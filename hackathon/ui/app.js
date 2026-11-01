@@ -51,7 +51,7 @@ function render(s) {
   }
   hide('cancel', s.phase === 'idle');
   text('record-hint', s.rehearsal ? 'Try an example from Settings.' : s.mode === 'signs' ? 'Show a supported gesture to the camera.' : s.lips === 'warming' ? 'Getting the lip reader ready…' : s.lips === 'unavailable' ? 'Lip reading needs attention in Settings.' : s.mode === 'combined' ? 'Hold Space or the button before mouthing and gesturing.' : 'Or hold Space, then release when you finish.');
-  text('entry-hint', s.mode === 'signs' ? 'Show a supported gesture, then speak your message.' : s.mode === 'lips' ? 'Hold the button, mouth a short sentence, then release.' : 'Show a supported gesture, or hold the button to mouth a sentence.');
+  text('entry-hint', s.mode === 'signs' ? 'Show a supported gesture. Review, then speak.' : s.mode === 'lips' ? 'Hold the button, mouth a short sentence, then release.' : 'Show a supported gesture, or hold the button to mouth a sentence.');
   const gesturesReady = s.signs === 'ready' && Object.values(s.vocabulary).some(v => v.enabled ?? v.verified);
   if (!s.rehearsal && !gesturesReady && s.mode !== 'lips') {
     text('entry-hint', s.mode === 'signs' ? 'Gestures need setup. Choose another input in Settings.' : 'Hold the button to mouth a short sentence.');

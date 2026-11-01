@@ -62,7 +62,21 @@
         if (finished) return;
         body.classList.remove('is-illustrating'); body.classList.add('is-settling');
         try {
-          flippers.forEach((tile,index) => animations.push(tile.animate([{transform:'rotateX(0deg)'},{transform:'rotateX(-180deg)'}],{duration:650,delay:index*20,easing:'cubic-bezier(.25,.5,.3,1)',fill:'forwards'})));
+          const word = document.querySelector?.('.wordmark-text');
+          flippers.forEach((tile,index) => {
+            let destination = 'rotateX(-180deg)';
+            if (word?.firstChild && document.createRange) {
+              const range = document.createRange();
+              range.setStart(word.firstChild,index); range.setEnd(word.firstChild,index+1);
+              const target = range.getBoundingClientRect(), origin = tile.getBoundingClientRect();
+              const dx = target.left + target.width/2 - origin.left - origin.width/2;
+              const dy = target.top + target.height/2 - origin.top - origin.height/2;
+              const back = tile.querySelector('.flap-back');
+              const scale = parseFloat(getComputedStyle(word).fontSize)/parseFloat(getComputedStyle(back).fontSize);
+              destination = `translate(${dx}px,${dy}px) rotateX(-180deg) scale(${scale})`;
+            }
+            animations.push(tile.animate([{transform:'rotateX(0deg)',opacity:1},{transform:destination,opacity:1,offset:.82},{transform:destination,opacity:0}],{duration:700,delay:index*18,easing:'cubic-bezier(.25,.5,.3,1)',fill:'forwards'}));
+          });
           timer = setTimeout(finish, 900);
         } catch (_) { finish(); }
       },4000);

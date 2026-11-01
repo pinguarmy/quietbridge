@@ -117,3 +117,11 @@ The tool shows the last stabilized gesture, its model score and processing time;
 this is not a live landmark overlay or calibrated accuracy. Preview labels are
 explicitly synthetic. Its collapsed video guide accepts a local file for browser
 playback using a revocable object URL, with no upload or persistent storage.
+
+Shared branding places the symbol before QuietBridge on purpose, communication
+and settings. Native same-origin view transitions progressively enhance page
+changes where supported; navigation remains ordinary links elsewhere. Reduced
+motion disables navigation and control animations. The opening word keeps a
+fixed center while Next appears, and its flipping cards move toward the measured
+letter positions before blending into the semantic heading. Message polling does
+not replay entrance animations.
