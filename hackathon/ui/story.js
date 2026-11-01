@@ -75,9 +75,9 @@
               const scale = parseFloat(getComputedStyle(word).fontSize)/parseFloat(getComputedStyle(back).fontSize);
               destination = `translate(${dx}px,${dy}px) rotateX(-180deg) scale(${scale})`;
             }
-            animations.push(tile.animate([{transform:'rotateX(0deg)',opacity:1},{transform:destination,opacity:1,offset:.82},{transform:destination,opacity:0}],{duration:700,delay:index*18,easing:'cubic-bezier(.25,.5,.3,1)',fill:'forwards'}));
+            animations.push(tile.animate([{transform:'rotateX(0deg)',opacity:1},{transform:destination,opacity:1,offset:.82},{transform:destination,opacity:0}],{duration:800,delay:index*12,easing:'cubic-bezier(.25,.5,.3,1)',fill:'forwards'}));
           });
-          timer = setTimeout(finish, 900);
+          timer = setTimeout(finish, 980);
         } catch (_) { finish(); }
       },4000);
     } catch (_) { finish(); }

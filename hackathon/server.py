@@ -26,11 +26,14 @@ def make_server(runtime, port=8765):
                 return False
             return True
 
-        def _send(self, status, body, content_type):
+        def _send(self, status, body, content_type, *, etag=None):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
+            if status != 304:
+                self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "private, no-cache" if etag else "no-store")
+            if etag:
+                self.send_header("ETag", etag)
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'")
             self.end_headers()
@@ -56,7 +59,16 @@ def make_server(runtime, port=8765):
                 elif path in {"/", "/index.html", "/purpose", "/purpose.html", "/why", "/why.html", "/guide", "/guide.html", "/communicate", "/communicate.html", "/settings", "/settings.html", "/app.js", "/video-guide.js", "/style.css", "/theme.css", "/story.js", "/story.css", "/hand-letters.json", "/assets/bsl-alphabet.png"}:
                     filename = {"/": "index.html", "/purpose": "purpose.html", "/why": "why.html", "/guide": "guide.html", "/communicate": "communicate.html", "/settings": "settings.html"}.get(path, path[1:])
                     mime = {".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png"}[Path(filename).suffix]
-                    self._send(200, (UI / filename).read_bytes(), mime if mime.startswith("image/") else mime + "; charset=utf-8")
+                    asset = UI / filename
+                    content_type = mime if mime.startswith("image/") else mime + "; charset=utf-8"
+                    etag = None
+                    if asset.suffix != ".html":
+                        stat = asset.stat()
+                        etag = f'W/"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+                        if self.headers.get("If-None-Match") == etag:
+                            self._send(304, b"", content_type, etag=etag)
+                            return
+                    self._send(200, asset.read_bytes(), content_type, etag=etag)
                 else:
                     self._json(404, {"error": "Not found"})
             except (BrokenPipeError, ConnectionResetError):

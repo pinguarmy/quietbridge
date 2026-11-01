@@ -237,10 +237,29 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(err.exception.code, 404)
 
     def test_communication_and_settings_pages_are_served(self):
-        for path in ["/", "/purpose", "/why", "/communicate", "/settings"]:
+        for path in ["/", "/purpose", "/why", "/communicate", "/settings", "/guide"]:
             with self.subTest(path=path), urlopen(self.url + path) as res:
                 self.assertIn("text/html", res.headers["Content-Type"])
                 self.assertIn(b"QuietBridge", res.read())
+
+    def test_static_assets_revalidate_without_caching_live_state(self):
+        with tempfile.TemporaryDirectory() as directory, patch("hackathon.server.UI", Path(directory)):
+            asset = Path(directory) / "theme.css"
+            asset.write_text("body{color:white}")
+            with urlopen(self.url + "/theme.css") as res:
+                etag = res.headers["ETag"]
+                self.assertEqual(res.headers["Cache-Control"], "private, no-cache")
+            request = Request(self.url + "/theme.css", headers={"If-None-Match": etag})
+            with self.assertRaises(HTTPError) as cached:
+                urlopen(request)
+            self.assertEqual(cached.exception.code, 304)
+            asset.write_text("body{color:lightblue}")
+            with urlopen(request) as res:
+                self.assertNotEqual(res.headers["ETag"], etag)
+                self.assertIn(b"lightblue", res.read())
+        with urlopen(self.url + "/api/state") as res:
+            self.assertEqual(res.headers["Cache-Control"], "no-store")
+            self.assertIsNone(res.headers["ETag"])
 
     def test_story_is_separate_from_communication_and_serves_letter_data(self):
         with urlopen(self.url + "/") as res:
@@ -260,7 +279,9 @@ class ServerTests(unittest.TestCase):
         with urlopen(self.url + "/purpose") as res:
             purpose = res.read().decode()
         self.assertIn("The Key Components of Communication:", purpose)
-        self.assertIn("Wispr Flow changed how we work - less time typing, more freedom to think and create. QuietBridge asks: what if speech isn’t an option?", purpose)
+        self.assertIn("WisprFlow changed how we work.", purpose)
+        self.assertIn("Less time typing, more freedom to think &amp; create.", purpose)
+        self.assertIn("QuietBridge asks: what if speech isn’t an option?", purpose)
         self.assertIn('href="/why"', purpose)
         self.assertNotIn("151,000", purpose)
         with urlopen(self.url + "/why") as res:
@@ -270,7 +291,8 @@ class ServerTests(unittest.TestCase):
         self.assertIn('href="/purpose"', why)
         self.assertIn("at some point in their lives", why)
         self.assertIn("Not an exact daily-use count.", why)
-        self.assertIn("A lifetime measure, not a current non-speaking count.", why)
+        self.assertIn("will experience communication difficulties at some point in their lives.", why)
+        self.assertIn("This can include difficulties speaking, understanding, reading or writing.", why)
         self.assertIn("https://rnid.org.uk/", why)
         self.assertIn("https://www.rcslt.org/", why)
         self.assertIn("A visual language with its own grammar", why)

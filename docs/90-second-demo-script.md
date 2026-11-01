@@ -1,21 +1,23 @@
 # QuietBridge: 90-second recording script
 
-About 130 spoken words, leaving space for the opening animation, demonstration and spoken output. Sam leads the story; Peter introduces the technology and operates the tool.
+Reserve 35 seconds for the demonstration. About 100 spoken words leaves room for the opening animation and the tool's speech. Sam tells the story; Peter introduces the system and operates the demo.
 
 | Time | Speaker and exact words | Picture / action |
 | --- | --- | --- |
 | 0–5s | No narration. | QuietBridge hands flip into the name and logo. |
-| 5–17s | **Sam:** “Wispr Flow changed how I work—less time typing, more freedom to think and create. QuietBridge asks: what if speech isn’t an option?” | Sam on camera, then enter the site. This is Sam's experience, not a measured benefit of QuietBridge. |
-| 17–29s | **Peter:** “We’re exploring another route: mouth movements and hand gestures, turned into words that you review and choose to speak.” | Show the communication components, then move to the tool. |
-| 29–59s | **Sam:** “Peter shows a gesture, then mouths a short sentence. The words appear here. He checks the result and chooses Speak.” | Full-screen tool. Hands and lip views, floating words. Pause narration for the actions and tool speech. Show only actual recognition output; identify prerecorded footage if used. |
-| 59–75s | **Peter:** “Today, our prototype combines lip input, four gesture shortcuts and on-device speech. If inputs disagree, the user chooses. We’re testing whether this makes short exchanges easier.” | Show the reviewed text and explicit speech action. A conflict example is optional if reliable. |
-| 75–90s | **Sam:** “Our ambition is less effort between a thought and its expression—supporting communication, productivity and creativity. QuietBridge: bridging more ways to communicate.” | Return to Sam and Peter, then QuietBridge closing frame. |
+| 5–17s | **Sam:** “Wispr Flow changed how we work: less time typing, more freedom to think and create. But what if speech isn’t an option?” | Sam, then enter the site. This is the team's experience, not a measured benefit of QuietBridge. |
+| 17–29s | **Peter:** “QuietBridge explores another way to communicate: using mouth movements and supported hand gestures to compose words, review them, and choose when to speak.” | Show the components briefly, then the tool. |
+| 29–34s | **Sam:** “Here’s Peter using QuietBridge to create a spoken message.” | Move to full-screen tool footage. |
+| 34–69s | **35-second demonstration. Keep narration minimal.** | 34–44s: one supported gesture. 44–58s: one rehearsed mouth-input sentence. 58–69s: review the result and press Speak. Leave silence for playback. Identify prerecorded footage if used. |
+| 69–81s | **Peter:** “Today, the prototype supports lip input, four gesture shortcuts and on-device speech. The user stays in control of what gets spoken.” | Actual reviewed output, then Peter. |
+| 81–90s | **Sam:** “Our next step is testing whether this makes everyday exchanges easier. QuietBridge: more ways to be understood.” | Both presenters, then QuietBridge closing frame. |
 
 ## Recording priorities
 
+- Protect the full 35-second demo slot. Shorten narration before speeding it up.
 - One supported gesture, one rehearsed mouth-input sentence, one clear speech playback. Allow the viewer to see what changed.
-- Keep captions visible. Leave deliberate silence while the tool speaks.
-- Treat speed, reduced effort and better combined accuracy as hypotheses until measured with intended users.
+- Captions throughout; no narration over the tool's speech.
+- Use actual recognition output. Identify synthetic or prerecorded examples.
+- Accuracy, reduced effort and improved productivity remain hypotheses until measured with intended users.
 - Do not claim general BSL translation, pronunciation correction, emotion inference or support for every type of communication.
-- Confirm the actual demo setup before saying “fully local/offline”: the checked-in runtime is single-host, and Peter's venue-to-home arrangement is not yet verified.
-- Rehearse against a timer. Shorten narration before speeding it up; protect the 30-second demonstration slot.
+- Confirm the actual deployment before claiming fully local/offline operation; venue-to-home inference is not yet verified.
