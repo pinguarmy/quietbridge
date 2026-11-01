@@ -12,6 +12,7 @@
   <div class="workspace">
     <section class="camera-panel" aria-label="Camera and recording">
       <div class="preview"><img id="camera" alt="Your live camera preview" hidden><div id="camera-placeholder"><span class="viewfinder" aria-hidden="true">⌜ &nbsp; ⌝<br>⌞ &nbsp; ⌟</span><p id="camera-message">Getting your camera ready…</p></div><span id="preview-status" class="preview-label">Getting ready</span></div>
+      <p id="gesture-feedback" class="gesture-feedback"><span id="gesture-label" role="status" aria-live="polite">Getting gesture input ready…</span><span id="gesture-metrics"></span></p>
       <div class="record-controls"><button id="record" class="record" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">Hold to mouth words</span></button><button id="cancel" class="text-button" hidden>Cancel</button></div>
       <p id="record-hint" class="hint">Or hold Space, then release when you finish.</p>
       <p class="mode-caption"><span id="mode-caption">Lips and gestures</span> · <a href="/settings">Change</a></p>
@@ -27,7 +28,9 @@
       <p id="last-spoken" class="last-spoken"></p>
     </section>
   </div>
+  <details class="demo-guide"><summary>How to use QuietBridge</summary><div id="demo-video-slot" class="demo-video-slot"><p id="demo-video-empty">Choose a demo video to preview it here.</p><label for="demo-video-file">Choose demo video</label><input id="demo-video-file" type="file" accept="video/*" aria-describedby="demo-video-note"><p id="demo-video-note" class="hint">Local preview only. The file stays in this browser.</p><video id="demo-video" controls playsinline preload="metadata" hidden></video><p id="demo-video-status" class="hint" role="status"></p><button id="clear-demo-video" class="text-button" type="button" hidden>Clear preview</button></div></details>
   <footer><span>You choose what to say, and when to speak.</span><a href="/settings#gestures">Supported gestures</a></footer>
 </main>
 <script src="/app.js"></script>
+<script src="/video-guide.js"></script>
 </body></html>

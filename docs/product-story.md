@@ -105,3 +105,15 @@ The immediate engineering gate remains live validation on Peter's MacBook Pro:
 reliable supported gestures, usable lip output, visible conflict handling, local
 speech, Wi-Fi off and three consecutive successful runs. Optional LLM suggestions
 come later; they are not proof of intended meaning.
+
+The purpose diagram is a qualitative network of communication cues, not a pie
+chart, percentage breakdown or claim that this prototype recognizes every cue.
+Its voice/tone, mouth, face, gesture, body and context labels draw on
+[NIDCD](https://www.nidcd.nih.gov/about/nidcd-director-message/cloth-face-coverings-and-distancing-pose-communication-challenges-many),
+[RNID](https://rnid.org.uk/information-and-support/hearing-loss/lipreading/), and
+[University of Surrey's BSL non-manual features](https://bsl.surrey.ac.uk/principles/f-non-manual-features).
+The BSL definition links to the [British Deaf Association](https://bda.org.uk/bsl-deaf-culture/).
+The tool shows the last stabilized gesture, its model score and processing time;
+this is not a live landmark overlay or calibrated accuracy. Preview labels are
+explicitly synthetic. Its collapsed video guide accepts a local file for browser
+playback using a revocable object URL, with no upload or persistent storage.

@@ -256,14 +256,25 @@ class ServerTests(unittest.TestCase):
         self.assertIn('class="sr-only"', page)
         with urlopen(self.url + "/purpose") as res:
             purpose = res.read().decode()
-        self.assertIn("Our speech is much more than just noise, we aim to pick up all the subtleties of communication.", purpose)
+        self.assertIn("Communication is far more nuanced than just what you hear", purpose)
         self.assertIn("Our aim is to make speech accessible, through every medium of communication", purpose)
         self.assertIn('href="/communicate"', purpose)
-        self.assertIn("over their lifetime", purpose)
+        self.assertIn("at some point in their lives", purpose)
+        self.assertIn("Not an exact daily-use count.", purpose)
+        self.assertIn("A lifetime measure, not a current non-speaking count.", purpose)
         self.assertIn("https://rnid.org.uk/", purpose)
         self.assertIn("https://www.rcslt.org/", purpose)
+        self.assertIn("A visual language with its own grammar", purpose)
+        self.assertIn("https://bda.org.uk/bsl-deaf-culture/", purpose)
         with urlopen(self.url + "/communicate") as res:
-            self.assertIn(b'src="/app.js"', res.read())
+            communication = res.read()
+            self.assertIn(b'src="/app.js"', communication)
+            self.assertIn(b'accept="video/*"', communication)
+            self.assertIn(b'id="gesture-label"', communication)
+            self.assertIn("img-src 'self' blob:", res.headers["Content-Security-Policy"])
+            self.assertIn("media-src 'self' blob:", res.headers["Content-Security-Policy"])
+        with urlopen(self.url + "/video-guide.js") as res:
+            self.assertIn(b"URL.createObjectURL", res.read())
         with urlopen(self.url + "/hand-letters.json") as res:
             data = json.load(res)
         self.assertEqual(data["kind"], "bsl-chart")
