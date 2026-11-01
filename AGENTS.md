@@ -1,44 +1,46 @@
-# QuietBridge — 开发指南
+# QuietBridge — Developer Guide
 
-## 做什么
+## Goal
 
-6 小时做出能演示的辅助沟通原型：口型 / 少量手势 → 文字 → 本地语音。支持口型、手势、组合三种模式。不是通用手语翻译器。
+Build a working assistive-communication demo in six hours: lips / a small gesture vocabulary → text → local speech. Support lips-only, gestures-only and combined input. This is not a general sign-language translator.
 
-**快做、复用、先跑通。** 不加无关框架，不做大重构，不为假想问题堆防御代码。实现当前任务，跑相关检查，简单说明结果就结束。
+**Move fast, reuse what exists, get it working first.** No unnecessary frameworks, major refactors or defensive code for hypothetical problems. Implement the task, run relevant checks and give a short handoff.
 
-## 两人分工
+Use English for shared documentation, code comments and demo UI so both teammates can work directly with them.
 
-- A：口型适配、单摄像头运行时、融合、UI、语音；负责 `hackathon/signs/` 之外的文件和依赖。
-- B：手势识别；只改 `hackathon/signs/`，需要改公共文件时告诉 A。
-- 分支：`feat/lips-ui-fusion`、`feat/sign-recognizer`；各自提 PR，由 A 合入 `main`。不 force-push。
-- 公共类型直接导入 `hackathon/contracts.py`，不要另造一套。改接口先和另一人对齐。
+## Ownership
 
-## 实现约定
+- A · Sam: lip adapter, single-camera runtime, fusion, UI and speech; owns files and dependencies outside `hackathon/signs/`.
+- B · Peter: gesture recognition; owns `hackathon/signs/`. Ask Sam for shared-file changes.
+- Branches: `feat/lips-ui-fusion` and `feat/sign-recognizer`. Open separate PRs; Sam merges into `main`. No force pushes.
+- Import shared types from `hackathon/contracts.py`; do not create another schema. Agree interface changes with the other person first.
 
-- 复用 `lipflow/` 的 Auto-AVSR 和人脸处理，新功能放 `hackathon/`。优先适配，不重写旧引擎。
-- 一个摄像头，两路处理。队列只留最新帧（`maxsize=1`）；模型只加载一次，口型在松开后解码。
-- 手势先做 4–6 个，时间不够收缩到 3 个。稳定后才发事件，保持同一手势不重复发。
-- `SignRecognizer.process(frame_bgr, timestamp_ms) -> list[SignEvent]`；无结果返回 `[]`，另提供 `close()`。时间统一用单调时钟毫秒。
-- 融合先用本地规则：一致时选对应候选，冲突时显示选项让用户确认；UNKNOWN 不编造句子。
-- 文字先显示，用户点 Speak 再用本地 TTS 发声。不自动说出不确定结果。
-- 核心流程不依赖网络。可选 API 最后再做，异步建议，不能阻塞或覆盖用户已确认的内容。
+## Implementation
 
-## 开发与验证
+- Reuse Auto-AVSR and face processing from `lipflow/`; put new work in `hackathon/`. Adapt rather than rewrite the engine.
+- One camera, two processing paths. Keep only the latest frame (`maxsize=1`); load models once and decode lips after release.
+- Start with 4–6 gestures; reduce to 3 if needed. Emit stable events, not repeated events while a pose is held.
+- `SignRecognizer.process(frame_bgr, timestamp_ms) -> list[SignEvent]`; return `[]` without a result and provide `close()`. Use one monotonic clock in milliseconds.
+- Use local fusion rules: select a matching candidate on agreement, show alternatives on conflict. Never invent a sentence from UNKNOWN.
+- Display text first; speak with local TTS only when the user presses Speak. Do not automatically speak uncertain output.
+- The core path works offline. Add optional API suggestions last, asynchronously; never block output or overwrite confirmed text.
+
+## Development and checks
 
 ```sh
 uv run lipflow doctor
 uv run pytest
 ```
 
-云端做轻量单测；真实摄像头、模型和语音在演示 Mac 上测。只跑与改动相关的检查，别把模拟输入说成真实识别成功。
+Use lightweight tests in the cloud; test real camera input, models and speech on the demo Mac. Run checks relevant to the change. Synthetic input is not evidence of live recognition.
 
-节奏：20 分钟对齐接口；1.5 小时两路各自产出；3 小时合起来；4 小时后不加核心功能；最后练 60–90 秒演示。
+Pace: agree interfaces in 20 minutes; get independent results by 1.5 hours; integrate by 3 hours; stop adding core features after 4 hours; rehearse a 60–90 second demo.
 
-交付标准：三种模式能跑，冲突能确认，断网能显示和发声，连续演示三次，屏幕显示实际延迟。做不稳就减功能。
+Done means all three modes work, conflicts ask for confirmation, text and speech work offline, three consecutive demos succeed, and actual latency is visible. Cut scope if it is unreliable.
 
-## 保留什么
+## Keep intact
 
-- 项目名 QuietBridge（静语桥），仓库 https://github.com/pinguarmy/quietbridge。
-- 本地目录、Python 包/命令 `lipflow`、已安装应用和个人数据路径暂时不改。
-- 不提交密钥、模型、个人设置或录制；共享演示样本要先取得参与者同意。
-- 保留 LICENSE、NOTICE 和上游归属；LRS3 模型权重有非商业研究使用限制。
+- Project: QuietBridge, https://github.com/pinguarmy/quietbridge.
+- Keep the local directory, Python package/CLI `lipflow`, installed app and personal data paths unchanged for now.
+- Do not commit keys, models, private settings or recordings. Obtain participants' consent before sharing demo samples.
+- Preserve LICENSE, NOTICE and upstream attribution. LRS3 model weights have non-commercial research-use restrictions.
