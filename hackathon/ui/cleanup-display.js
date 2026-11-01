@@ -34,6 +34,12 @@
       original.textContent = state.session_text || (state.candidates || []).join(' / ');
       raw.append(summary, original);
       message.textContent = cleanup.suggestion;
+      // Displaying an AI suggestion must never leave Speak bound to different raw words.
+      if (state.decision?.text !== cleanup.suggestion && document.getElementById('speak')) {
+        document.getElementById('speak').disabled = true;
+        const speakLabel = document.getElementById('speak-label');
+        if (speakLabel) speakLabel.textContent = 'Select the welcome suggestion first';
+      }
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'alternative';
@@ -44,7 +50,7 @@
           window.requestAction('confirm', {revision:cleanup.source_revision, text:cleanup.suggestion});
         }
       };
-      panel.append(label, button);
+      panel.append(label, button, raw);
     }
   };
 })();
