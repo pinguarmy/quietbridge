@@ -1,5 +1,9 @@
-"""Shared QuietBridge interfaces. Both tracks import these exact types."""
+"""Shared interface between Sam's runtime and Peter's sign recognizer.
 
+All event timestamps use int(time.perf_counter() * 1000), on the same machine.
+Only final, supported sign events enter fusion. Scores are recognizer scores,
+not a claim of calibrated probability or measured accuracy.
+"""
 from dataclasses import dataclass
 
 
