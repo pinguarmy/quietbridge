@@ -89,22 +89,26 @@ nonfinal events, future events and stale events never enter fusion.
 
 `hackathon/vocabulary.json` now matches Peter's four labels: `THUMB_UP`,
 `THUMB_DOWN`, `OPEN_PALM`, and `POINTING_UP`. The proposed phrases are Yes,
-No, Please stop, and One moment. All remain `verified: false`: live fusion ignores
-them. Set an entry to `verified: true` only after the team tests the corresponding
-recognizer output and agrees its phrase. `matches` contains whole word/phrase aliases
+No, Please stop, and One moment. All four have `enabled: true` for confirmation-based
+use and `verified: false` because live accuracy has not been measured. An unverified
+enabled gesture displays its fixed phrase but requires Confirm & speak. Set
+`enabled: false` to disable a mapping. Set `verified: true` only after the team tests
+the corresponding recognizer output and agrees its phrase. `matches` contains whole word/phrase aliases
 used to rerank lip candidates. The optional `--vocabulary /path/to/mapping.json`
 flag selects another mapping. Restart the server after recognizer or mapping changes.
 This is a small gesture recognizer, not a general BSL/ASL translator.
 
-Use Peter's standalone checker to validate gestures before enabling mappings;
-all-false mappings intentionally suppress events in the integrated app. See
+Use Peter's standalone checker to validate gesture quality. Enabling a mapping
+does not claim recognition accuracy. Older mappings without `enabled` retain the
+old behavior: only `verified: true` permits their events. See
 `hackathon/signs/README.md` for model setup and live trials. Its earlier note about
 the root placeholder labels is superseded by the now-aligned root vocabulary.
 Do not run the standalone checker and integrated server together.
 
 ## Fusion and measurements
 
-- Sign-only uses a fixed phrase for a supported, verified final event.
+- Sign-only uses a fixed phrase for an enabled, supported final event. Unverified
+  mappings require explicit confirmation; verified mappings still require a Speak click.
 - Lip-only shows the top candidate and asks for confirmation.
 - Combined reranks up to three lip candidates when a single sign concept agrees.
   A keyword cannot prove a whole sentence, so the user explicitly reviews the text

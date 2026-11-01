@@ -4,6 +4,7 @@ from pathlib import Path
 import queue
 import threading
 import time
+import tempfile
 import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -73,6 +74,42 @@ class FusionTests(unittest.TestCase):
 
     def test_lip_only_has_no_claim_of_confidence(self):
         self.assertEqual(fuse(LipResult(["Hello"], 9), [], VOCAB, 2000).status, "confirmation_needed")
+
+    def test_enabled_unverified_gestures_require_confirmation(self):
+        vocabulary = load_vocabulary()
+        for label, entry in vocabulary.items():
+            with self.subTest(label=label):
+                self.assertTrue(entry["enabled"])
+                self.assertFalse(entry["verified"])
+                decision = fuse(None, [sign(label)], vocabulary, 2000)
+                self.assertEqual((decision.text, decision.status), (entry["phrase"], "confirmation_needed"))
+
+    def test_disabled_mapping_overrides_verified_flag(self):
+        vocabulary = {"HELP": {**VOCAB["HELP"], "enabled": False}}
+        self.assertEqual(fuse(None, [sign()], vocabulary, 2000).status, "unavailable")
+
+    def test_yes_and_no_do_not_agree_with_opposite_lip_candidates(self):
+        vocabulary = load_vocabulary()
+        for label, candidate in [("THUMB_UP", "No."), ("THUMB_DOWN", "Yes.")]:
+            with self.subTest(label=label):
+                decision = fuse(LipResult([candidate], 0), [sign(label)], vocabulary, 2000)
+                self.assertEqual((decision.reason, decision.status), ("conflict", "confirmation_needed"))
+
+    def test_shared_mapping_has_no_conflicting_phrase_aliases(self):
+        vocabulary = load_vocabulary()
+        aliases = {}
+        for label, entry in vocabulary.items():
+            for alias in entry["matches"]:
+                normalized = alias.casefold().strip()
+                self.assertNotIn(normalized, aliases, f"{label} overlaps {aliases.get(normalized)}")
+                aliases[normalized] = label
+
+    def test_enabled_flag_must_be_boolean(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "bad.json"
+            path.write_text(json.dumps({"HELP": {**VOCAB["HELP"], "enabled": "yes"}}))
+            with self.assertRaises(ValueError):
+                load_vocabulary(path)
 
 
 class RuntimeTests(unittest.TestCase):

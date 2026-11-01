@@ -44,7 +44,7 @@ function render(s) {
   hide('cancel', s.phase === 'idle');
   text('record-hint', s.rehearsal ? 'Try an example from Settings.' : s.mode === 'signs' ? 'Show a supported gesture to the camera.' : s.lips === 'warming' ? 'Getting the lip reader ready…' : s.lips === 'unavailable' ? 'Lip reading needs attention in Settings.' : s.mode === 'combined' ? 'Hold Space or the button before mouthing and gesturing.' : 'Or hold Space, then release when you finish.');
   text('entry-hint', s.mode === 'signs' ? 'Show a supported gesture, then speak your message.' : s.mode === 'lips' ? 'Hold the button, mouth a short sentence, then release.' : 'Show a supported gesture, or hold the button to mouth a sentence.');
-  const gesturesReady = s.signs === 'ready' && Object.values(s.vocabulary).some(v => v.verified);
+  const gesturesReady = s.signs === 'ready' && Object.values(s.vocabulary).some(v => v.enabled ?? v.verified);
   if (!s.rehearsal && !gesturesReady && s.mode !== 'lips') {
     text('entry-hint', s.mode === 'signs' ? 'Gestures need setup. Choose another input in Settings.' : 'Hold the button to mouth a short sentence.');
     text('record-hint', s.mode === 'signs' ? 'Open Settings to check gesture input.' : 'Gesture input is being set up. You can still use your lips once ready.');
@@ -74,11 +74,12 @@ function render(s) {
   text('result-timing', !s.rehearsal && s.metrics.release_to_text_ms !== undefined ? 'Message ready in ' + (s.metrics.release_to_text_ms / 1000).toFixed(1) + ' s' : '');
   [['metric-release','release_to_text_ms'],['metric-decode','decode_ms'],['metric-fusion','fusion_ms']].forEach(([id,key]) => text(id, s.metrics[key] === undefined ? '—' : s.metrics[key] + ' ms'));
   if (!initialized && $('labels')) {
-    const entries = Object.entries(s.vocabulary), enabled = entries.filter(([,v]) => v.verified);
-    text('vocabulary-summary', enabled.length ? 'These gestures are enabled for live use.' : 'No live gestures are enabled yet. The team is checking the vocabulary.');
+    const entries = Object.entries(s.vocabulary), enabled = entries.filter(([,v]) => v.enabled ?? v.verified);
+    text('vocabulary-summary', enabled.length ? enabled.length + ' gesture mappings are enabled. Review the message before speaking. Live accuracy is still being checked.' : 'No gesture mappings are enabled yet.');
     entries.forEach(([label, entry]) => {
       const name = entry.display_name || label;
-      const el = document.createElement('span'); el.textContent = name + (entry.verified ? '' : ' · being checked'); el.className = entry.verified ? '' : 'pending'; $('labels').append(el);
+      const active = entry.enabled ?? entry.verified;
+      const el = document.createElement('span'); el.textContent = name + ' → ' + entry.phrase + (!active ? ' · disabled' : entry.verified ? '' : ' · confirm first'); el.className = entry.verified ? '' : 'pending'; $('labels').append(el);
       const opt = document.createElement('option'); opt.value = label; opt.textContent = name; $('test-label')?.append(opt);
     });
     initialized = true;
