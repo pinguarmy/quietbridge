@@ -1,0 +1,238 @@
+"""Run without model dependencies: python -m unittest discover -s hackathon/tests -v."""
+import json
+import queue
+import threading
+import time
+import unittest
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+from unittest.mock import Mock, patch
+
+from hackathon.contracts import LipResult, SignEvent
+from hackathon.fusion import fuse
+from hackathon.runtime import Runtime, put_latest
+from hackathon.runtime import clock_ms as real_clock_ms
+from hackathon.server import make_server
+
+VOCAB = {
+    "HELP": {"phrase": "I need help.", "matches": ["help"], "verified": True},
+    "WATER": {"phrase": "I want water.", "matches": ["water"], "verified": True},
+    "NO": {"phrase": "No.", "matches": ["no"], "verified": True},
+}
+
+
+def sign(label="HELP", score=.95, start=1000, end=1500, final=True):
+    return SignEvent(label, score, start, end, final)
+
+
+class FusionTests(unittest.TestCase):
+    def test_no_input_never_generates_text(self):
+        self.assertEqual(fuse(None, [], VOCAB, 2000).status, "unavailable")
+
+    def test_fixed_sign_phrase(self):
+        d = fuse(None, [sign()], VOCAB, 2000)
+        self.assertEqual((d.text, d.status, d.reason), ("I need help.", "accepted", "sign_only"))
+
+    def test_bad_or_unverified_events_do_not_become_speech(self):
+        invalid = [sign("UNKNOWN"), sign(score=.5), sign(score=float("nan")), sign(score=1.1),
+                   sign(final=False), sign(start=2000, end=1500), sign(end=6000), sign(end=100)]
+        for event in invalid:
+            with self.subTest(event=event):
+                self.assertEqual(fuse(None, [event], VOCAB, 5000, since_ms=1000).status, "unavailable")
+        self.assertEqual(fuse(None, [sign()], {"HELP": {**VOCAB["HELP"], "verified": False}}, 2000).status, "unavailable")
+
+    def test_agreement_reranks_candidates_but_still_confirms_sentence(self):
+        d = fuse(LipResult(["I want water", "I need help"], 20), [sign()], VOCAB, 2000)
+        self.assertEqual((d.text, d.reason, d.status), ("I need help", "agreement", "confirmation_needed"))
+
+    def test_negation_and_numbers_cannot_be_erased_by_concept_match(self):
+        for text in ["I do not need help", "I don't need help", "I need 2 help sessions", "I need two helpers"]:
+            with self.subTest(text=text):
+                d = fuse(LipResult([text], 10), [sign()], VOCAB, 2000)
+                self.assertEqual((d.reason, d.status), ("conflict", "confirmation_needed"))
+
+    def test_no_is_not_found_inside_know(self):
+        d = fuse(LipResult(["I know"], 0), [sign("NO")], VOCAB, 2000)
+        self.assertEqual(d.reason, "conflict")
+
+    def test_multiple_labels_never_concatenated(self):
+        d = fuse(None, [sign(), sign("WATER")], VOCAB, 2000)
+        self.assertEqual((d.text, d.status), ("", "confirmation_needed"))
+
+    def test_lip_only_has_no_claim_of_confidence(self):
+        self.assertEqual(fuse(LipResult(["Hello"], 9), [], VOCAB, 2000).status, "confirmation_needed")
+
+
+class RuntimeTests(unittest.TestCase):
+    def setUp(self):
+        self.r = Runtime(rehearsal=True, vocabulary=VOCAB)
+        self.r.speaker = Mock(available=True)
+
+    def tearDown(self):
+        self.r.close()
+
+    def test_latest_frame_queue_drops_old_frames(self):
+        q = queue.Queue(maxsize=1)
+        put_latest(q, 1); put_latest(q, 2); put_latest(q, 3)
+        self.assertEqual(q.get_nowait(), 3)
+
+    def test_uncertain_message_cannot_speak_until_confirmed(self):
+        self.r.action("rehearse", {"text": "I want water", "label": "HELP"})
+        rev = self.r.revision
+        with self.assertRaises(ValueError):
+            self.r.action("speak", {"revision": rev})
+        self.r.speaker.speak.assert_not_called()
+        self.r.action("confirm", {"text": "I need help.", "revision": rev})
+        self.r.action("speak", {"revision": rev})
+        self.r.speaker.speak.assert_called_once_with("I need help.")
+
+    def test_new_result_invalidates_old_confirmation_and_speak(self):
+        self.r.action("rehearse", {"text": "Hello"})
+        old = self.r.revision
+        self.r.action("confirm", {"text": "Hello", "revision": old})
+        self.r.action("rehearse", {"text": "Goodbye"})
+        for action in ["confirm", "speak"]:
+            with self.assertRaises(ValueError):
+                self.r.action(action, {"text": "Hello", "revision": old})
+        self.r.speaker.speak.assert_not_called()
+
+    def test_cannot_confirm_invented_text(self):
+        self.r.action("rehearse", {"text": "Hello"})
+        with self.assertRaises(ValueError):
+            self.r.action("confirm", {"text": "Different meaning", "revision": self.r.revision})
+
+    def test_duplicate_event_does_not_republish(self):
+        self.r.receive_signs([sign()], now=2000)
+        rev = self.r.revision
+        self.r.receive_signs([sign()], now=2001)
+        self.assertEqual(self.r.revision, rev)
+
+    def test_synthetic_endpoint_disabled_in_live_mode(self):
+        live = Runtime(vocabulary=VOCAB)
+        with self.assertRaises(ValueError):
+            live.action("rehearse", {"text": "Made up"})
+        live.close()
+
+
+class ServerTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.r = Runtime(rehearsal=True, vocabulary=VOCAB)
+        cls.server = make_server(cls.r, 0)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.url = f"http://127.0.0.1:{cls.server.server_port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown(); cls.server.server_close(); cls.thread.join(); cls.r.close()
+
+    def post(self, path, data, token, **headers):
+        request = Request(self.url + path, data=json.dumps(data).encode(),
+                          headers={"Content-Type": "application/json", "X-Lipflow-Token": token, **headers})
+        return urlopen(request, timeout=3)
+
+    def test_full_http_confirmation_flow(self):
+        with urlopen(self.url + "/api/state") as res:
+            initial = json.load(res)
+        with self.post("/api/action/rehearse", {"text": "I want water", "label": "HELP"}, initial["token"]) as res:
+            current = json.load(res)
+        self.assertEqual(current["decision"]["status"], "confirmation_needed")
+        with self.post("/api/action/confirm", {"text": "I want water", "revision": current["revision"]}, initial["token"]) as res:
+            self.assertTrue(json.load(res)["confirmed"])
+
+    def test_other_origins_and_missing_token_are_rejected(self):
+        with urlopen(self.url + "/api/state") as res:
+            token = json.load(res)["token"]
+        for value, headers in [("", {}), (token, {"Origin": "https://example.com"})]:
+            with self.assertRaises(HTTPError) as err:
+                self.post("/api/action/cancel", {}, value, **headers)
+            self.assertEqual(err.exception.code, 403)
+
+    def test_invalid_host_and_path_are_rejected(self):
+        with self.assertRaises(HTTPError) as err:
+            urlopen(Request(self.url + "/api/state", headers={"Host": "other.example"}))
+        self.assertEqual(err.exception.code, 403)
+        with self.assertRaises(HTTPError) as err:
+            urlopen(self.url + "/../pyproject.toml")
+        self.assertEqual(err.exception.code, 404)
+
+
+class WorkerTests(unittest.TestCase):
+    def wait_for(self, condition):
+        until = time.monotonic() + 3
+        while time.monotonic() < until:
+            if condition():
+                return
+            time.sleep(.005)
+        self.fail("Worker did not reach expected state")
+
+    def run_worker_case(self, *, fail=False, cancel=False):
+        r = Runtime(vocabulary=VOCAB)
+        r.state["camera"] = "ready"
+        decoding, proceed = threading.Event(), threading.Event()
+
+        class Adapter:
+            recording = None
+
+            def start(self):
+                self.recording = object()
+
+            def process(self, *args):
+                pass
+
+            def finish(self):
+                decoding.set()
+                if not proceed.wait(3):
+                    raise RuntimeError("Test timed out")
+                if fail:
+                    raise ValueError("No visible face")
+                return LipResult(["I need help"], 7)
+
+            def close(self):
+                pass
+
+        offset = [0]
+        with patch("hackathon.lips_adapter.LipsAdapter", Adapter), patch("hackathon.runtime.clock_ms", side_effect=lambda: real_clock_ms() + offset[0]):
+            thread = threading.Thread(target=r._lips, daemon=True)
+            r.threads.append(thread)
+            thread.start()
+            try:
+                self.wait_for(lambda: r.snapshot()["lips"] == "ready")
+                r.action("start", {})
+                now = real_clock_ms()
+                r.receive_signs([SignEvent("HELP", .95, now, now, True)], now=now)
+                r.action("stop", {})
+                self.assertTrue(decoding.wait(2))
+                if cancel:
+                    r.action("cancel", {})
+                    revision = r.revision
+                # Simulate a long decode: capture-window events must remain aligned.
+                offset[0] = 6000
+                proceed.set()
+                if cancel:
+                    self.wait_for(lambda: r.snapshot()["phase"] == "idle")
+                    r.stop.set(); thread.join(1)
+                    self.assertEqual(r.revision, revision)
+                    self.assertEqual(r.snapshot()["decision"]["status"], "unavailable")
+                else:
+                    self.wait_for(lambda: r.snapshot()["phase"] == "idle")
+                    decision = r.snapshot()["decision"]
+                    self.assertEqual(decision["reason"], "sign_only" if fail else "agreement")
+                    self.assertEqual(decision["text"], "I need help." if fail else "I need help")
+            finally:
+                proceed.set()
+                r.close()
+
+    def test_slow_decode_retains_signs_from_capture_window(self):
+        self.run_worker_case()
+
+    def test_failed_lip_decode_preserves_supported_sign(self):
+        self.run_worker_case(fail=True)
+
+    def test_cancelled_decode_cannot_publish_late_result(self):
+        self.run_worker_case(cancel=True)
+
+
+if __name__ == "__main__":
+    unittest.main()

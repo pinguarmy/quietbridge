@@ -1,0 +1,7 @@
+{
+  "HELP": {"phrase": "I need help.", "matches": ["help"], "verified": false},
+  "STOP": {"phrase": "Please stop.", "matches": ["stop"], "verified": false},
+  "YES": {"phrase": "Yes.", "matches": ["yes"], "verified": false},
+  "NO": {"phrase": "No.", "matches": ["no"], "verified": false},
+  "WATER": {"phrase": "I would like some water.", "matches": ["water"], "verified": false}
+}

@@ -1,5 +1,9 @@
 # Lipflow
 
+**Hackathon lip + gesture demo:** see [the local demo and integration guide](hackathon/README.md).
+Sam owns lips, UI and fusion; Peter owns `hackathon/signs/`. Run
+`python -m hackathon.server --rehearsal` to test the UI without camera/model dependencies.
+
 **Wispr Flow for your lips.** Hold a key, silently mouth what you want to say, let go, and the
 text shows up at your cursor in whatever app you're in. No microphone and no sound, just your webcam.
 
