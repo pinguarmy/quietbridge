@@ -10,13 +10,14 @@
   <section class="intro"><h1>Settings</h1><p>Choose your inputs. Changes apply to this session.</p></section>
   <section class="settings-section"><h2>How would you like to communicate?</h2><div class="mode-switch" role="group" aria-label="Input mode"><button data-mode="combined">Lips and gestures</button><button data-mode="lips">Lips only</button><button data-mode="signs">Gestures only</button></div><p id="mode-hint" class="hint">Either input can work on its own.</p></section>
   <section id="gestures" class="settings-section"><h2>Supported gestures</h2><p id="vocabulary-summary" class="section-copy">Checking the supported vocabulary…</p><div id="labels" class="label-list"></div><p class="hint">A small gesture vocabulary, rather than a general BSL or ASL translator.</p></section>
-  <section class="settings-section" aria-labelledby="cleanup-heading">
+  <section id="cleanup" class="settings-section" aria-labelledby="cleanup-heading">
      <h2 id="cleanup-heading">Optional AI text cleanup</h2>
      <p class="section-copy">Suggest a clearer version of your message. You choose whether to use it.</p>
      <form id="cleanup-settings-form" class="preview-form">
        <label>API base URL<input id="cleanup-base-url" type="url" placeholder="https://.../v1" autocomplete="url"></label>
        <label>Model<input id="cleanup-model" type="text" autocomplete="off"></label>
        <label>API key<input id="cleanup-api-key" type="password" autocomplete="off"></label>
+       <label>Processing speed<select id="cleanup-tier"><option value="default">Standard</option><option value="fast">Fast · premium pricing</option></select></label>
        <label><input id="cleanup-enabled" type="checkbox"> Enable AI text cleanup</label>
        <p class="hint">Sends candidate text and gesture labels from this Mac to your provider. No video/audio. Key kept only in backend memory.</p>
        <div><button id="cleanup-save" class="speak" type="submit">Save settings</button> <button id="cleanup-test" type="button">Test connection</button></div>
@@ -30,4 +31,5 @@
   <footer><span>Processing and speech run on this Mac.</span><a href="/">Back to your message</a></footer>
 </main>
 <script src="/app.js"></script>
+ <script src="/cleanup-settings.js"></script>
 </body></html>

@@ -22,9 +22,11 @@
       if (!response.ok) throw new Error();
       const config = await response.json();
       $('cleanup-base-url').value = config.base_url || '';
-      $('cleanup-model').value = config.model || '';
+      $('cleanup-model').value = config.model || 'gpt-6-luna';
+      $('cleanup-tier').value = config.service_tier || 'default';
       $('cleanup-enabled').checked = Boolean(config.enabled);
-      status(config.configured ? 'A provider key is configured in backend memory.' : 'No provider key is configured.');
+      $('cleanup-api-key').placeholder = config.configured ? 'Key saved — leave blank to keep it' : 'Paste your OpenAI API key';
+      status(config.configured ? 'API key is saved. No need to enter it again after refreshing. Restarting the backend clears it.' : 'No API key saved yet.');
     } catch (_) {
       error('Could not load AI cleanup settings. Please refresh and try again.');
     }
@@ -38,11 +40,12 @@
       const response = await fetch('/api/cleanup/config', {
         method: 'POST',
         headers: {'Content-Type':'application/json', 'X-Lipflow-Token':token},
-        body: JSON.stringify({base_url:$('cleanup-base-url').value.trim(), model:$('cleanup-model').value.trim(), api_key:key, enabled:$('cleanup-enabled').checked})
+        body: JSON.stringify({base_url:$('cleanup-base-url').value.trim(), model:$('cleanup-model').value.trim(), api_key:key, enabled:$('cleanup-enabled').checked, service_tier:$('cleanup-tier').value})
       });
       if (!response.ok) throw new Error();
       const result = await response.json();
-      status(result.configured ? 'Settings saved. Provider key remains in backend memory.' : 'Settings saved. No provider key is configured.');
+      $('cleanup-api-key').placeholder = result.configured ? 'Key saved — leave blank to keep it' : 'Paste your OpenAI API key';
+      status(result.configured ? 'Saved. API key is configured; leave the password field blank unless replacing it.' : 'Settings saved. No API key saved yet.');
     } catch (_) {
       error('Could not save settings. Check the values and try again.'); status('');
     } finally {
@@ -59,7 +62,7 @@
       });
       const result = await response.json();
       if (!response.ok) throw new Error();
-      status(`Connection successful · ${Number(result.latency_ms) || 0} ms`);
+      status(`Connection ${String(result.status || 'successful')} · ${Number(result.latency_ms ?? result.latency) || 0} ms`);
     } catch (_) {
       status(''); error('Connection test failed. Check the provider settings and try again.');
     } finally { setBusy(false); }

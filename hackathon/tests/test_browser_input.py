@@ -117,8 +117,18 @@ def test_browser_frame_http_contract_and_native_rejection():
         assert response.status == 415
         response, _ = request(port, "POST", "/api/frame", b"not a jpeg", headers)
         assert response.status == 400
-        response, _ = request(port, "POST", "/api/frame", b"x" * (512 * 1024 + 1), headers)
+        # Header-only oversized request proves rejection before accepting a body;
+        # sending 512KiB after rejection races the socket close on macOS.
+        oversized = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        oversized.putrequest("POST", "/api/frame")
+        for key, value in headers.items():
+            oversized.putheader(key, value)
+        oversized.putheader("Content-Length", str(512 * 1024 + 1))
+        oversized.endheaders()
+        response = oversized.getresponse()
         assert response.status == 413
+        response.read()
+        oversized.close()
     finally:
         server.shutdown()
         server.server_close()

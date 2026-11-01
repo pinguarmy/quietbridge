@@ -3,7 +3,7 @@ const text = (id, value) => { const el = $(id), next = String(value ?? ''); if (
 const hide = (id, value) => { if ($(id)) $(id).hidden = value; };
 let state = null, token = '', actionChain = Promise.resolve(), pointerHeld = false, keyHeld = false;
 let speaking = false, pendingActions = 0, renderedRevision = null, initialized = false, chosenText = null, connectionLost = false;
-let browserCameraStream = null, browserCameraStarting = false, browserFrameTimer = null, browserFrameCanvas = document.createElement('canvas');
+let browserCameraStream = null, browserCameraStarting = false, browserCameraStopping = false, browserFrameTimer = null, browserFrameCanvas = document.createElement('canvas');
 browserFrameCanvas.width = 960; browserFrameCanvas.height = 720;
 async function uploadBrowserFrames() {
   if (!browserCameraStream || !state?.browser_camera || state.rehearsal) return;
@@ -28,7 +28,7 @@ async function uploadBrowserFrames() {
   if (browserCameraStream) browserFrameTimer = setTimeout(uploadBrowserFrames, 66);
 }
 async function startBrowserCamera() {
-  if (browserCameraStarting || browserCameraStream) return;
+  if (browserCameraStarting || browserCameraStopping || browserCameraStream) return;
   browserCameraStarting = true;
   const button = $('browser-camera-button');
   if (button) { button.disabled = true; button.textContent = 'Starting camera…'; }
@@ -37,13 +37,41 @@ async function startBrowserCamera() {
     if (!state?.browser_camera || state.rehearsal) { stream.getTracks().forEach(track => track.stop()); return; }
     browserCameraStream = stream;
     $('browser-camera').srcObject = stream;
-    browserCameraStream.getVideoTracks()[0]?.addEventListener('ended', stopBrowserCamera, {once:true});
+    browserCameraStream.getVideoTracks()[0]?.addEventListener('ended', () => { void stopCameraSession(); }, {once:true});
+    await $('browser-camera').play();
+    if (!await requestAction('camera_session', {active:true})) {
+      const message = $('error')?.textContent || 'Could not start recognition.';
+      stopBrowserCamera();
+      await requestAction('camera_session', {active:false});
+      text('error', message); return;
+    }
     text('error', ''); uploadBrowserFrames();
   } catch (e) {
+    const hadCamera = Boolean(browserCameraStream);
+    stopBrowserCamera();
+    if (hadCamera) await requestAction('camera_session', {active:false});
     text('error', e.name === 'NotAllowedError' ? 'Camera access was blocked. Allow camera access for this site in your browser, then try again.' : e.name === 'NotFoundError' ? 'No camera was found. Connect a camera and try again.' : `Could not start the browser camera: ${e.message || 'check browser camera permissions and try again.'}`);
   } finally {
     browserCameraStarting = false;
     if (button) { button.disabled = false; button.textContent = browserCameraStream ? 'Stop camera' : 'Start camera'; }
+  }
+}
+async function stopCameraSession() {
+  if (browserCameraStopping) return;
+  browserCameraStopping = true;
+  keyHeld = pointerHeld = false;
+  // Stop capture immediately; do not keep sharing frames during a slow action.
+  stopBrowserCamera();
+  try { await requestAction('camera_session', {active:false}); }
+  finally { browserCameraStopping = false; }
+}
+function endCameraSessionOnUnload() {
+  const hadCamera = Boolean(browserCameraStream);
+  stopBrowserCamera();
+  if (hadCamera && token) {
+    void fetch('/api/action/camera_session', {method:'POST', keepalive:true,
+      headers:{'Content-Type':'application/json', 'X-Lipflow-Token':token},
+      body:JSON.stringify({active:false})}).catch(() => {});
   }
 }
 function stopBrowserCamera() {
@@ -78,7 +106,7 @@ function render(s) {
   text('last-sign', s.last_sign ? s.last_sign.label + ' · ' + s.last_sign.score.toFixed(2) : '—');
   text('component-errors', [s.camera_error, s.lip_error, s.sign_error].filter(Boolean).join('\n'));
   const modeName = {combined:'Lips and gestures', lips:'Lips only', signs:'Gestures only'}[s.mode];
-  text('mode-caption', modeName);
+  text('mode-caption', modeName + (s.lip_model ? ' · Lip: ' + s.lip_model : '') + (s.gesture_model ? ' · Gesture: ' + s.gesture_model : ''));
   if ($('test-text')) $('test-text').disabled = s.mode === 'signs';
   if ($('test-label')) $('test-label').disabled = s.mode === 'lips';
   text('mode-hint', s.phase === 'idle' ? 'Either input can work on its own.' : 'Finish or cancel your recording before changing inputs.');
@@ -92,25 +120,35 @@ function render(s) {
   const browserCameraButton = $('browser-camera-button');
   if (browserCameraButton) {
     browserCameraButton.hidden = !browserCameraAvailable;
-    browserCameraButton.textContent = browserCameraStarting ? 'Starting camera…' : browserCameraStream ? 'Stop camera' : 'Start camera';
-    browserCameraButton.disabled = browserCameraStarting;
+    browserCameraButton.textContent = browserCameraStarting ? 'Starting camera…' : browserCameraStopping ? 'Stopping camera…' : browserCameraStream ? 'Stop camera' : 'Start camera';
+    browserCameraButton.disabled = browserCameraStarting || browserCameraStopping || (!browserCameraStream && s.session_finalizing === true);
   }
   text('preview-status', s.rehearsal ? 'Preview · camera off' : ready || browserCameraStream ? 'Camera on' : browserCameraAvailable ? 'Waiting for browser camera' : s.camera === 'unavailable' ? 'Camera unavailable' : 'Getting ready…');
   text('camera-message', s.rehearsal ? 'Your camera is off in preview.' : browserCameraAvailable && !browserCameraStream ? 'Select Start camera to share this browser camera.' : s.camera === 'unavailable' ? 'Check camera access in Settings.' : 'Getting your camera ready…');
   const record = $('record');
   if (record) {
-    hide('record', s.mode === 'signs');
-    record.disabled = s.rehearsal || s.lips !== 'ready' || !ready || !['idle','recording'].includes(s.phase);
+    hide('record', s.mode === 'signs' || s.auto_recognition === true || s.session_active === true || s.session_finalizing === true);
+    record.disabled = s.auto_recognition === true || s.session_active === true || s.session_finalizing === true || s.rehearsal || s.lips !== 'ready' || !ready || !['idle','recording'].includes(s.phase);
     record.classList.toggle('listening', s.phase === 'recording');
     text('record-label', ({recording:'Mouth your words… release to finish', tail:'Finishing…', decoding:'Reading your lips…'})[s.phase] || 'Hold to mouth words');
   }
-  hide('cancel', s.phase === 'idle');
+  hide('cancel', s.phase === 'idle' || s.session_active === true || s.session_finalizing === true);
   text('record-hint', s.rehearsal ? 'Try an example from Settings.' : s.mode === 'signs' ? 'Show a supported gesture to the camera.' : s.lips === 'warming' ? 'Getting the lip reader ready…' : s.lips === 'unavailable' ? 'Lip reading needs attention in Settings.' : s.mode === 'combined' ? 'Hold Space or the button before mouthing and gesturing.' : 'Or hold Space, then release when you finish.');
   text('entry-hint', s.mode === 'signs' ? 'Show a supported gesture, then speak your message.' : s.mode === 'lips' ? 'Hold the button, mouth a short sentence, then release.' : 'Show a supported gesture, or hold the button to mouth a sentence.');
   const gesturesReady = s.signs === 'ready' && Object.values(s.vocabulary).some(v => v.enabled ?? v.verified);
   if (!s.rehearsal && !gesturesReady && s.mode !== 'lips') {
     text('entry-hint', s.mode === 'signs' ? 'Gestures need setup. Choose another input in Settings.' : 'Hold the button to mouth a short sentence.');
     text('record-hint', s.mode === 'signs' ? 'Open Settings to check gesture input.' : 'Gesture input is being set up. You can still use your lips once ready.');
+  }
+  if ((s.session_active === true || s.auto_recognition === true) && !s.rehearsal) {
+    text('record-hint', 'Words build up while the camera is on. Stop camera to finish and polish.');
+    text('entry-hint', 'Mouth your words while the camera is on. Stop camera when you are finished.');
+  } else if (s.session_finalizing === true) {
+    text('entry-hint', 'Camera stopped. Finishing the last words before optional text cleanup.');
+    text('record-hint', 'Your camera is off. Your words stay here while the last result finishes.');
+  } else if (browserCameraAvailable && !browserCameraStream) {
+    text('entry-hint', 'Start camera to build your message. Stop camera to finish and polish.');
+    text('record-hint', 'Words build up while the camera is on. Stop camera to finish and polish.');
   }
   const d = s.decision, review = d.status === 'confirmation_needed';
   if (renderedRevision !== s.revision) {
@@ -133,6 +171,7 @@ function render(s) {
   }
   if (!review) { chosenText = d.text || null; if ($('alternatives')) $('alternatives').replaceChildren(); }
   updateMessage();
+  window.renderCleanup?.(s);
   text('last-spoken', s.last_spoken ? 'Last spoken: ' + s.last_spoken : '');
   text('result-timing', !s.rehearsal && s.metrics?.release_to_text_ms !== undefined ? 'Release → text · ' + (s.metrics.release_to_text_ms / 1000).toFixed(1) + ' s' : '');
   [['metric-release','release_to_text_ms'],['metric-decode','decode_ms'],['metric-fusion','fusion_ms']].forEach(([id,key]) => text(id, s.metrics[key] === undefined ? '—' : s.metrics[key] + ' ms'));
@@ -152,24 +191,37 @@ function render(s) {
 function updateMessage() {
   if (!state || !$('message')) return;
   const d = state.decision, review = d.status === 'confirmation_needed';
-  const processing = ['tail', 'decoding'].includes(state.phase);
+  const sessionActive = state.session_active === true;
+  const sessionFinalizing = state.session_finalizing === true;
+  const sessionBusy = sessionActive || sessionFinalizing;
+  const sessionText = typeof state.session_text === 'string' ? state.session_text.trim() : '';
+  const chunkProcessing = ['tail', 'decoding'].includes(state.phase);
+  const cleanupPending = state.cleanup?.source_revision === state.revision && state.cleanup?.status === 'pending';
+  const processing = sessionFinalizing || chunkProcessing;
   const draft = typeof state.draft_text === 'string' && state.draft_text.trim()
     ? state.draft_text.trim()
     : typeof state.greedy_preview === 'string' && state.greedy_preview.trim()
       ? state.greedy_preview.trim() : '';
-  const displayText = processing ? (draft || 'Reading your words…') : chosenText || (review ? 'Which message did you mean?' : 'Your words will appear here.');
+  const liveDraft = sessionBusy && Boolean(sessionText);
+  const displayText = sessionBusy
+    ? sessionText || draft || (sessionFinalizing ? 'Finishing last words…' : 'Your words will appear here.')
+    : chosenText || sessionText || (processing ? draft || 'Reading your words…' : review ? 'Which message did you mean?' : 'Your words will appear here.');
   text('message', displayText);
-  $('message').classList.toggle('empty', !chosenText && !processing);
-  $('message').classList.toggle('processing', processing);
-  $('message').classList.toggle('draft', processing && Boolean(draft));
-  hide('draft-label', !(processing && Boolean(draft)));
-  if (processing && $('alternatives')) $('alternatives').replaceChildren();
-  text('decision-status', review ? 'Check your message' : d.status === 'accepted' ? 'Ready to speak' : state.phase === 'tail' ? 'Finishing' : state.phase === 'decoding' ? 'Reading lips…' : state.phase === 'recording' ? 'Listening' : state.lips === 'warming' ? 'Warming up' : 'Waiting');
+  $('message').classList.toggle('empty', !sessionText && !chosenText && !processing && !draft);
+  // Keep accumulated words visible during later chunks; only an empty pending
+  // result needs the reading spinner. Live text is a draft, not a final message.
+  $('message').classList.toggle('processing', processing && !sessionText);
+  $('message').classList.toggle('draft', liveDraft || (processing && Boolean(draft)));
+  $('message').style.textDecoration = liveDraft ? 'underline dotted' : '';
+  $('message').style.textUnderlineOffset = liveDraft ? '0.18em' : '';
+  hide('draft-label', !(liveDraft || processing && Boolean(draft)));
+  if ((sessionBusy || processing) && $('alternatives')) $('alternatives').replaceChildren();
+  text('decision-status', cleanupPending ? 'Polishing…' : sessionFinalizing ? 'Finishing last words…' : sessionActive ? 'Recognizing…' : review ? 'Check your message' : d.status === 'accepted' ? 'Ready to speak' : state.phase === 'tail' ? 'Finishing' : state.phase === 'decoding' ? 'Reading lips…' : state.phase === 'recording' ? 'Listening' : state.lips === 'warming' ? 'Warming up' : 'Waiting');
   $('decision-status').classList.toggle('review', review);
-  text('reason', !state.speech_available ? 'Speech is unavailable on this device. Check Settings.' : review && d.reason === 'conflict' ? 'The inputs differ. Choose the message you intended.' : review ? 'If these are your words, confirm and speak.' : d.status === 'accepted' ? 'Speak whenever you are ready.' : 'Nothing is spoken until you choose.');
+  text('reason', state.lip_error ? 'Some audio-free lip input could not be read: ' + state.lip_error : sessionActive ? 'Live draft. Stop camera when your message is complete.' : sessionFinalizing ? 'Camera is off. Finishing the last words, then optional cleanup.' : !state.speech_available ? 'Speech is unavailable on this device. Check Settings.' : review && d.reason === 'conflict' ? 'The inputs differ. Choose the message you intended.' : review ? 'If these are your words, confirm and speak.' : d.status === 'accepted' ? 'Speak whenever you are ready.' : 'Nothing is spoken until you choose.');
   document.querySelectorAll('.alternative').forEach(b => {const selected = b.dataset.candidate === chosenText; b.classList.toggle('selected', selected); b.setAttribute('aria-pressed', String(selected)); b.disabled = speaking;});
   text('speak-label', review ? 'Confirm & speak' : 'Speak message');
-  $('speak').disabled = processing || !chosenText || !state.speech_available || speaking || !['accepted','confirmation_needed'].includes(d.status);
+  $('speak').disabled = sessionBusy || processing || !chosenText || !state.speech_available || speaking || !['accepted','confirmation_needed'].includes(d.status);
 }
 
 async function speakMessage() {
@@ -236,24 +288,28 @@ async function preview() {
   if (!$('camera')) return;
   if (state && !state.rehearsal && state.camera === 'ready') {
     try {
-      const res = await fetch('/api/frame'); if (res.ok) {
-        const url = URL.createObjectURL(await res.blob()), img = $('camera'), old = img.dataset.url;
-        img.src = url; img.dataset.url = url; img.hidden = false; hide('camera-placeholder', true);
-        if (old) URL.revokeObjectURL(old);
-      }
+      // Use the same-origin JPEG URL: blob URLs are intentionally blocked by CSP.
+      // Decode before replacing the displayed frame so failed requests never show
+      // a broken-image icon or make the mouth canvas draw an incomplete image.
+      const next = new Image();
+      next.src = '/api/frame?t=' + Date.now();
+      await next.decode();
+      const img = $('camera');
+      img.src = next.src; img.hidden = false; hide('camera-placeholder', true);
     } catch (_) {}
-  } else { hide('camera', true); hide('camera-placeholder', false); }
+  } else {
+    const hasFrozenFrame = $('camera').naturalWidth > 0 && !$('camera').hidden;
+    hide('camera', !hasFrozenFrame); hide('camera-placeholder', hasFrozenFrame);
+    if (hasFrozenFrame && !browserCameraStream) text('preview-status', 'Camera off · last frame');
+  }
   setTimeout(preview, 100);
 }
 document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => requestAction('mode', {mode:b.dataset.mode}));
 if ($('browser-camera-button')) $('browser-camera-button').onclick = async () => {
-  if (browserCameraStream) {
-    if (state?.phase !== 'idle') { keyHeld = pointerHeld = false; await requestAction('cancel'); }
-    stopBrowserCamera(); return;
-  }
+  if (browserCameraStream) { await stopCameraSession(); return; }
   if (state?.browser_camera === true && !state.rehearsal) await startBrowserCamera();
 };
-window.addEventListener('beforeunload', stopBrowserCamera);
+window.addEventListener('beforeunload', endCameraSessionOnUnload);
 const recordButton = $('record');
 recordButton?.addEventListener('pointerdown', e => {if (recordButton.disabled || keyHeld) return; e.preventDefault(); pointerHeld = true; recordButton.setPointerCapture(e.pointerId); requestAction('start');});
 function releasePointer() {if (pointerHeld) {pointerHeld = false; requestAction('stop');}}

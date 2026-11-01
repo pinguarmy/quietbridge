@@ -46,6 +46,8 @@ def make_server(runtime, port=8765):
             try:
                 if path == "/api/state":
                     self._json(200, {**runtime.snapshot(), "token": token})
+                elif path == "/api/cleanup/config":
+                    self._json(200, runtime.cleanup_config())
                 elif path == "/api/tracking":
                     self._json(200, runtime.tracking_snapshot())
                 elif path == "/api/frame":
@@ -61,9 +63,9 @@ def make_server(runtime, port=8765):
                     self.send_header("Cache-Control", "no-store")
                     self.send_header("Content-Length", "0")
                     self.end_headers()
-                elif path in {"/", "/index.html", "/settings", "/settings.html", "/app.js", "/style.css"}:
+                elif path in {"/", "/index.html", "/settings", "/settings.html", "/app.js", "/cleanup-settings.js", "/cleanup-display.js", "/style.css"}:
                     filename = {"/": "index.html", "/settings": "settings.html"}.get(path, path[1:])
-                    mime = {"index.html": "text/html", "settings.html": "text/html", "app.js": "text/javascript", "style.css": "text/css"}[filename]
+                    mime = {"index.html": "text/html", "settings.html": "text/html", "app.js": "text/javascript", "cleanup-settings.js": "text/javascript", "cleanup-display.js": "text/javascript", "style.css": "text/css"}[filename]
                     self._send(200, (UI / filename).read_bytes(), mime + "; charset=utf-8")
                 else:
                     self._json(404, {"error": "Not found"})
@@ -81,7 +83,8 @@ def make_server(runtime, port=8765):
             if self.path == "/api/frame":
                 self._handle_frame()
                 return
-            if not self.path.startswith("/api/action/"):
+            cleanup_path = self.path in {"/api/cleanup/config", "/api/cleanup/test"}
+            if not cleanup_path and not self.path.startswith("/api/action/"):
                 self._json(404, {"error": "Not found"})
                 return
             try:
@@ -91,8 +94,13 @@ def make_server(runtime, port=8765):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError("Expected a JSON object")
-                runtime.action(self.path.removeprefix("/api/action/"), data)
-                self._json(200, runtime.snapshot())
+                if self.path == "/api/cleanup/config":
+                    self._json(200, runtime.configure_cleanup(data))
+                elif self.path == "/api/cleanup/test":
+                    self._json(200, runtime.test_cleanup())
+                else:
+                    runtime.action(self.path.removeprefix("/api/action/"), data)
+                    self._json(200, runtime.snapshot())
             except (ValueError, TypeError, RuntimeError, OSError) as exc:
                 self._json(400, {"error": str(exc)})
             except (BrokenPipeError, ConnectionResetError):
