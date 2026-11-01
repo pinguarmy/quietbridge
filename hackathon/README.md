@@ -21,6 +21,9 @@ the current engine does not supply a calibrated confidence score.
 
 ## Run live on the demo Mac
 
+The target is **Peter's MacBook Pro**. See the [demo-machine handoff](../docs/demo-mac-handoff.md)
+for reusing existing models while preserving the original personalized checkout.
+
 Use the existing Python environment if already installed. For a fresh checkout:
 
 ```sh
