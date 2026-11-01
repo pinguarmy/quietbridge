@@ -86,6 +86,11 @@ def make_recognizer(tmp_path, monkeypatch, *, results=(), events=()):
     return recognizer, backend, stabilizer, captured
 
 
+@pytest.fixture(autouse=True)
+def no_implicit_personal_model(monkeypatch):
+    monkeypatch.delenv("QUIETBRIDGE_PERSONAL_GESTURES", raising=False)
+
+
 def frame(bgr=(10, 20, 30)):
     img = np.zeros((2, 2, 3), dtype=np.uint8)
     img[:, :] = bgr

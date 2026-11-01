@@ -29,6 +29,7 @@ returns whatever events the stabilizer confirms.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -75,7 +76,15 @@ class SignRecognizer:
         ``hackathon.signs.stabilizer``.
     """
 
-    def __init__(self, model_path=None, *, stabilizer=None):
+    def __init__(self, model_path=None, *, stabilizer=None, personal_model_path=None):
+        # Personal classification is opt-in: an old local model must not silently
+        # change a teammate's stock demo. No fallback to stock after rejection.
+        personal_model_path = personal_model_path or os.environ.get("QUIETBRIDGE_PERSONAL_GESTURES")
+        self._personal = None
+        if personal_model_path:
+            from .personal import PersonalGestureModel
+
+            self._personal = PersonalGestureModel.load(Path(personal_model_path).expanduser())
         if model_path is None:
             from .assets import default_model_path
 
@@ -133,8 +142,21 @@ class SignRecognizer:
         image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         result = self._backend.recognize_for_video(image, timestamp_ms)
 
-        label, score = self._pick_label(result)
+        label, score = self._pick_personal_label(result) if self._personal is not None else self._pick_label(result)
         return list(self._stabilizer.update(label, score, timestamp_ms))
+
+    def _pick_personal_label(self, result) -> tuple[Optional[str], float]:
+        from .features import hand_features
+
+        # Collection records exactly one hand per feature trial. Reject two-hand
+        # input rather than pretending that combination was part of training.
+        if len(result.hand_landmarks) != 1:
+            return None, 0.0
+        feature = hand_features(result.hand_landmarks[0], result.handedness[0][0].category_name)
+        label, score = self._personal.predict(feature)
+        if label not in SUPPORTED_LABELS or score < MIN_SCORE:
+            return None, 0.0
+        return label, score
 
     @staticmethod
     def _pick_label(result) -> tuple[Optional[str], float]:

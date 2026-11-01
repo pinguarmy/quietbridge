@@ -1,6 +1,8 @@
 # Peter's gesture recognizer · Track B
 
-Sam owns lips, runtime, fusion, UI and speech. Peter owns this directory. This implementation reuses MediaPipe's pretrained GestureRecognizer, with no new dependency or custom training.
+Sam owns lips, runtime, fusion, UI and speech. Peter owns this directory. The baseline reuses MediaPipe's pretrained GestureRecognizer without a new dependency. Optional personal template collection and training are described in [PERSONALIZATION.md](PERSONALIZATION.md); these are not general sign-language recognition.
+
+For guided Air recordings, run `.venv/bin/python -m hackathon.signs.lab` and open <http://127.0.0.1:8766>. Choose **Gestures** or **Lips**, then explicitly **Start recording / Finish & save**. One camera supplies a full hand-tracking view and a zoomed mouth view; the preview route tracks faces without saving mouth clips until recording is started. Gesture recordings save coordinates; lip recordings save labelled 96×96 grayscale mouth crops, never microphone audio or raw full frames. This standalone lab does not modify Sam's integration or require the Pro. Current custom motion-v2 labels are HELLO, WELCOME, OPENAI, DDE, HACKATHON and REST; collecting those labels does not mean their dynamic recognizer is trained. Preserve earlier static-pose data separately. See [the recording plan](PERSONALIZATION.md).
 
 These are **four predefined communication gestures, not BSL/ASL translation**. A supported model class is not evidence of reliable live recognition. All vocabulary entries remain `verified: false` until the team tests the gesture and agrees its phrase.
 
