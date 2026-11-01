@@ -5,8 +5,7 @@ import argparse
 from pathlib import Path
 
 from lipflow.customize import import_plain_text, update_custom_settings
-from lipflow.hotkey import KEYS
-from lipflow.paths import HOME
+from lipflow.paths import HOME, WINDOWS
 
 
 def parse_sheet(text):
@@ -32,6 +31,12 @@ def apply(path):
         if key == "整理风格" and value:
             settings["cleanup_style"] = "faithful" if value in ("忠实", "faithful") else "polish"
         elif key == "快捷键" and value:
+            # Parsing a worksheet must not load an OS keyboard hook. Resolve it
+            # only when applying a shortcut, using the current platform's keys.
+            if WINDOWS:
+                from lipflow.win.hotkey import KEYS
+            else:
+                from lipflow.hotkey import KEYS
             code = value.lower().replace(" ", "_")
             if code not in KEYS:
                 raise ValueError(f"快捷键需先匹配支持的按键，未自动修改：{value}")

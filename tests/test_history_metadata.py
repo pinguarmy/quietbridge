@@ -1,3 +1,4 @@
+import builtins
 import json
 from types import SimpleNamespace
 
@@ -26,6 +27,22 @@ def test_settings_atomic_round_trip(tmp_path, monkeypatch):
     dictation.save_settings(settings)
     assert dictation.load_settings() == settings
     assert list(path.parent.iterdir()) == [path]
+
+
+def test_settings_load_keeps_unicode_with_windows_default_encoding(tmp_path, monkeypatch):
+    path = tmp_path / "settings.json"
+    monkeypatch.setattr(dictation, "SETTINGS", str(path))
+    settings = {"existing": "保留", "custom_words": ["José", "QuietBridge"]}
+    dictation.save_settings(settings)
+
+    def windows_default_open(file, *args, **kwargs):
+        # Emulate Windows' legacy default without changing the runner's locale.
+        kwargs.setdefault("encoding", "cp1252")
+        return builtins.open(file, *args, **kwargs)
+
+    monkeypatch.setattr(dictation, "open", windows_default_open, raising=False)
+
+    assert dictation.load_settings() == settings
 
 
 def test_history_old_call_remains_compatible(tmp_path, monkeypatch):
