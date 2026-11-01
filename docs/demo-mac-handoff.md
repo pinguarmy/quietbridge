@@ -1,5 +1,11 @@
 # QuietBridge demo Mac handoff
 
+**Deployment clarification:** Sam now describes the camera on Peter's computer
+and inference on a desktop at home. The published runtime does not implement
+that split: it opens the camera and speaks on the server host. The instructions
+below describe the original single-host fallback. The camera transport, return
+path and venue-side speech setup still need Peter's branch/configuration details.
+
 The final live demo runs on **Peter's MacBook Pro**. Sam's Mac runs integration
 development and the synthetic rehearsal UI. Its model/dependency downloads have
 been stopped. No real recognition accuracy or vision latency has been verified
@@ -76,9 +82,10 @@ python -m hackathon.signs.assets --download
 python -m hackathon.signs.demo --camera 0 --seconds 60
 ```
 
-Use these live trials to agree the fixed phrases. Entries remain `verified: false`
-until tested and are ignored by live fusion. Enable only validated mappings, close
-the checker, and restart the integrated server. For combined input, start recording
+Use these live trials to agree the fixed phrases. The four mappings are enabled
+but remain `verified: false`; their phrases require explicit confirmation until
+tested. Disable any unreliable mapping, close the checker, and restart the
+integrated server. For combined input, start recording
 before gesturing, since a held pose does not emit repeatedly.
 
 ## Demo gate
@@ -89,7 +96,7 @@ missing modality. Turn Wi-Fi off and verify display and explicit Speak still
 work. Require three consecutive successful live runs. Keep a consented offline
 recording as fallback; do not commit it.
 
-Sam's focused suite has passed 36 tests plus 14 subtests: 24 integration tests and
+Sam's focused suite has passed 41 tests plus 20 subtests: 29 integration tests and
 12 gesture stabilization/asset tests. This does not load real vision models.
 Real recognition, audible speech onset and repeatability on the Pro remain live
 acceptance checks. Peter owns the separate "hello dev day" phrase work.

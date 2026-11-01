@@ -1,5 +1,35 @@
 # QuietBridge progress audit
 
+## Latest deployment and delivery update
+
+Sam has clarified the intended setup: Peter's camera computer at the venue,
+with recognition on a desktop at home. A fresh fetch finds no camera-upload,
+WebRTC/WebSocket transport, remote inference client, tunnel configuration or
+returned speech/audio path. Current code is single-host: `cv2.VideoCapture`
+opens the server host's camera, worker threads load models locally, HTTP binds
+to `127.0.0.1`, and `say` speaks on the server host. Browser code only receives
+JPEG/state data and sends controls. A remote-desktop camera-forwarding setup
+could exist outside Git, but it is not documented in the published refs.
+
+This means the home-desktop split is an implementation/configuration gap,
+not a completed deployment. Do not expose the localhost service publicly as a
+substitute for camera transport. Separate devices also need preserved capture
+timestamps/utterance IDs and venue-side output. The offline acceptance criterion
+applies to the single-host fallback; a home link necessarily needs a network.
+
+The Windows import/UTF-8 fixes are merged through PR #1 at `7a27b3f`. Actual
+Windows CI passed 166 tests, skipped 9 macOS-only checks, passed 14 subtests, and
+completed an end-to-end sample-video lip read. Those results are separate from
+live camera recognition.
+
+The gesture mapping change enables the four configured phrases while leaving
+all live-verification flags false. Unverified phrases require Confirm & speak.
+The focused suite passes 41 tests plus 20 subtests, including Yes/No conflicts,
+disabled mappings and alias collisions. The animated navy first page is being
+implemented separately on `feat/animated-story`; it is not on main at this snapshot.
+
+The earlier audit below records the integration before these follow-ups.
+
 Audit snapshot: 1 November 2026. Includes Sam's simplified UI (`c6023ce`),
 Peter's published `feat/sign-recognizer` (`5641e38`) and their integration in
 this change. GitHub reports a private repository with `main` as its default
