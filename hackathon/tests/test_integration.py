@@ -199,10 +199,25 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(err.exception.code, 404)
 
     def test_communication_and_settings_pages_are_served(self):
-        for path in ["/", "/settings"]:
+        for path in ["/", "/communicate", "/settings"]:
             with self.subTest(path=path), urlopen(self.url + path) as res:
                 self.assertIn("text/html", res.headers["Content-Type"])
                 self.assertIn(b"QuietBridge", res.read())
+
+    def test_story_is_separate_from_communication_and_serves_letter_data(self):
+        with urlopen(self.url + "/") as res:
+            page = res.read().decode()
+        self.assertIn('href="/communicate"', page)
+        self.assertIn('src="/story.js"', page)
+        self.assertNotIn('src="/app.js"', page)
+        self.assertIn("More ways to", page)  # Readable fallback exists before JavaScript.
+        with urlopen(self.url + "/communicate") as res:
+            self.assertIn(b'src="/app.js"', res.read())
+        with urlopen(self.url + "/hand-letters.json") as res:
+            data = json.load(res)
+        self.assertEqual((data["width"], data["height"]), (28, 28))
+        self.assertEqual(set(data["glyphs"]), set("ABCDEFGHIKLMNOPQRSTUVWXY"))
+        self.assertTrue(all(len(glyph["pixels"]) == 784 for glyph in data["glyphs"].values()))
 
 
 class WorkerTests(unittest.TestCase):

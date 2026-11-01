@@ -2,32 +2,34 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>QuietBridge</title><link rel="stylesheet" href="/style.css">
+  <meta name="theme-color" content="#071225"><title>QuietBridge · Another way to be understood</title>
+  <link rel="stylesheet" href="/story.css"><script src="/story.js" defer></script>
 </head>
 <body>
-<main class="communication-page">
-  <header><a class="wordmark" href="/">QuietBridge<span aria-hidden="true">◖◗</span></a><a class="settings-link" href="/settings">Settings</a></header>
-  <div id="rehearsal-banner" class="banner" hidden>Preview mode · Camera is off. <a href="/settings#preview">Try an example</a></div>
-  <section class="intro"><h1>What would you like to say?</h1><p id="entry-hint">Show a supported gesture, or hold the button to mouth a sentence.</p></section>
-  <div class="workspace">
-    <section class="camera-panel" aria-label="Camera and recording">
-      <div class="preview"><img id="camera" alt="Your live camera preview" hidden><div id="camera-placeholder"><span class="viewfinder" aria-hidden="true">⌜ &nbsp; ⌝<br>⌞ &nbsp; ⌟</span><p id="camera-message">Getting your camera ready…</p></div><span id="preview-status" class="preview-label">Getting ready</span></div>
-      <div class="record-controls"><button id="record" class="record" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">Hold to mouth words</span></button><button id="cancel" class="text-button" hidden>Cancel</button></div>
-      <p id="record-hint" class="hint">Or hold Space, then release when you finish.</p>
-      <p class="mode-caption"><span id="mode-caption">Lips and gestures</span> · <a href="/settings">Change</a></p>
-    </section>
-    <section class="message-panel" aria-label="Your message">
-      <div class="message-heading"><h2>Your message</h2><span id="decision-status" class="status">Waiting</span></div>
-      <p id="message" class="message empty" aria-live="polite">Your words will appear here.</p>
-      <p id="reason" class="reason">Check your message before speaking.</p>
-      <div id="alternatives" class="alternatives" role="group" aria-label="Choose the message you intended"></div>
-      <button id="speak" class="speak" disabled><span id="speak-label">Speak message</span></button>
-      <p id="error" class="error" role="alert"></p>
-      <p id="result-timing" class="hint"></p>
-      <p id="last-spoken" class="last-spoken"></p>
-    </section>
-  </div>
-  <footer><span>Your camera stays on this Mac. You choose when to speak.</span><a href="/settings#gestures">Supported gestures</a></footer>
+<div class="galaxy" aria-hidden="true"><div class="nebula nebula-one"></div><div class="nebula nebula-two"></div><div class="starfield"></div><div class="orbital orbital-one"></div><div class="orbital orbital-two"></div></div>
+<main class="story">
+  <header class="story-header"><a class="brand" href="/" aria-label="QuietBridge"><span class="brand-symbol" aria-hidden="true">◖◗</span><span data-hand-text>QuietBridge</span></a><nav aria-label="Introduction controls"><button id="skip-animation" class="quiet-button" type="button">Skip animation</button><a class="direct-link" href="/communicate">Start communicating <span aria-hidden="true">↗</span></a></nav></header>
+  <section class="hero" aria-labelledby="story-title">
+    <div class="hero-copy">
+      <p class="eyebrow" data-hand-text>COMMUNICATION, ON YOUR TERMS</p>
+      <h1 id="story-title"><span data-hand-text>More ways to</span><span class="accent" data-hand-text>be understood.</span></h1>
+      <p class="hero-lead" data-hand-text>A simple message should not take all your energy.</p>
+      <p class="hero-description" data-hand-text>For moments when typing is tiring or speech is not an option. Use a supported gesture or silent mouth movements, review the words, and choose to speak.</p>
+      <div class="hero-actions"><a class="primary-link" href="/communicate" aria-label="Start communicating"><span data-hand-text>Start communicating</span><span aria-hidden="true">↗</span></a><span class="action-note" data-hand-text>Your words. Your choice.</span></div>
+    </div>
+    <aside class="constellation" aria-label="Illustration of movement becoming a message">
+      <svg class="constellation-lines" viewBox="0 0 400 440" aria-hidden="true"><circle cx="200" cy="210" r="148"/><circle cx="200" cy="210" r="103"/><path d="M71 147 L202 98 L332 182 L273 324 L120 329 Z"/><path d="M71 147 L273 324 M202 98 L120 329 M332 182 L120 329"/><circle class="star-point" cx="71" cy="147" r="4"/><circle class="star-point" cx="202" cy="98" r="4"/><circle class="star-point" cx="332" cy="182" r="4"/><circle class="star-point" cx="273" cy="324" r="4"/><circle class="star-point" cx="120" cy="329" r="4"/></svg>
+      <span class="orbit-caption">MOVEMENT → MEANING</span>
+      <div class="sample-tile tile-h" data-sample="H" aria-hidden="true"><span>H</span></div><div class="sample-tile tile-e" data-sample="E" aria-hidden="true"><span>E</span></div><div class="sample-tile tile-y" data-sample="Y" aria-hidden="true"><span>Y</span></div>
+      <div class="message-signal"><span class="signal-label">YOUR MESSAGE</span><strong data-hand-text>Hey.</strong><span class="signal-line" aria-hidden="true"></span></div>
+      <p class="illustration-caption">Illustrative ASL letter images.<br>A small gesture prototype, not full sign translation.</p>
+    </aside>
+  </section>
+  <section class="steps" aria-label="How QuietBridge works">
+    <article><span class="step-number" aria-hidden="true">01 /</span><h2 data-hand-text>Express your message</h2><p data-hand-text>Use the input that works for you.</p></article>
+    <article><span class="step-number" aria-hidden="true">02 /</span><h2 data-hand-text>Make it your words</h2><p data-hand-text>Review the text. Choose when inputs differ.</p></article>
+    <article><span class="step-number" aria-hidden="true">03 /</span><h2 data-hand-text>Choose to speak</h2><p data-hand-text>Send your confirmed words to a local voice.</p></article>
+  </section>
+  <footer class="story-footer"><span>A local-first lip and gesture communication prototype.</span><span id="journey-status" aria-live="polite">An illustration of letters becoming words.</span><a href="/communicate">Go directly to the tool <span aria-hidden="true">↗</span></a></footer>
 </main>
-<script src="/app.js"></script>
 </body></html>

@@ -29,7 +29,8 @@ a result established by passing software tests.
 
 ## The experience
 
-1. Open directly into the communication screen.
+1. The opening story illustrates movement becoming words. Skip its animation or
+   choose Start communicating immediately; `/communicate` opens the tool directly.
 2. Gesture, or hold the button and mouth a short message. For combined input,
    hold first, then gesture and mouth the words.
 3. Review the proposed message. If inputs conflict, choose the intended meaning.
@@ -38,6 +39,15 @@ a result established by passing software tests.
 Keep input settings, supported vocabulary and diagnostics on the separate Settings
 page. Show readiness honestly. Do not automatically speak, hide uncertainty or
 complete an expected phrase from incomplete evidence.
+
+The opening illustration uses unmodified static ASL alphabet examples from Sign
+Language MNIST, not model predictions or a representation of full sign translation.
+Its hand tiles remain for four seconds before moving into readable words. The
+actual semantic copy and direct controls are available immediately. Reduced-motion,
+missing-data and JavaScript-free views show readable copy without waiting. J and Z
+have no image in this dataset; unsupported letters use a neutral marker rather than
+an invented handshape. The story does not start speech, record frames or make
+recognition requests. Source and CC0 metadata accompany the small local JSON asset.
 
 ## A short pitch
 

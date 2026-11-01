@@ -12,7 +12,10 @@ Python 3.11 or 3.12 is required. From the repository root:
 python -m hackathon.server --rehearsal
 ```
 
-Open <http://127.0.0.1:8765>. This mode uses explicitly synthetic text and sign events;
+Open <http://127.0.0.1:8765> for the animated product story, or go directly to
+<http://127.0.0.1:8765/communicate> for communication. Start communicating and
+Skip animation remain available throughout the story, and reduced-motion users
+see readable copy immediately. This mode uses explicitly synthetic text and sign events;
 it never opens the camera and does not claim vision accuracy or latency. Open
 **Settings → Try an example** to preview matching or conflicting inputs. The app
 returns to the communication screen. Choose an alternative when the inputs conflict,

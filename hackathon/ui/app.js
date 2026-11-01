@@ -150,6 +150,6 @@ if ($('test-submit')) $('test-submit').onclick = async () => {
   const exampleText = state.mode === 'signs' ? '' : $('test-text').value;
   const label = state.mode === 'lips' ? '' : $('test-label').value;
   if (!exampleText.trim() && !label) {text('error', 'Add example words or choose a gesture first.'); return;}
-  if (await requestAction('rehearse', {text:exampleText, label})) window.location.assign('/');
+  if (await requestAction('rehearse', {text:exampleText, label})) window.location.assign('/communicate');
 };
 poll(); preview();
