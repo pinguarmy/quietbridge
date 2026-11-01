@@ -30,6 +30,8 @@ from .paste import copy_text, paste_text
 LOG = os.path.join(HOME, "Lipflow.log")
 CAMERAS = 4  # Windows can't name cameras through OpenCV: offer the first few by number
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+CLEANUP_BACKENDS = ["auto", "gemini", "local", "ollama", "claude", "basic"]
+CLEANUP_STYLES = ["faithful", "polish"]
 
 
 @dataclass
@@ -37,10 +39,12 @@ class Options:
     key: str = DEFAULT_KEY
     beam: int = 4
     backend: str = "auto"
+    style: "str | None" = None  # None = the persisted cleanup_style, or "faithful"
     camera: "int | str" = "auto"
     paste: bool = True
     live_preview: bool = True
     onboard: bool = False
+    onboarding_start: str = "welcome"  # CLI-compatible; Windows keeps its own setup flow
 
 
 def key_label(key: str) -> str:
@@ -57,7 +61,7 @@ class Lipflow:
         self.root.withdraw()
         self._q: "queue.Queue" = queue.Queue()
         self.reader: LipReader | None = None
-        self.cleaner = Cleaner(opts.backend)
+        self.cleaner = Cleaner(opts.backend, style=opts.style)
         self.jobs: "queue.Queue" = queue.Queue()
         self.session = 0          # bumps on every start/cancel so stale previews are dropped
         self.preview_busy = False
@@ -82,6 +86,9 @@ class Lipflow:
     @property
     def key_name(self) -> str:
         return key_label(self.opts.key)
+
+    def _cleanup_label(self) -> str:
+        return f"Cleanup: {self.cleaner.describe()} · {self.cleaner.style}"
 
     # -- threading -------------------------------------------------------------------------
     def ui(self, fn, *args, **kw):
@@ -144,10 +151,19 @@ class Lipflow:
             return Item(key_label(name), lambda icon, item: self.ui(self._pick_key, name),
                         checked=lambda item: self.opts.key == name, radio=True)
 
+        def pick_cleanup_backend(name):
+            return Item("Automatic" if name == "auto" else name.title(),
+                        lambda icon, item: self._pick_cleanup(backend=name),
+                        checked=lambda item: self.settings.get("cleanup_backend", "auto") == name, radio=True)
+
+        def pick_cleanup_style(name):
+            return Item(name.title(), lambda icon, item: self._pick_cleanup(style=name),
+                        checked=lambda item: self.settings.get("cleanup_style", "faithful") == name, radio=True)
+
         menu = Menu(
             Item(lambda item: self.state_text, None, enabled=False),
             Item(lambda item: f"Hold {self.key_name} to dictate, double-tap for hands-free", None, enabled=False),
-            Item(lambda item: f"Cleanup: {self.cleaner.describe()}", None, enabled=False),
+            Item(lambda item: self._cleanup_label(), None, enabled=False),
             Menu.SEPARATOR,
             Item("Copy last dictation", lambda icon, item: self.ui(self._copy_last)),
             Item("Practice && train more…", lambda icon, item: self.ui(self.show_setup, "practice")),
@@ -155,6 +171,9 @@ class Lipflow:
             Menu.SEPARATOR,
             Item("Camera", Menu(*[pick_camera(v) for v in ["auto", *range(CAMERAS)]])),
             Item("Push-to-talk key", Menu(*[pick_key(k) for k in KEYS])),
+            Item("Cleanup", Menu(*[pick_cleanup_backend(b) for b in CLEANUP_BACKENDS],
+                                 Menu.SEPARATOR,
+                                 *[pick_cleanup_style(s) for s in CLEANUP_STYLES])),
             toggle("whisper", False, then=lambda: self.ui(self._whisper_changed)),
             toggle("use_context"),
             toggle("save_clips"),
@@ -203,6 +222,20 @@ class Lipflow:
         self._install_key()
         self.icon.update_menu()
         self.hud.show("done", "Push-to-talk key", f"Hold {self.key_name} to dictate", 2.0)
+
+    def _pick_cleanup(self, backend=None, style=None):
+        """Tray thread: persist the choice; the Cleaner itself is rebuilt on the model thread."""
+        if backend is not None:
+            if backend == "auto":
+                self.settings.pop("cleanup_backend", None)
+            else:
+                self.settings["cleanup_backend"] = backend
+        if style is not None:
+            self.settings["cleanup_style"] = style
+        save_settings(self.settings)
+        self.jobs.put(("cleanup", self.settings.get("cleanup_backend", "auto"),
+                       self.settings.get("cleanup_style")))
+        self.icon.update_menu()
 
     def _whisper_changed(self):
         if self.settings.get("whisper") and self.av_reader is None and not self.loading:
@@ -374,6 +407,8 @@ class Lipflow:
                     self._train(job[1])
                 elif job[0] == "whisper":
                     self._load_whisper()
+                elif job[0] == "cleanup":  # backend/style changed from the tray
+                    self._set_cleanup(*job[1:])
             except Exception as e:
                 import traceback
                 traceback.print_exc()
@@ -381,6 +416,20 @@ class Lipflow:
             finally:
                 if job[0] == "preview":
                     self.preview_busy = False
+
+    def _set_cleanup(self, backend, style):
+        """Model thread: swap in a new Cleaner so the tray never builds one (the local model's
+        first load can take seconds, and network clients belong off the UI)."""
+        c = Cleaner(backend, style=style)
+        if c.backend == "local":
+            try:
+                c.warmup()
+            except Exception as e:
+                print(f"[lipflow] local cleanup model unavailable ({e}); using basic cleanup")
+                c.backend, c.model = "basic", None
+        self.cleaner = c
+        print(f"[lipflow] cleanup: {c.describe()} · {c.style}")
+        self.ui(self.icon.update_menu)
 
     def _load(self):
         t = time.time()
@@ -488,7 +537,8 @@ class Lipflow:
         self.last_output = text
         self.last_paste_at = time.time()
         self.context.append(text)
-        log_history(rec, candidates, text, t_all, self.cleaner.describe())
+        log_history(rec, candidates, text, t_all, self.cleaner.describe(),
+                    cleanup_details=self.cleaner.last_result)
         keep_clip(rois, candidates, text, self.settings)
         self.ui(paste_text if self.opts.paste else copy_text, out if self.opts.paste else text)
         self.ui(self.hud.show, "done", "Pasted" if self.opts.paste else "Copied", text, 2.4)

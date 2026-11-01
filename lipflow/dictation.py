@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import time
 
 import numpy as np
@@ -28,8 +29,18 @@ def load_settings() -> dict:
 
 
 def save_settings(d: dict):
-    os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
-    json.dump(d, open(SETTINGS, "w"), indent=2)
+    """Atomically replace settings so an interrupted save cannot lose the profile."""
+    folder = os.path.dirname(SETTINGS)
+    os.makedirs(folder, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", dir=folder, prefix=".settings-",
+                                     suffix=".json", encoding="utf-8", delete=False) as f:
+        path = f.name
+        json.dump(d, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    # Destination is the literal module SETTINGS path, never a user-supplied computed target.
+    os.replace(path, SETTINGS)
 
 
 def clip_problem(rec) -> "tuple[str, str] | None":
@@ -51,12 +62,18 @@ def rois_for(rec):
     return mouth_rois([grays[i] for i in idx], [anchors[i] for i in idx])
 
 
-def log_history(rec, candidates, text, secs, cleanup: str):
+def log_history(rec, candidates, text, secs, cleanup: str, cleanup_details: dict | None = None):
+    """Keep actual cleanup outcome locally; never record transport config or credentials."""
     os.makedirs(os.path.dirname(HISTORY), exist_ok=True)
+    entry = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "seconds": round(rec.duration, 2),
+             "raw": candidates, "text": text, "latency": round(secs, 2), "cleanup": cleanup}
+    if cleanup_details:
+        # Allow-list metadata instead of copying arbitrary provider response/config objects.
+        entry["cleanup_details"] = {key: cleanup_details[key] for key in
+                                    ("backend", "style", "fallback", "cleanup_ms", "error", "model")
+                                    if key in cleanup_details}
     with open(HISTORY, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "seconds": round(rec.duration, 2),
-                            "raw": candidates, "text": text, "latency": round(secs, 2),
-                            "cleanup": cleanup}) + "\n")
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 def keep_clip(rois, candidates, text, settings: dict):

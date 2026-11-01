@@ -56,21 +56,34 @@ HARVARD = [
 ]
 
 
-def practice_sentences(n: int = N_SENTENCES) -> list[str]:
-    """Half your own everyday sentences (from an imported Wispr Flow history: 5–12 words, no digits)
+def practice_sentences(n: int = N_SENTENCES, phrases_path: str | None = None,
+                       exclude: set[str] | None = None) -> list[str]:
+    """Half your own everyday sentences (from custom phrases or imported history: 5–12 words, no digits)
     for your real vocabulary, half Harvard sentences for even coverage of lip shapes; all Harvard
-    if there's no history. Shuffled together."""
+    if there's no history or phrases. Shuffled together."""
     from .personal import PHRASES
+    target_path = phrases_path or PHRASES
     mine = []
-    if os.path.exists(PHRASES):
-        for line in open(PHRASES, encoding="utf-8"):
-            for s in re.split(r"(?<=[.!?])\s+", line.strip()):
+    if os.path.exists(target_path):
+        for line in open(target_path, encoding="utf-8", errors="ignore"):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            for s in re.split(r"(?<=[.!?])\s+", line):
                 w = s.split()
                 if 5 <= len(w) <= 12 and not re.search(r"\d|http|@|/", s):
                     mine.append(s.rstrip(".!?,"))
+    excluded = exclude or set()
+    mine = [s for s in mine if s not in excluded]
     random.shuffle(mine)
     own = list(dict.fromkeys(mine))[:n // 2]
-    harvard = random.sample(HARVARD, n - len(own))
+    available = [s for s in HARVARD if s not in excluded]
+    need = n - len(own)
+    # After exhausting new prompts, old prompts may be rerecorded, but never repeat
+    # a sentence twice inside one recording round.
+    if len(available) < need:
+        available += [s for s in HARVARD if s not in available]
+    harvard = random.sample(available, min(need, len(available)))
     out = own + harvard
     random.shuffle(out)
     return out

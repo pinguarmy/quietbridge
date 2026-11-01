@@ -3,7 +3,39 @@
 **Wispr Flow for your lips.** Hold a key, silently mouth what you want to say, let go, and the
 text shows up at your cursor in whatever app you're in. No microphone and no sound, just your webcam.
 
-Everything runs locally on your Mac or Windows PC. An optional LLM pass fixes the words lip reading gets wrong.
+Camera processing and visual speech recognition run locally on your Mac or Windows PC.
+Text cleanup can run locally or, when explicitly selected, use Gemini 3.8 Flash through CPA.
+Cloud cleanup sends candidate text and bounded text context, never camera video or audio.
+
+## Private workspace and collaboration
+
+This version lives at <https://github.com/pinguarmy/lipflow> (private). The original
+project is <https://github.com/amywork777/lipflow>, retained as the `upstream` remote.
+The personalized work is on `peter/silent-input`.
+
+The owner can invite collaborators in **Settings → Collaborators → Add people**.
+Invitees must accept the invitation before they can clone or contribute; sharing the
+repository URL alone does not grant access. Personal recordings, local models and
+runtime credentials are not included in this repository.
+
+## Peter's silent-input version
+
+**Left Option stays with Doubao; Right Option starts Lipflow.** Hold to mouth words,
+release to insert. Natural cleanup is selected: Gemini corrects candidates, adds punctuation,
+and removes fillers/repetitions. Faithful mode keeps the dictated wording.
+
+Personalization uses chat choices, not a worksheet. The selected starter domains are
+AI/coding, finance and education, covering AI prompts, messages, email and notes.
+Settings and the recording guide use a light native macOS layout with Chinese labels. Cloud failures fall back to
+local cleanup, then offline rules; clips and personal models remain on this Mac.
+
+The default model is `gemini-3.8-flash`; the endpoint/model are configurable. Credentials
+come from the existing CPA environment or DSH credential reference, not from the settings
+file. No new Google API key or installation is needed.
+
+See [the one-session personalization guide](docs/personalization.md) for vocabulary,
+phrase customization, recording, face training, and tuning. The face recordings still
+require your participation; text-only tests do not establish your personal lip-reading accuracy.
 
 ```
  hold ⌥ (right)  ──►  webcam  ──►  face landmarks (live)  ──►  mouth crops, 25 fps
@@ -18,7 +50,7 @@ Everything runs locally on your Mac or Windows PC. An optional LLM pass fixes th
 Needs an Apple Silicon Mac on macOS 13 or later (macOS 26 for the Liquid Glass look), and about 2 GB of disk.
 
 ```sh
-git clone https://github.com/amywork777/lipflow.git ~/code/lipflow
+git clone https://github.com/pinguarmy/lipflow.git ~/code/lipflow
 cd ~/code/lipflow && ./setup.sh     # installs uv deps, ~1.2 GB of models, builds /Applications/Lipflow.app
 open /Applications/Lipflow.app
 ```
@@ -49,7 +81,7 @@ macOS asks for permissions in the terminal's name.
 Needs Windows 10 or 11 (64-bit) and about 3 GB of disk. In PowerShell:
 
 ```powershell
-git clone https://github.com/amywork777/lipflow.git $HOME\code\lipflow
+git clone https://github.com/pinguarmy/lipflow.git $HOME\code\lipflow
 cd $HOME\code\lipflow
 powershell -ExecutionPolicy Bypass -File setup.ps1   # uv deps, ~1.2 GB of models, Start menu shortcut
 ```
@@ -141,8 +173,9 @@ Options: `uv run lipflow --help`
 
 ```
 --key {right_option,left_option,right_command,right_control,fn}
---cleanup {auto,claude,local,ollama,basic}
---beam N          beam size (default 10)
+--cleanup {auto,gemini,claude,local,ollama,basic}
+--cleanup-style {faithful,polish}
+--beam N          beam size (default 4 for the app; 10 for file transcription)
 --copy-only       copy to the clipboard instead of pasting
 --camera N|FILE   camera index, or a video file to stand in for the webcam
 ```

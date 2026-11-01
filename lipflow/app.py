@@ -41,10 +41,12 @@ class Options:
     key: str = "right_option"
     beam: int = 4  # measured on 38 sentences: beam 10 25.2% WER 1.66 s/clip, beam 4 26.1% 0.99 s
     backend: str = "auto"
+    style: "str | None" = None  # None = the persisted cleanup_style, or "faithful"
     camera: "int | str" = "auto"  # 'auto' = the Mac's built-in camera
     paste: bool = True
     live_preview: bool = True
     onboard: bool = False
+    onboarding_start: str = "welcome"
 
 
 def ui(fn, *args, **kw):
@@ -58,7 +60,7 @@ class Lipflow(NSObject):
             return None
         self.opts = opts
         self.reader: LipReader | None = None
-        self.cleaner = Cleaner(opts.backend)
+        self.cleaner = Cleaner(opts.backend, style=opts.style)
         self.jobs: "queue.Queue" = queue.Queue()
         self.session = 0          # bumps on every start/cancel so stale previews are dropped
         self.preview_busy = False
@@ -120,21 +122,25 @@ class Lipflow(NSObject):
         menu = NSMenu.alloc().init()
         self.state_item = self._item(menu, "Loading model…", None, icon="hourglass")
         key_name = self.opts.key.replace("_", " ").title()
-        self._item(menu, f"Hold {key_name} to dictate, double-tap for hands-free", None, icon="keyboard")
-        self._item(menu, f"Cleanup: {self.cleaner.describe()}", None, icon="text.badge.checkmark")
+        self._item(menu, f"按住 {key_name} 做口型 · 双击免按住", None, icon="keyboard")
+        self.cleanup_item = self._item(menu, self._cleanup_label(), None, icon="text.badge.checkmark")
         n = len(self.cleaner.personal.phrases)
-        self._item(menu, f"Personalised from {n:,} of your phrases" if n else
-                   "Not personalised yet: run lipflow import-wispr", None, icon="person.text.rectangle")
+        self._item(menu, f"已准备 {n:,} 条常用句" if n else
+                   "个人定制：选择常用场景即可开始", None, icon="person.text.rectangle")
         menu.addItem_(NSMenuItem.separatorItem())
         self._camera_menu(menu)
-        self.last_item = self._item(menu, "Copy last dictation", "copyLast:", icon="doc.on.clipboard")
-        self._item(menu, "Open history", "openHistory:", icon="clock.arrow.circlepath")
-        self._item(menu, "Edit custom words…", "openWords:", icon="character.book.closed")
-        self._item(menu, "Practice & train more…", "trainMore:", icon="person.crop.square")
-        self._item(menu, "Settings…", "openSettings:", ",", icon="gearshape")
+        self.last_item = self._item(menu, "复制上次输入", "copyLast:", icon="doc.on.clipboard")
+        self._item(menu, "查看输入记录", "openHistory:", icon="clock.arrow.circlepath")
+        self._item(menu, "常用名词…", "openWords:", icon="character.book.closed")
+        self._item(menu, "录制口型与训练…", "trainMore:", icon="person.crop.square")
+        self._item(menu, "设置…", "openSettings:", ",", icon="gearshape")
         menu.addItem_(NSMenuItem.separatorItem())
-        self._item(menu, "Quit Lipflow", "quit:", "q", icon="power")
+        self._item(menu, "退出 Lipflow", "quit:", "q", icon="power")
         self.status.setMenu_(menu)
+
+    @objc.python_method
+    def _cleanup_label(self) -> str:
+        return f"Cleanup: {self.cleaner.describe()} · {self.cleaner.style}"
 
     @objc.python_method
     def _camera_menu(self, menu):
@@ -213,9 +219,11 @@ class Lipflow(NSObject):
         if self.setup is None:
             self.setup = Onboarding.alloc().initWithApp_(self)
         self.camera.track_always = True
-        self.setup.show()
-        if start_at == "practice":
+        if start_at == "practice" and all(self.setup._perm_state()):
             self.setup.goPractice_(None)
+        elif start_at == "practice":
+            self.setup.goPermissions_(None)  # real permission gate, not an installation recheck
+        self.setup.show()
 
     def openWords_(self, sender):
         from . import vocab
@@ -348,6 +356,8 @@ class Lipflow(NSObject):
                     self._train(job[1])
                 elif job[0] == "whisper":
                     self._load_whisper()
+                elif job[0] == "cleanup":  # backend/style changed in Settings
+                    self._set_cleanup(*job[1:])
                 elif job[0] == "reload":  # e.g. face model reset from Settings
                     self.reader = LipReader(beam_size=self.opts.beam)
                     self.reader.warmup()
@@ -358,6 +368,21 @@ class Lipflow(NSObject):
             finally:
                 if job[0] == "preview":
                     self.preview_busy = False
+
+    @objc.python_method
+    def _set_cleanup(self, backend: str, style: "str | None"):
+        """Model thread: swap in a new Cleaner so Settings never builds one on the UI thread
+        (the local model's first load can take seconds, and network clients belong off the UI)."""
+        c = Cleaner(backend, style=style)
+        if c.backend == "local":
+            try:
+                c.warmup()
+            except Exception as e:
+                print(f"[lipflow] local cleanup model unavailable ({e}); using basic cleanup")
+                c.backend, c.model = "basic", None
+        self.cleaner = c
+        print(f"[lipflow] cleanup: {c.describe()} · {c.style}")
+        ui(self.cleanup_item.setTitle_, self._cleanup_label())
 
     @objc.python_method
     def _load(self):
@@ -380,7 +405,7 @@ class Lipflow(NSObject):
         if self.settings.get("whisper"):
             self.jobs.put(("whisper",))
         if self.opts.onboard or not self.settings.get("onboarded"):
-            ui(self.show_setup)
+            ui(self.show_setup, self.opts.onboarding_start if self.opts.onboard else "welcome")
         else:
             ui(self.hud.show, "done", "Lipflow is ready", f"Hold {name} and mouth your words", 2.5)
 
@@ -488,7 +513,11 @@ class Lipflow(NSObject):
         self._save_clip(rois, candidates, text)
         if self.opts.paste:
             ui(paste_text, out)
-            if ctx is not None and ctx.element is not None and self.settings.get("learn_corrections", True):
+            # Only "faithful" cleanup keeps the model's words, so only its output is a safe
+            # word-for-word target when a correction re-trains the lip reader: polished text
+            # (fillers dropped, phrasing tidied) would teach the VSR words you never mouthed.
+            if ctx is not None and ctx.element is not None and self.settings.get("learn_corrections", True) \
+                    and self.cleaner.style == "faithful":
                 from .corrections import Watcher
                 ui(lambda: Watcher(ctx.element, ctx.value, out, rois, candidates).start())
         else:
@@ -518,7 +547,8 @@ class Lipflow(NSObject):
 
     @objc.python_method
     def _log(self, rec, candidates, text, secs):
-        log_history(rec, candidates, text, secs, self.cleaner.describe())
+        log_history(rec, candidates, text, secs, self.cleaner.describe(),
+                    cleanup_details=self.cleaner.last_result)
 
 
 class AppDelegate(NSObject):

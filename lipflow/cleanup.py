@@ -10,12 +10,20 @@ Backends, first available wins:
   local   – a tiny on-device model via MLX (Qwen3-0.6B 4-bit, ~350 MB, ~0.2 s); LIPFLOW_LOCAL_MODEL
   ollama  – a local Ollama server on :11434 (LIPFLOW_OLLAMA_MODEL, default qwen3:4b); only if chosen
   basic   – offline casing + punctuation rules
+
+Explicit opt-in only (never picked by "auto"):
+  gemini  – cloud cleanup via a CPA OpenAI-compatible endpoint (see cloud.py); settings fields
+            cleanup_backend/cleanup_style/gemini_model/cpa_base_url/cleanup_timeout, key from
+            CPA_API_KEY/LIPFLOW_CPA_API_KEY or the DSH credentials file. Falls back to the local
+            model, then basic, if the cloud call fails. Styles: "faithful" (corrections only)
+            or "polish" (also drops fillers/repetitions and tidies phrasing).
 """
 from __future__ import annotations
 
 import json
 import os
 import re
+import time
 
 import requests
 
@@ -165,14 +173,35 @@ def basic_cleanup(text: str) -> str:
     return t
 
 
+def _settings() -> dict:
+    """The user's settings.json (via dictation.load_settings), or {} — never raises."""
+    try:
+        from .dictation import load_settings
+        s = load_settings()
+        return s if isinstance(s, dict) else {}
+    except Exception:
+        return {}
+
+
 class Cleaner:
-    def __init__(self, backend: str = "auto"):
+    def __init__(self, backend: str = "auto", style: "str | None" = None):
+        settings = _settings()
+        # An explicit constructor argument wins; "auto" consults the settings opt-in, then probes.
+        # The cloud ("gemini") is only ever used when asked for directly, here or in settings.
+        if backend == "auto":
+            backend = settings.get("cleanup_backend") or "auto"
         self.backend = self._pick(backend)
+        self.style = style or settings.get("cleanup_style") or "faithful"
+        if self.style not in ("faithful", "polish"):
+            self.style = "faithful"
         self.model = None
         self._client = None
         self._mlx = None
         self._words: list[str] = []
         self._similar: list[str] = []
+        # What actually happened on the last __call__: which backend produced the text, the style,
+        # which backend fell back (None if the primary worked), and how long cleanup took. No secrets.
+        self.last_result: "dict | None" = None
         # Measured on real dictations (WER): free edits 31.5%, format-only 19.0%, one edit using only
         # the guesses' words or words you commonly use, with those words in the prompt: 17.9%.
         self.strict = os.environ.get("LIPFLOW_LOCAL_STRICT", "0") == "1"
@@ -188,6 +217,18 @@ class Cleaner:
             self.model = os.environ.get("LIPFLOW_MODEL", "claude-opus-5-5")
         elif self.backend == "ollama":
             self.model = os.environ.get("LIPFLOW_OLLAMA_MODEL", "qwen3:4b")
+        elif self.backend == "gemini":
+            from . import cloud
+            self.model = (settings.get("gemini_model") or os.environ.get("LIPFLOW_GEMINI_MODEL")
+                          or cloud.DEFAULT_MODEL)
+            self._cpa_base_url = (settings.get("cpa_base_url") or os.environ.get("LIPFLOW_CPA_BASE_URL")
+                                  or cloud.DEFAULT_BASE_URL)
+            try:
+                t = float(settings.get("cleanup_timeout") or cloud.DEFAULT_TIMEOUT)
+            except (TypeError, ValueError):
+                t = cloud.DEFAULT_TIMEOUT
+            self._cleanup_timeout = min(max(t, 0.5), cloud.MAX_TIMEOUT)
+            self._cpa_key = cloud.resolve_cpa_key()
 
     @staticmethod
     def _ollama_up() -> bool:
@@ -247,8 +288,11 @@ class Cleaner:
             self._similar = []
         candidates = vocab.rerank(candidates, words)
         if not candidates:
+            self.last_result = {"backend": self.backend, "style": self.style,
+                                "fallback": None, "cleanup_ms": 0}
             return ""
         self._words = words or []
+        t0 = time.monotonic()
         try:
             if self.backend == "local":
                 out = self._local(candidates, context)
@@ -256,12 +300,58 @@ class Cleaner:
                 out = self._claude(candidates, context)
             elif self.backend == "ollama":
                 out = self._ollama(candidates, context)
+            elif self.backend == "gemini":
+                out = self._gemini(candidates, context)
             else:
                 out = None
-        except Exception as e:  # never lose a dictation to a network hiccup
-            print(f"[cleanup] {self.backend} failed ({e.__class__.__name__}: {e}); using basic cleanup")
+        except Exception as e:  # never lose a dictation to a network hiccup; the exception
+            # text can carry endpoints, so log the type only (never credentials)
+            print(f"[cleanup] {self.backend} failed ({e.__class__.__name__}); falling back")
             out = None
-        return vocab.apply_case((out or basic_cleanup(candidates[0])).strip(), words)
+        used, failed = self.backend, None
+        if out is None and self.backend == "gemini":
+            failed = self.backend
+            out = self._local_fallback(candidates, context)
+            used = "local" if out is not None else "basic"
+        elif out is None and self.backend != "basic":
+            failed, used = self.backend, "basic"
+        text = vocab.apply_case((out or basic_cleanup(candidates[0])).strip(), words)
+        self.last_result = {"backend": used, "style": self.style, "fallback": failed,
+                            "cleanup_ms": int((time.monotonic() - t0) * 1000)}
+        return text
+
+    def _gemini(self, candidates: list[str], context: str) -> "str | None":
+        from . import cloud
+        if not self._cpa_key:
+            print("[cleanup] gemini backend has no CPA API key (CPA_API_KEY env or DSH credentials); "
+                  "falling back")
+            return None
+        return cloud.cleanup(candidates, context, self._words, self._similar,
+                             base_url=self._cpa_base_url, model=self.model,
+                             api_key=self._cpa_key, timeout=self._cleanup_timeout,
+                             style=self.style)
+
+    def _local_fallback(self, candidates: list[str], context: str) -> "str | None":
+        """Lazy, synchronous on-device fallback for when the cloud fails. Loads the small MLX
+        model only when first needed, on this same thread — no parallel worker threads."""
+        import importlib.util
+        if importlib.util.find_spec("mlx_lm") is None:
+            return None
+        keep = self.model
+        if self._mlx is None:  # self.model currently names the cloud model; load the local one
+            self.model = os.environ.get("LIPFLOW_LOCAL_MODEL", LOCAL_MODEL)
+        try:
+            if self._mlx is None:
+                # warmup() only loads when backend == "local"; here backend is still the
+                # cloud's, so load directly or _local would unpack a None self._mlx
+                from mlx_lm import load
+                self._mlx = load(self.model)
+            return self._local(candidates, context)
+        except Exception as e:
+            print(f"[cleanup] local fallback failed ({e.__class__.__name__}); using basic cleanup")
+            return None
+        finally:
+            self.model = keep
 
     def _claude(self, candidates: list[str], context: str) -> "str | None":
         resp = self._client.beta.messages.create(

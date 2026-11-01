@@ -4,7 +4,8 @@ Read once, locally, through the Accessibility API (on Windows, just the window t
 press the push-to-talk key (the app you're dictating into is frontmost at that moment). Only names
 and terms are pulled out, to help with the words lip reading gets wrong most often — who you're
 writing to, the thread you're in.
-Nothing is saved to disk or sent anywhere.
+The full field contents stay in memory. Extracted names may be supplied to the
+selected cleanup backend; explicit cloud cleanup sends those names as text, never video.
 """
 from __future__ import annotations
 
