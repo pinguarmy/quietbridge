@@ -29,8 +29,9 @@ a result established by passing software tests.
 
 ## The experience
 
-1. The opening story illustrates movement becoming words. Skip its animation or
-   choose Start communicating immediately; `/communicate` opens the tool directly.
+1. The opening story illustrates movement becoming words. Continue is immediately
+   usable and opens `/purpose`; Start communicating there opens `/communicate`.
+   Skip is available during the animation. `/communicate` still opens the tool directly.
 2. Gesture, or hold the button and mouth a short message. For combined input,
    hold first, then gesture and mouth the words.
 3. Review the proposed message. If inputs conflict, choose the intended meaning.
@@ -40,14 +41,33 @@ Keep input settings, supported vocabulary and diagnostics on the separate Settin
 page. Show readiness honestly. Do not automatically speak, hide uncertainty or
 complete an expected phrase from incomplete evidence.
 
-The opening illustration uses unmodified static ASL alphabet examples from Sign
-Language MNIST, not model predictions or a representation of full sign translation.
-Its hand tiles remain for four seconds before moving into readable words. The
+The concise opening uses one headline, a short explanation and the three labels
+Express, Review and Speak. Its illustration uses the user-supplied BSL alphabet
+chart, with per-letter crops drawn at display time from the unchanged original PNG.
+These are illustrations, not model predictions or full sign translation.
+Its hand tiles remain for four seconds before a staggered, horizontally hinged
+flip reveals letters and settles into readable words. The
 actual semantic copy and direct controls are available immediately. Reduced-motion,
-missing-data and JavaScript-free views show readable copy without waiting. J and Z
-have no image in this dataset; unsupported letters use a neutral marker rather than
-an invented handshape. The story does not start speech, record frames or make
-recognition requests. Source and CC0 metadata accompany the small local JSON asset.
+missing-data and JavaScript-free views show readable copy without waiting.
+Unsupported characters use a neutral marker rather than an invented handshape.
+The story does not start speech, record frames or make recognition requests.
+The original chart and display-time crop map are retained under `hackathon/ui/`.
+The ASL MNIST data remains a separate experiment and is not mixed with these BSL illustrations.
+A generated four-pose masculine mouth sprite decoratively moves beside the emerging example
+word, then rests closed; reduced motion keeps the closed pose throughout. It is not
+a live mouth feed, speech synthesis or evidence of recognition. The original PNG
+and its generation prompt are retained together under `hackathon/ui/assets/`.
+
+The purpose page uses the user's exact purpose/aim wording and two source-linked
+UK figures: the BDA's approximately 151,000 BSL-user estimate as reported by
+[RNID](https://rnid.org.uk/what-we-do/evidence-hub/prevalence-of-hearing-loss-tinnitus-and-bsl/),
+and [RCSLT's up-to-14-million lifetime communication-difficulty measure](https://www.rcslt.org/policy-and-influencing/uk-wide/).
+The first is not an exact daily-use count and varies by definition; the second is
+not a current count of non-speaking people. Shared navy colors, typography and
+control styles cover the intro, purpose, communication and settings pages. The
+communication and settings pages remain static and have no four-second delay.
+Neutral user-control footers avoid claiming a particular camera/inference location;
+this UI work does not implement the proposed home-desktop transport.
 
 ## A short pitch
 

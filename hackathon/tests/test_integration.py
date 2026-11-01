@@ -236,7 +236,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(err.exception.code, 404)
 
     def test_communication_and_settings_pages_are_served(self):
-        for path in ["/", "/communicate", "/settings"]:
+        for path in ["/", "/purpose", "/communicate", "/settings"]:
             with self.subTest(path=path), urlopen(self.url + path) as res:
                 self.assertIn("text/html", res.headers["Content-Type"])
                 self.assertIn(b"QuietBridge", res.read())
@@ -244,17 +244,34 @@ class ServerTests(unittest.TestCase):
     def test_story_is_separate_from_communication_and_serves_letter_data(self):
         with urlopen(self.url + "/") as res:
             page = res.read().decode()
-        self.assertIn('href="/communicate"', page)
+        self.assertIn('href="/purpose"', page)
         self.assertIn('src="/story.js"', page)
         self.assertNotIn('src="/app.js"', page)
         self.assertIn("More ways to", page)  # Readable fallback exists before JavaScript.
+        self.assertNotIn("Open tool", page)
+        self.assertIn('class="sr-only"', page)
+        with urlopen(self.url + "/purpose") as res:
+            purpose = res.read().decode()
+        self.assertIn("Our speech is much more than just noise, we aim to pick up all the subtleties of communication.", purpose)
+        self.assertIn("Our aim is to make speech accessible, through every medium of communication", purpose)
+        self.assertIn('href="/communicate"', purpose)
+        self.assertIn("over their lifetime", purpose)
+        self.assertIn("https://rnid.org.uk/", purpose)
+        self.assertIn("https://www.rcslt.org/", purpose)
         with urlopen(self.url + "/communicate") as res:
             self.assertIn(b'src="/app.js"', res.read())
         with urlopen(self.url + "/hand-letters.json") as res:
             data = json.load(res)
-        self.assertEqual((data["width"], data["height"]), (28, 28))
-        self.assertEqual(set(data["glyphs"]), set("ABCDEFGHIKLMNOPQRSTUVWXY"))
-        self.assertTrue(all(len(glyph["pixels"]) == 784 for glyph in data["glyphs"].values()))
+        self.assertEqual(data["kind"], "bsl-chart")
+        self.assertEqual(set(data["glyphs"]), set("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+        for glyph in data["glyphs"].values():
+            x, y, width, height = glyph["crop"]
+            self.assertTrue(0 <= x < x + width <= data["width"])
+            self.assertTrue(0 <= y < y + height <= data["height"])
+        for asset in ["/assets/lips-sprite-masculine.png", data["image"]]:
+            with urlopen(self.url + asset) as res:
+                self.assertEqual(res.headers["Content-Type"], "image/png")
+                self.assertEqual(res.read(8), b"\x89PNG\r\n\x1a\n")
 
 
 class WorkerTests(unittest.TestCase):

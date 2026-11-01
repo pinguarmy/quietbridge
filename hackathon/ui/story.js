@@ -5,10 +5,19 @@
   const status = document.getElementById('journey-status');
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
   const fields = [];
+  const samples = [];
   const animations = [];
   let finished = false, timer = null;
 
-  function finish() {
+  const mouth = document.getElementById('mouth-animation');
+  const sprite = mouth?.dataset?.sprite;
+  if (sprite) {
+    const image = new Image();
+    image.onload = () => { mouth.hidden = false; mouth.classList.add('has-mouth'); };
+    image.src = sprite;
+  }
+
+  function finish(focusCTA = false) {
     finished = true;
     clearTimeout(timer);
     animations.forEach(animation => animation.cancel());
@@ -16,26 +25,39 @@
     body.classList.add('is-complete');
     fields.forEach(({cloud}) => { cloud.hidden = true; });
     status.textContent = 'Your words. Your choice.';
-    skip.textContent = 'Animation skipped';
+    skip.hidden = true;
     skip.disabled = true;
+    if (focusCTA) document.querySelector?.('.hero-actions a')?.focus?.({preventScroll:true});
   }
-  skip.addEventListener('click', finish);
+  skip.addEventListener('click', () => finish(true));
   document.addEventListener('keydown', event => { if (event.key === 'Escape') finish(); });
   reduced.addEventListener('change', event => { if (event.matches) finish(); });
   if (reduced.matches) { finish(); return; }
 
-  function handCanvas(glyph, width, height) {
+  function loadImage(url) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image); image.onerror = reject; image.src = url;
+    });
+  }
+
+  function handCanvas(image, crop) {
     const canvas = document.createElement('canvas');
-    canvas.width = width; canvas.height = height;
+    canvas.width = 120; canvas.height = 120;
     const context = canvas.getContext('2d');
-    const pixels = context.createImageData(width, height);
-    for (let i = 0; i < glyph.pixels.length; i++) {
-      const value = glyph.pixels[i], offset = i * 4;
-      pixels.data[offset] = value; pixels.data[offset + 1] = value;
-      pixels.data[offset + 2] = value; pixels.data[offset + 3] = 255;
-    }
-    context.putImageData(pixels, 0, 0);
+    const [x,y,width,height] = crop, scale = Math.min(112 / width,112 / height);
+    context.drawImage(image,x,y,width,height,(120-width*scale)/2,(120-height*scale)/2,width*scale,height*scale);
     return canvas;
+  }
+
+  function addFaces(card, source, letter) {
+    const front = document.createElement('span'); front.className = 'flap-front';
+    if (source) {
+      const canvas = document.createElement('canvas'); canvas.width=120; canvas.height=120;
+      canvas.getContext('2d').drawImage(source,0,0); front.append(canvas);
+    } else { front.textContent = '·'; front.classList.add('unavailable'); }
+    const back = document.createElement('span'); back.className = 'flap-back'; back.textContent = letter;
+    card.append(front,back);
   }
 
   function prepareField(element, glyphs) {
@@ -48,7 +70,7 @@
     element.replaceChildren(words, cloud);
     const rect = element.getBoundingClientRect();
     const fontSize = parseFloat(getComputedStyle(element).fontSize);
-    const size = Math.max(12, Math.min(34, Math.round(fontSize * .53)));
+    const size = Math.max(24, Math.min(48, Math.round(fontSize * .65)));
     const gap = fontSize > 40 ? 5 : 2;
     const width = Math.max(rect.width, size);
     let x = 0, y = 0, index = 0;
@@ -59,19 +81,13 @@
       if (!/[A-Z]/.test(letter)) { x += size * .22; continue; }
       if (x + size > width) { x = 0; y += size + gap; }
       const tile = document.createElement('span');
-      tile.className = 'hand-tile';
+      tile.className = 'hand-tile flip-card';
       tile.style.setProperty('--tile-size', size + 'px');
+      tile.style.setProperty('--letter-size', Math.min(fontSize,size*.8) + 'px');
       tile.style.left = x + 'px'; tile.style.top = y + 'px';
       const source = glyphs[letter];
-      if (source) {
-        const canvas = document.createElement('canvas');
-        canvas.width = source.width; canvas.height = source.height;
-        canvas.getContext('2d').drawImage(source, 0, 0);
-        tile.append(canvas);
-      } else {
-        tile.classList.add('unavailable'); tile.textContent = '·';
-        tile.title = 'No static letter image is available for ' + letter;
-      }
+      addFaces(tile,source,character);
+      if (!source) tile.title = 'No letter image is available for ' + letter;
       const range = document.createRange();
       range.setStart(words.firstChild, i); range.setEnd(words.firstChild, i + 1);
       const target = range.getBoundingClientRect();
@@ -88,37 +104,47 @@
     body.classList.remove('is-illustrating'); body.classList.add('is-settling');
     fields.forEach(({tiles}) => tiles.forEach(({tile,x,y,targetX,targetY,delay}) => {
       animations.push(tile.animate([
-        {transform:'translate(0, 0) scale(1)',opacity:1},
-        {transform:'translate(' + (targetX-x) + 'px,' + (targetY-y) + 'px) scale(.5)',opacity:0}
-      ], {duration:700,delay,easing:'cubic-bezier(.2,.7,.2,1)',fill:'forwards'}));
+        {transform:'translate(0,0) rotateX(0deg)',opacity:1,offset:0},
+        {transform:'translate(' + ((targetX-x)*.65) + 'px,' + ((targetY-y)*.65) + 'px) rotateX(-90deg)',opacity:1,offset:.44},
+        {transform:'translate(' + (targetX-x) + 'px,' + (targetY-y) + 'px) rotateX(-180deg)',opacity:1,offset:.8},
+        {transform:'translate(' + (targetX-x) + 'px,' + (targetY-y) + 'px) rotateX(-180deg)',opacity:0,offset:1}
+      ], {duration:720,delay,easing:'cubic-bezier(.25,.5,.3,1)',fill:'forwards'}));
     }));
+    samples.forEach((card,index) => animations.push(card.animate([{transform:'rotateX(0deg)'},{transform:'rotateX(-180deg)'}],{duration:650,delay:index*90,easing:'cubic-bezier(.25,.5,.3,1)',fill:'forwards'})));
     timer = setTimeout(() => {
       finished = true; body.classList.remove('is-settling'); body.classList.add('is-complete');
       status.textContent = 'Your words. Your choice.';
-      skip.textContent = 'Animation complete'; skip.disabled = true;
+      skip.hidden = true; skip.disabled = true;
     }, 900);
   }
 
   async function begin() {
     try {
       const response = await fetch('/hand-letters.json');
-      if (!response.ok) return;
+      if (!response.ok) { finish(); return; }
       const data = await response.json();
       if (finished || reduced.matches) return;
-      if (data.width !== 28 || data.height !== 28 || !data.glyphs) return;
+      if (data.kind !== 'bsl-chart' || !data.glyphs || !data.image) { finish(); return; }
+      const chart = await loadImage(data.image);
+      if (finished || reduced.matches) return;
+      if (chart.naturalWidth !== data.width || chart.naturalHeight !== data.height) { finish(); return; }
       const glyphs = {};
       Object.entries(data.glyphs).forEach(([letter,glyph]) => {
-        if (glyph.pixels?.length === 784 && glyph.pixels.every(value => Number.isInteger(value) && value >= 0 && value <= 255))
-          glyphs[letter] = handCanvas(glyph, data.width, data.height);
+        const crop = glyph.crop;
+        if (Array.isArray(crop) && crop.length === 4 && crop.every(Number.isInteger) && crop[0] >= 0 && crop[1] >= 0 && crop[2] > 0 && crop[3] > 0 && crop[0]+crop[2] <= data.width && crop[1]+crop[3] <= data.height)
+          glyphs[letter] = handCanvas(chart,crop);
       });
+      if (!Object.keys(glyphs).length) { finish(); return; }
       document.querySelectorAll('[data-hand-text]').forEach(element => prepareField(element, glyphs));
       document.querySelectorAll('[data-sample]').forEach(element => {
         const source = glyphs[element.dataset.sample];
         if (!source) return;
-        const canvas = document.createElement('canvas'); canvas.width=28; canvas.height=28;
-        canvas.getContext('2d').drawImage(source,0,0); element.append(canvas); element.classList.add('has-sample');
+        const card = document.createElement('div'); card.className='sample-flipper flip-card';
+        addFaces(card,source,element.dataset.sample); element.replaceChildren(card);
+        element.classList.add('has-sample'); samples.push(card);
       });
       body.classList.add('is-illustrating');
+      skip.hidden = false;
       status.textContent = 'A brief fingerspelling illustration. Skip whenever you like.';
       timer = setTimeout(settle, 4000);
     } catch (_) { finish(); }
