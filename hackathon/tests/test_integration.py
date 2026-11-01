@@ -248,12 +248,14 @@ class ServerTests(unittest.TestCase):
         self.assertIn('href="/purpose"', page)
         self.assertIn('src="/story.js"', page)
         self.assertNotIn('src="/app.js"', page)
-        self.assertIn("More ways to", page)  # Readable fallback exists before JavaScript.
+        self.assertIn('class="wordmark-text">QuietBridge</span>', page)  # Readable fallback exists before JavaScript.
         self.assertNotIn("Open tool", page)
         self.assertNotIn("mouth-animation", page)
         self.assertNotIn("lips-sprite", page)
-        self.assertEqual(re.findall(r'data-sample="([A-Z])"', page), list("DEVDAY"))
-        self.assertIn('class="sr-only"', page)
+        self.assertNotIn("data-sample", page)
+        self.assertNotIn("skip-animation", page)
+        self.assertNotIn("hero-description", page)
+        self.assertIn('id="story-next"', page)
         with urlopen(self.url + "/purpose") as res:
             purpose = res.read().decode()
         self.assertIn("Communication is far more nuanced than just what you hear", purpose)

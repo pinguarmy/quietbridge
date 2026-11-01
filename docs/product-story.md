@@ -29,9 +29,11 @@ a result established by passing software tests.
 
 ## The experience
 
-1. The opening story illustrates movement becoming words. Continue is immediately
-   usable and opens `/purpose`; Start communicating there opens `/communicate`.
-   Skip is available during the animation. `/communicate` still opens the tool directly.
+1. The opening shows only QuietBridge: BSL letter illustrations hold for four
+   seconds, then flip into the word. Next appears after the animation and opens
+   `/purpose`; Start communicating there opens `/communicate`. Reduced motion,
+   failed assets or Escape reveal the word and Next immediately. `/communicate`
+   still opens the tool directly.
 2. Gesture, or hold the button and mouth a short message. For combined input,
    hold first, then gesture and mouth the words.
 3. Review the proposed message. If inputs conflict, choose the intended meaning.
@@ -41,19 +43,17 @@ Keep input settings, supported vocabulary and diagnostics on the separate Settin
 page. Show readiness honestly. Do not automatically speak, hide uncertainty or
 complete an expected phrase from incomplete evidence.
 
-The concise opening uses one headline, a short explanation and the three labels
-Express, Review and Speak. Its illustration uses the user-supplied BSL alphabet
-chart, with per-letter crops drawn at display time from the unchanged original PNG.
+The opening illustrates the letters of QuietBridge using the user-supplied BSL
+alphabet chart, with crops drawn at display time from the unchanged original PNG.
 These are illustrations, not model predictions or full sign translation.
 Its hand tiles remain for four seconds before a staggered, horizontally hinged
-flip reveals letters and settles into readable words. The
-actual semantic copy and direct controls are available immediately. Reduced-motion,
-missing-data and JavaScript-free views show readable copy without waiting.
-Unsupported characters use a neutral marker rather than an invented handshape.
+flip reveals the word. The semantic heading is available throughout. Next is
+hidden and not focusable during the animation; reduced-motion, failed-data and
+JavaScript-free views show readable content and Next without the animation.
+A bounded loading timeout prevents stalled assets from blocking navigation.
 The story does not start speech, record frames or make recognition requests.
 The original chart and display-time crop map are retained under `hackathon/ui/`.
 The ASL MNIST data remains a separate experiment and is not mixed with these BSL illustrations.
-Six linked cards illustrate DEV above DAY, then flip into the corresponding letters.
 The opening does not load or display a mouth sprite. Earlier generated mouth assets
 and prompts are retained as provenance only, separate from the active introduction.
 
@@ -106,9 +106,9 @@ reliable supported gestures, usable lip output, visible conflict handling, local
 speech, Wi-Fi off and three consecutive successful runs. Optional LLM suggestions
 come later; they are not proof of intended meaning.
 
-The purpose diagram is a qualitative network of communication cues, not a pie
-chart, percentage breakdown or claim that this prototype recognizes every cue.
-Its voice/tone, mouth, face, gesture, body and context labels draw on
+The purpose page lists communication cues without a percentage breakdown or a
+claim that this prototype recognizes every cue. Its voice/tone, mouth, face,
+gesture, body and context labels draw on
 [NIDCD](https://www.nidcd.nih.gov/about/nidcd-director-message/cloth-face-coverings-and-distancing-pose-communication-challenges-many),
 [RNID](https://rnid.org.uk/information-and-support/hearing-loss/lipreading/), and
 [University of Surrey's BSL non-manual features](https://bsl.surrey.ac.uk/principles/f-non-manual-features).
