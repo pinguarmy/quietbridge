@@ -8,7 +8,7 @@
 <main class="communication-page">
   <header><a class="brand" href="/"><span class="brand-symbol" aria-hidden="true">◖◗</span><span>QuietBridge</span></a><a class="settings-link" href="/settings">Settings</a></header>
   <div id="rehearsal-banner" class="banner" hidden>Preview mode · Camera is off. <a href="/settings#preview">Try an example</a></div>
-  <section class="intro"><h1>What would you like to say?</h1><p id="entry-hint">Show a supported gesture, or hold the button to mouth a sentence.</p></section>
+  <section class="intro"><h1>What would you like to say?</h1><p id="entry-hint">Show a supported gesture, or hold the button to mouth a sentence.</p><p id="result-timing" class="hint"></p></section>
   <div class="workspace demo-workspace">
     <div class="demo-views">
       <section class="camera-panel demo-pane" aria-label="Hands camera">
@@ -30,13 +30,11 @@
     <div id="alternatives" class="alternatives" role="group" aria-label="Choose the message you intended"></div>
     <div class="demo-actions"><div class="record-controls"><button id="record" class="record" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">Hold to mouth words</span></button><button id="cancel" class="text-button" hidden>Cancel</button></div><button id="speak" class="speak" disabled><span id="speak-label">Speak message</span></button></div>
     <p id="error" class="error" role="alert"></p>
-    <p id="record-hint" class="hint">Or hold Space, then release when you finish.</p>
-    <p id="gesture-feedback" class="gesture-feedback"><span id="gesture-label" role="status" aria-live="polite">Getting gesture input ready…</span><span id="gesture-metrics"></span></p>
-    <p id="result-timing" class="hint"></p><p id="last-spoken" class="last-spoken"></p>
-    <p class="mode-caption"><span id="mode-caption">Lips and gestures</span> · <a href="/settings">Change</a></p>
+    <p id="record-hint" class="sr-only">Or hold Space, then release when you finish.</p>
+
   </section>
 
-  <footer><span>You choose what to say, and when to speak.</span><a href="/guide">How to use QuietBridge</a><a href="/settings#gestures">Supported gestures</a></footer>
+  <footer class="demo-footer"><a href="/guide">How to use QuietBridge</a></footer>
 </main>
 <script src="/app.js"></script>
 </body></html>

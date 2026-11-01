@@ -302,7 +302,7 @@ class ServerTests(unittest.TestCase):
             self.assertIn(b'src="/app.js"', communication)
             self.assertIn(b'href="/guide"', communication)
             self.assertNotIn(b'<video', communication)
-            self.assertIn(b'id="gesture-label"', communication)
+            self.assertNotIn(b'id="gesture-label"', communication)
             self.assertIn("img-src 'self' blob:", res.headers["Content-Security-Policy"])
             self.assertIn("media-src 'self' blob:", res.headers["Content-Security-Policy"])
         with urlopen(self.url + "/video-guide.js") as res:
