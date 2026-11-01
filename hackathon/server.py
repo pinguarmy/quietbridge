@@ -46,6 +46,8 @@ def make_server(runtime, port=8765):
             try:
                 if path == "/api/state":
                     self._json(200, {**runtime.snapshot(), "token": token})
+                elif path == "/api/tracking":
+                    self._json(200, runtime.tracking_snapshot())
                 elif path == "/api/frame":
                     with runtime.lock:
                         jpeg = runtime.jpeg
@@ -53,6 +55,12 @@ def make_server(runtime, port=8765):
                         self._send(200, jpeg, "image/jpeg")
                     else:
                         self._json(503, {"error": "No camera frame yet"})
+                elif path == "/record":
+                    self.send_response(302)
+                    self.send_header("Location", "http://127.0.0.1:8766")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
                 elif path in {"/", "/index.html", "/settings", "/settings.html", "/app.js", "/style.css"}:
                     filename = {"/": "index.html", "/settings": "settings.html"}.get(path, path[1:])
                     mime = {"index.html": "text/html", "settings.html": "text/html", "app.js": "text/javascript", "style.css": "text/css"}[filename]
@@ -69,6 +77,9 @@ def make_server(runtime, port=8765):
             if (origin and origin not in {f"http://127.0.0.1:{self.server.server_port}",
                                          f"http://localhost:{self.server.server_port}"}) or self.headers.get("X-Lipflow-Token") != token:
                 self._json(403, {"error": "Reload the local demo page"})
+                return
+            if self.path == "/api/frame":
+                self._handle_frame()
                 return
             if not self.path.startswith("/api/action/"):
                 self._json(404, {"error": "Not found"})
@@ -87,6 +98,37 @@ def make_server(runtime, port=8765):
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
+        def _handle_frame(self):
+            if not runtime.browser_camera or runtime.rehearsal:
+                self.close_connection = True
+                self._json(400, {"error": "Browser camera input is not enabled"})
+                return
+            if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "image/jpeg":
+                self.close_connection = True
+                self._json(415, {"error": "Content-Type must be image/jpeg"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = 0
+            if length > 512 * 1024:
+                self.close_connection = True
+                self._json(413, {"error": "Frame exceeds 512 KiB"})
+                return
+            if length <= 0:
+                self.close_connection = True
+                self._json(400, {"error": "A JPEG frame is required"})
+                return
+            body = self.rfile.read(length)
+            import cv2
+            import numpy as np
+            frame = cv2.imdecode(np.frombuffer(body, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if frame is None:
+                self._json(400, {"error": "Body is not a decodable JPEG"})
+                return
+            runtime.receive_frame(frame)
+            self._json(200, {"ok": True})
+
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.daemon_threads = True
     return server
@@ -94,19 +136,24 @@ def make_server(runtime, port=8765):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--rehearsal", action="store_true", help="Synthetic inputs only; no camera or model loading")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--rehearsal", action="store_true", help="Synthetic inputs only; no camera or model loading")
+    source.add_argument("--browser-camera", action="store_true", help="Receive camera frames from the browser")
     parser.add_argument("--sign-only", action="store_true", help="Do not load the lip model")
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--vocabulary", type=Path, help="JSON label-to-phrase mapping, default hackathon/vocabulary.json")
     args = parser.parse_args()
     from .fusion import load_vocabulary
-    runtime = Runtime(rehearsal=args.rehearsal, camera=args.camera, enable_lips=not args.sign_only,
+    runtime = Runtime(rehearsal=args.rehearsal, browser_camera=args.browser_camera,
+                      camera=args.camera, enable_lips=not args.sign_only,
                       vocabulary=load_vocabulary(args.vocabulary) if args.vocabulary else None)
     server = make_server(runtime, args.port)
     runtime.start()
     print(f"QuietBridge: http://127.0.0.1:{server.server_port}", flush=True)
     print("REHEARSAL — synthetic inputs, no recognition" if args.rehearsal else
+          "BROWSER CAMERA — allow camera access in the browser. Wait for warmup before recording."
+          if args.browser_camera else
           "LOCAL — no cloud inference. Wait for warmup before recording.", flush=True)
     try:
         server.serve_forever(poll_interval=0.2)

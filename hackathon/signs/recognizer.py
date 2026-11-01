@@ -113,6 +113,7 @@ class SignRecognizer:
         )
         self._backend = vision.GestureRecognizer.create_from_options(options)
         self._last_timestamp_ms: Optional[int] = None
+        self.last_tracking = []
 
     def process(self, frame_bgr, timestamp_ms: int) -> list[SignEvent]:
         """Classify one frame and return newly confirmed events (usually ``[]``).
@@ -141,6 +142,20 @@ class SignRecognizer:
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         result = self._backend.recognize_for_video(image, timestamp_ms)
+        self.last_tracking = []
+        hand_landmarks = getattr(result, "hand_landmarks", None) or []
+        gestures = getattr(result, "gestures", None) or []
+        handedness = getattr(result, "handedness", None) or []
+        for index, landmarks in enumerate(hand_landmarks):
+            hand_gestures = gestures[index] if index < len(gestures) else []
+            top = hand_gestures[0] if hand_gestures else None
+            categories = handedness[index] if index < len(handedness) else []
+            self.last_tracking.append({
+                "handedness": categories[0].category_name if categories else "",
+                "landmarks": [[float(p.x), float(p.y), float(p.z)] for p in landmarks],
+                "label": LABEL_MAP.get(top.category_name) if top else None,
+                "score": float(top.score) if top else 0.0,
+            })
 
         label, score = self._pick_personal_label(result) if self._personal is not None else self._pick_label(result)
         return list(self._stabilizer.update(label, score, timestamp_ms))

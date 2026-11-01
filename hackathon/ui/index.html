@@ -6,19 +6,21 @@
 </head>
 <body>
 <main class="communication-page">
-  <header><a class="wordmark" href="/">QuietBridge<span aria-hidden="true">◖◗</span></a><a class="settings-link" href="/settings">Settings</a></header>
+  <header><a class="wordmark" href="/">QuietBridge<span aria-hidden="true">◖◗</span></a><nav class="header-links"><a class="settings-link" href="/settings">Settings</a><a class="settings-link" href="/record">Recording lab</a></nav></header>
   <div id="rehearsal-banner" class="banner" hidden>Preview mode · Camera is off. <a href="/settings#preview">Try an example</a></div>
   <section class="intro"><h1>What would you like to say?</h1><p id="entry-hint">Show a supported gesture, or hold the button to mouth a sentence.</p></section>
   <div class="workspace">
     <section class="camera-panel" aria-label="Camera and recording">
-      <div class="preview"><img id="camera" alt="Your live camera preview" hidden><div id="camera-placeholder"><span class="viewfinder" aria-hidden="true">⌜ &nbsp; ⌝<br>⌞ &nbsp; ⌟</span><p id="camera-message">Getting your camera ready…</p></div><span id="preview-status" class="preview-label">Getting ready</span></div>
-      <div class="record-controls"><button id="record" class="record" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">Hold to mouth words</span></button><button id="cancel" class="text-button" hidden>Cancel</button></div>
+      <div class="preview-pair"><div class="preview-card"><div class="preview-title">Hands · full view</div><div class="preview"><img id="camera" alt="Your live camera preview" hidden><video id="browser-camera" autoplay playsinline muted aria-hidden="true"></video><canvas id="hands-overlay" width="640" height="480"></canvas><div id="camera-placeholder"><span class="viewfinder" aria-hidden="true">⌜ &nbsp; ⌝<br>⌞ &nbsp; ⌟</span><p id="camera-message">Getting your camera ready…</p></div><span id="preview-status" class="preview-label">Getting ready</span><span id="hands-status" class="preview-label secondary">Waiting for tracking</span></div></div></div>
+      <div class="record-controls"><button id="browser-camera-button" class="text-button" hidden>Start camera</button><button id="record" class="record" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">Hold to mouth words</span></button><button id="cancel" class="text-button" hidden>Cancel</button></div>
       <p id="record-hint" class="hint">Or hold Space, then release when you finish.</p>
       <p class="mode-caption"><span id="mode-caption">Lips and gestures</span> · <a href="/settings">Change</a></p>
     </section>
     <section class="message-panel" aria-label="Your message">
       <div class="message-heading"><h2>Your message</h2><span id="decision-status" class="status">Waiting</span></div>
-      <p id="message" class="message empty" aria-live="polite">Your words will appear here.</p>
+      <div class="preview-card message-mouth-card"><div class="preview-title">Lips · zoom</div><div class="mouth-view"><canvas id="mouth-overlay" width="320" height="200"></canvas><span id="mouth-status">Face not detected</span></div></div>
+       <p id="draft-label" class="draft-label" hidden>Live draft · not confirmed</p>
+       <p id="message" class="message empty" aria-live="polite">Your words will appear here.</p>
       <p id="reason" class="reason">Check your message before speaking.</p>
       <div id="alternatives" class="alternatives" role="group" aria-label="Choose the message you intended"></div>
       <button id="speak" class="speak" disabled><span id="speak-label">Speak message</span></button>

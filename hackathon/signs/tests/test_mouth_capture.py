@@ -24,6 +24,10 @@ class FakeObs:
     def outer_lips(self):
         return self.pts
 
+    @property
+    def inner_lips(self):
+        return self.pts * np.array([0.8, 0.8])
+
 
 class FakeTracker:
     def __init__(self):
@@ -110,6 +114,9 @@ def test_mouth_box_normalized(cap):
     box = cap.feed(frame(), 0)
     assert box == [0.2, 0.3, 0.2, 0.3]  # x0/200, y0/100, 40/200, 30/100
     assert cap.snapshot()["mouth_box"] == box
+    assert len(cap.snapshot()["outer_lips"]) == 20
+    assert len(cap.snapshot()["inner_lips"]) == 20
+    np.testing.assert_allclose(cap.snapshot()["outer_lips"][0], [.2, .3])
 
 
 def test_inactive_feed_does_not_detect(cap):

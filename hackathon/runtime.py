@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 from collections import deque
+import copy
 from dataclasses import asdict
 import importlib
 import queue
 import threading
 import time
 
+from .cleanup import CleanupClient
 from .contracts import Decision, LipResult, SignEvent
 from .fusion import fuse, load_vocabulary, usable_signs
 from .speech import Speaker
@@ -32,8 +34,11 @@ def put_latest(q, value):
 
 
 class Runtime:
-    def __init__(self, *, rehearsal=False, camera=0, enable_lips=True, vocabulary=None):
+    def __init__(self, *, rehearsal=False, browser_camera=False, camera=0, enable_lips=True, vocabulary=None):
+        if rehearsal and browser_camera:
+            raise ValueError("Browser camera and rehearsal modes are mutually exclusive")
         self.rehearsal = rehearsal
+        self.browser_camera = browser_camera
         self.camera_source = camera
         self.enable_lips = enable_lips
         self.vocabulary = load_vocabulary() if vocabulary is None else vocabulary
@@ -46,6 +51,8 @@ class Runtime:
         self.events = deque(maxlen=100)
         self.seen = deque(maxlen=200)
         self.jpeg = None
+        self._last_frame_timestamp_ms = None
+        self.tracking = {"hands": [], "mouth": None}
         self.speaker = Speaker()
         self.threads = []
         self.record_start = None
@@ -53,33 +60,41 @@ class Runtime:
         self.finish_at = None
         self.revision = 0
         self.confirmed_revision = None
+        self._cleanup_generation = 0
+        self.cleanup = CleanupClient()
         self.state = {
             "mode": "combined" if enable_lips else "signs", "phase": "idle",
-            "camera": "rehearsal" if rehearsal else "starting",
+            "camera": "rehearsal" if rehearsal else ("waiting" if browser_camera else "starting"),
             "lips": "rehearsal" if rehearsal else ("warming" if enable_lips else "disabled"),
             "signs": "rehearsal" if rehearsal else "loading",
             "camera_error": "", "lip_error": "", "sign_error": "", "error": "",
             "decision": asdict(Decision("", "unavailable", "sign_only", "local")),
             "candidates": [], "alternatives": [], "last_sign": None,
             "metrics": {}, "last_spoken": "", "recording": False,
+            "cleanup": {"status": "disabled", "suggestion": "", "latency_ms": 0,
+                        "error": "", "source_revision": 0},
         }
 
     def start(self):
         if self.rehearsal:
             return
-        for name, target in [("capture", self._capture), ("hands", self._hands),
-                             *([("lips", self._lips)] if self.enable_lips else [])]:
+        workers = [] if self.browser_camera else [("capture", self._capture)]
+        workers += [("hands", self._hands), *([("lips", self._lips)] if self.enable_lips else [])]
+        for name, target in workers:
             thread = threading.Thread(target=target, name=f"demo-{name}", daemon=True)
             self.threads.append(thread)
             thread.start()
 
     def snapshot(self):
-        import copy
         with self.lock:
             return copy.deepcopy({**self.state, "revision": self.revision,
                                   "confirmed": self.confirmed_revision == self.revision,
-                                  "rehearsal": self.rehearsal, "speech_available": self.speaker.available,
-                                  "vocabulary": self.vocabulary})
+                                  "rehearsal": self.rehearsal, "browser_camera": self.browser_camera,
+                                  "speech_available": self.speaker.available, "vocabulary": self.vocabulary})
+
+    def tracking_snapshot(self):
+        with self.lock:
+            return copy.deepcopy(self.tracking)
 
     def _publish(self, lips, events, now, since=None):
         start = time.perf_counter()
@@ -186,6 +201,25 @@ class Runtime:
         if data.get("revision") != self.revision:
             raise ValueError("The result changed; review the current text first")
 
+    def receive_frame(self, frame_bgr, timestamp_ms=None):
+        """Ingest one browser frame; return False for a repeated timestamp."""
+        import cv2
+
+        with self.lock:
+            now = clock_ms() if timestamp_ms is None else timestamp_ms
+            if self._last_frame_timestamp_ms is not None and now <= self._last_frame_timestamp_ms:
+                return False
+            self._last_frame_timestamp_ms = now
+            # Frames are read-only for consumers; preview processing uses a new array.
+            put_latest(self.hand_frames, (frame_bgr, now))
+            put_latest(self.lip_frames, (frame_bgr, now))
+            ok, encoded = cv2.imencode(".jpg", cv2.flip(frame_bgr, 1),
+                                       [cv2.IMWRITE_JPEG_QUALITY, 75])
+            if ok:
+                self.jpeg = encoded.tobytes()
+            self.state["camera"] = "ready"
+            return True
+
     def _capture(self):
         cap = None
         try:
@@ -246,11 +280,17 @@ class Runtime:
                 last = ts
                 started = time.perf_counter()
                 events = recognizer.process(frame, ts)
+                with self.lock:
+                    if hasattr(recognizer, "last_tracking"):
+                        self.tracking["hands"] = recognizer.last_tracking
+                        self.tracking["hands_timestamp_ms"] = ts
                 self.receive_signs(events)
                 with self.lock:
                     self.state["metrics"]["hand_process_ms"] = round((time.perf_counter() - started) * 1000, 2)
         except Exception as exc:
             with self.lock:
+                self.tracking["hands"] = []
+                self.tracking.pop("hands_timestamp_ms", None)
                 self.state.update(signs="unavailable", sign_error=str(exc))
         finally:
             if recognizer is not None:
@@ -264,6 +304,7 @@ class Runtime:
             with self.lock:
                 self.state["lips"] = "ready"
             active_start = None
+            last_processed_ts = None
             while not self.stop.is_set():
                 packet = None
                 try:
@@ -278,11 +319,18 @@ class Runtime:
                 if phase == "idle":
                     adapter.recording = None
                     active_start = None
-                    continue
+                if packet and packet[1] != last_processed_ts:
+                    in_capture = (active_start is not None and packet[1] >= active_start
+                                  and (end is None or packet[1] <= end))
+                    if active_start is None or in_capture:
+                        adapter.process(*packet)
+                        last_processed_ts = packet[1]
+                        with self.lock:
+                            if hasattr(adapter, "last_tracking"):
+                                self.tracking["mouth"] = adapter.last_tracking
+                                self.tracking["mouth_timestamp_ms"] = packet[1]
                 if active_start is None:
                     continue
-                if packet and packet[1] >= active_start and (end is None or packet[1] <= end):
-                    adapter.process(*packet)
                 now = clock_ms()
                 with self.lock:
                     if self.record_start != active_start:
@@ -318,6 +366,8 @@ class Runtime:
                     active_start = None
         except Exception as exc:
             with self.lock:
+                self.tracking["mouth"] = None
+                self.tracking.pop("mouth_timestamp_ms", None)
                 self.state.update(lips="unavailable", lip_error=str(exc), phase="idle", recording=False)
         finally:
             if adapter is not None:

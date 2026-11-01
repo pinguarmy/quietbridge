@@ -3,6 +3,61 @@ const text = (id, value) => { const el = $(id), next = String(value ?? ''); if (
 const hide = (id, value) => { if ($(id)) $(id).hidden = value; };
 let state = null, token = '', actionChain = Promise.resolve(), pointerHeld = false, keyHeld = false;
 let speaking = false, pendingActions = 0, renderedRevision = null, initialized = false, chosenText = null, connectionLost = false;
+let browserCameraStream = null, browserCameraStarting = false, browserFrameTimer = null, browserFrameCanvas = document.createElement('canvas');
+browserFrameCanvas.width = 960; browserFrameCanvas.height = 720;
+async function uploadBrowserFrames() {
+  if (!browserCameraStream || !state?.browser_camera || state.rehearsal) return;
+  try {
+    const video = $('browser-camera');
+    if (video?.videoWidth) {
+      browserFrameCanvas.getContext('2d').drawImage(video, 0, 0, 960, 720);
+      const blob = await new Promise(resolve => browserFrameCanvas.toBlob(resolve, 'image/jpeg', .7));
+      if (blob && browserCameraStream && state?.browser_camera && !state.rehearsal) {
+        const response = await fetch('/api/frame', {method:'POST', headers:{'Content-Type':'image/jpeg', 'X-Lipflow-Token':token}, body:blob});
+        if (response.status === 401 || response.status === 403) {
+          const fresh = await fetch('/api/state');
+          if (fresh.ok) {
+            const next = await fresh.json();
+            if (next.token) { token = next.token; render(next); }
+            else text('error', 'Browser camera upload was rejected and no fresh token was provided. Refresh QuietBridge.');
+          } else text('error', 'Browser camera upload was rejected. Refresh QuietBridge before trying again.');
+        } else if (!response.ok) text('error', `Browser camera upload failed (${response.status}).`);
+      }
+    }
+  } catch (_) { /* Keep the camera active; the status endpoint reports server-side errors. */ }
+  if (browserCameraStream) browserFrameTimer = setTimeout(uploadBrowserFrames, 66);
+}
+async function startBrowserCamera() {
+  if (browserCameraStarting || browserCameraStream) return;
+  browserCameraStarting = true;
+  const button = $('browser-camera-button');
+  if (button) { button.disabled = true; button.textContent = 'Starting camera…'; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({audio:false, video:{width:{ideal:960}, height:{ideal:720}}});
+    if (!state?.browser_camera || state.rehearsal) { stream.getTracks().forEach(track => track.stop()); return; }
+    browserCameraStream = stream;
+    $('browser-camera').srcObject = stream;
+    browserCameraStream.getVideoTracks()[0]?.addEventListener('ended', stopBrowserCamera, {once:true});
+    text('error', ''); uploadBrowserFrames();
+  } catch (e) {
+    text('error', e.name === 'NotAllowedError' ? 'Camera access was blocked. Allow camera access for this site in your browser, then try again.' : e.name === 'NotFoundError' ? 'No camera was found. Connect a camera and try again.' : `Could not start the browser camera: ${e.message || 'check browser camera permissions and try again.'}`);
+  } finally {
+    browserCameraStarting = false;
+    if (button) { button.disabled = false; button.textContent = browserCameraStream ? 'Stop camera' : 'Start camera'; }
+  }
+}
+function stopBrowserCamera() {
+  if (browserFrameTimer) clearTimeout(browserFrameTimer);
+  browserFrameTimer = null;
+  if (browserCameraStream) browserCameraStream.getTracks().forEach(track => track.stop());
+  browserCameraStream = null;
+  const video = $('browser-camera'); if (video) video.srcObject = null;
+  const button = $('browser-camera-button'); if (button) button.textContent = 'Start camera';
+}
+
+const handsCanvas = $('hands-overlay'), handsDraw = handsCanvas?.getContext('2d'), mouthCanvas = $('mouth-overlay'), mouthDraw = mouthCanvas?.getContext('2d');
+const handEdges = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+let latestTracking = null, trackingAt = 0, crop = null;
 
 function requestAction(name, data = {}) {
   pendingActions++;
@@ -32,8 +87,16 @@ function render(s) {
     b.setAttribute('aria-pressed', String(b.dataset.mode === s.mode)); b.disabled = s.phase !== 'idle';
   });
   const ready = s.camera === 'ready';
-  text('preview-status', s.rehearsal ? 'Preview · camera off' : ready ? 'Camera on' : s.camera === 'unavailable' ? 'Camera unavailable' : 'Getting ready…');
-  text('camera-message', s.rehearsal ? 'Your camera is off in preview.' : s.camera === 'unavailable' ? 'Check camera access in Settings.' : 'Getting your camera ready…');
+  const browserCameraAvailable = s.browser_camera === true && !s.rehearsal;
+  if (!browserCameraAvailable && browserCameraStream) stopBrowserCamera();
+  const browserCameraButton = $('browser-camera-button');
+  if (browserCameraButton) {
+    browserCameraButton.hidden = !browserCameraAvailable;
+    browserCameraButton.textContent = browserCameraStarting ? 'Starting camera…' : browserCameraStream ? 'Stop camera' : 'Start camera';
+    browserCameraButton.disabled = browserCameraStarting;
+  }
+  text('preview-status', s.rehearsal ? 'Preview · camera off' : ready || browserCameraStream ? 'Camera on' : browserCameraAvailable ? 'Waiting for browser camera' : s.camera === 'unavailable' ? 'Camera unavailable' : 'Getting ready…');
+  text('camera-message', s.rehearsal ? 'Your camera is off in preview.' : browserCameraAvailable && !browserCameraStream ? 'Select Start camera to share this browser camera.' : s.camera === 'unavailable' ? 'Check camera access in Settings.' : 'Getting your camera ready…');
   const record = $('record');
   if (record) {
     hide('record', s.mode === 'signs');
@@ -71,7 +134,7 @@ function render(s) {
   if (!review) { chosenText = d.text || null; if ($('alternatives')) $('alternatives').replaceChildren(); }
   updateMessage();
   text('last-spoken', s.last_spoken ? 'Last spoken: ' + s.last_spoken : '');
-  text('result-timing', !s.rehearsal && s.metrics.release_to_text_ms !== undefined ? 'Message ready in ' + (s.metrics.release_to_text_ms / 1000).toFixed(1) + ' s' : '');
+  text('result-timing', !s.rehearsal && s.metrics?.release_to_text_ms !== undefined ? 'Release → text · ' + (s.metrics.release_to_text_ms / 1000).toFixed(1) + ' s' : '');
   [['metric-release','release_to_text_ms'],['metric-decode','decode_ms'],['metric-fusion','fusion_ms']].forEach(([id,key]) => text(id, s.metrics[key] === undefined ? '—' : s.metrics[key] + ' ms'));
   if (!initialized && $('labels')) {
     const entries = Object.entries(s.vocabulary), enabled = entries.filter(([,v]) => v.enabled ?? v.verified);
@@ -89,14 +152,24 @@ function render(s) {
 function updateMessage() {
   if (!state || !$('message')) return;
   const d = state.decision, review = d.status === 'confirmation_needed';
-  text('message', chosenText || (review ? 'Which message did you mean?' : 'Your words will appear here.'));
-  $('message').classList.toggle('empty', !chosenText);
-  text('decision-status', review ? 'Check your message' : d.status === 'accepted' ? 'Ready to speak' : ({idle:'Waiting', recording:'Listening', tail:'Finishing', decoding:'Reading lips…'})[state.phase]);
+  const processing = ['tail', 'decoding'].includes(state.phase);
+  const draft = typeof state.draft_text === 'string' && state.draft_text.trim()
+    ? state.draft_text.trim()
+    : typeof state.greedy_preview === 'string' && state.greedy_preview.trim()
+      ? state.greedy_preview.trim() : '';
+  const displayText = processing ? (draft || 'Reading your words…') : chosenText || (review ? 'Which message did you mean?' : 'Your words will appear here.');
+  text('message', displayText);
+  $('message').classList.toggle('empty', !chosenText && !processing);
+  $('message').classList.toggle('processing', processing);
+  $('message').classList.toggle('draft', processing && Boolean(draft));
+  hide('draft-label', !(processing && Boolean(draft)));
+  if (processing && $('alternatives')) $('alternatives').replaceChildren();
+  text('decision-status', review ? 'Check your message' : d.status === 'accepted' ? 'Ready to speak' : state.phase === 'tail' ? 'Finishing' : state.phase === 'decoding' ? 'Reading lips…' : state.phase === 'recording' ? 'Listening' : state.lips === 'warming' ? 'Warming up' : 'Waiting');
   $('decision-status').classList.toggle('review', review);
   text('reason', !state.speech_available ? 'Speech is unavailable on this device. Check Settings.' : review && d.reason === 'conflict' ? 'The inputs differ. Choose the message you intended.' : review ? 'If these are your words, confirm and speak.' : d.status === 'accepted' ? 'Speak whenever you are ready.' : 'Nothing is spoken until you choose.');
   document.querySelectorAll('.alternative').forEach(b => {const selected = b.dataset.candidate === chosenText; b.classList.toggle('selected', selected); b.setAttribute('aria-pressed', String(selected)); b.disabled = speaking;});
   text('speak-label', review ? 'Confirm & speak' : 'Speak message');
-  $('speak').disabled = !chosenText || !state.speech_available || speaking || !['accepted','confirmation_needed'].includes(d.status);
+  $('speak').disabled = processing || !chosenText || !state.speech_available || speaking || !['accepted','confirmation_needed'].includes(d.status);
 }
 
 async function speakMessage() {
@@ -112,6 +185,45 @@ async function speakMessage() {
   } finally { speaking = false; updateMessage(); }
 }
 
+function clearTracking() {
+  latestTracking = null; crop = null;
+  handsDraw?.clearRect(0, 0, 640, 480); mouthDraw?.clearRect(0, 0, 320, 200);
+  text('hands-status', 'Waiting for tracking'); text('mouth-status', 'Face not detected');
+}
+function paintTracking() {
+  if (!handsDraw || !mouthDraw || !latestTracking || Date.now() - trackingAt > 1500) { clearTracking(); return; }
+  const hands = latestTracking.hands || [], mouth = latestTracking.mouth || {};
+  handsDraw.clearRect(0, 0, 640, 480);
+  for (const hand of hands) {
+    const points = hand.landmarks || [], color = hand.handedness === 'Left' ? '#4cdbab' : '#ffc071';
+    handsDraw.strokeStyle = color; handsDraw.fillStyle = color; handsDraw.lineWidth = 2.5;
+    for (const [a,b] of handEdges) if (points[a] && points[b]) { handsDraw.beginPath(); handsDraw.moveTo((1-points[a][0])*640, points[a][1]*480); handsDraw.lineTo((1-points[b][0])*640, points[b][1]*480); handsDraw.stroke(); }
+    points.forEach((p,i) => { handsDraw.beginPath(); handsDraw.arc((1-p[0])*640,p[1]*480, i===0?5:3,0,Math.PI*2); handsDraw.fill(); });
+    if(points.length){handsDraw.font='14px sans-serif';handsDraw.fillText(`${hand.label || hand.handedness || 'Hand'} · ${(hand.score||0).toFixed(2)}`,Math.max(5,(1-points[0][0])*640),Math.max(16,points[0][1]*480-10));}
+  }
+  text('hands-status', hands.length ? `Tracking ${hands.length} hand${hands.length===1?'':'s'}` : 'No hand detected');
+  const box = mouth.mouth_box, image = $('camera');
+  if (!box || box.length !== 4 || !image || image.hidden || !image.naturalWidth) { mouthDraw.clearRect(0,0,320,200); text('mouth-status','Face not detected'); crop=null; return; }
+  const [bx,by,bw,bh]=box, aspect=1.6*image.naturalHeight/image.naturalWidth;
+  const targetW=Math.min(1,Math.max(.18,bw*2.4)), targetH=Math.min(1,Math.max(targetW/aspect,bh*3.2));
+  if(!crop) crop={x:1-(bx+bw/2),y:by+bh/2,w:targetW,h:targetH};
+  const centerX=1-(bx+bw/2),centerY=by+bh/2;
+  crop.x += (centerX-crop.x)*.15; crop.y += (centerY-crop.y)*.15;
+  if(Math.abs(targetW-crop.w)/crop.w>.03) crop.w += (targetW-crop.w)*.08;
+  if(Math.abs(targetH-crop.h)/crop.h>.03) crop.h += (targetH-crop.h)*.08;
+  crop.w=Math.max(.18,Math.min(1,crop.w)); crop.h=Math.max(crop.w/aspect,Math.min(1,crop.h));
+  let left=Math.max(0,Math.min(1-crop.w,crop.x-crop.w/2)), top=Math.max(0,Math.min(1-crop.h,crop.y-crop.h/2));
+  mouthDraw.clearRect(0,0,320,200);
+  mouthDraw.drawImage(image,left*image.naturalWidth,top*image.naturalHeight,crop.w*image.naturalWidth,crop.h*image.naturalHeight,0,0,320,200);
+  const path=(points,close)=>{if(!Array.isArray(points)||points.length<2)return;mouthDraw.beginPath();points.forEach((p,i)=>{const x=((1-p[0])-left)/crop.w*320,y=(p[1]-top)/crop.h*200;i?mouthDraw.lineTo(x,y):mouthDraw.moveTo(x,y)});if(close)mouthDraw.closePath();mouthDraw.stroke();points.forEach(p=>{mouthDraw.beginPath();mouthDraw.arc(((1-p[0])-left)/crop.w*320,(p[1]-top)/crop.h*200,2.2,0,Math.PI*2);mouthDraw.fill()})};
+  mouthDraw.strokeStyle='#ff5c9a';mouthDraw.fillStyle='#ff8bb3';mouthDraw.lineWidth=2.4;path(mouth.outer_lips,true);mouthDraw.lineWidth=1.8;path(mouth.inner_lips,true);
+  text('mouth-status','Tracking lips · live landmarks');
+}
+async function trackingPoll() {
+  try { const r=await fetch('/api/tracking'); if(!r.ok) throw Error(); latestTracking=await r.json(); trackingAt=Date.now(); paintTracking(); }
+  catch (_) { if(Date.now()-trackingAt>1500) clearTracking(); }
+  setTimeout(trackingPoll,100);
+}
 async function poll() {
   try {
     const response = await fetch('/api/state'); if (!response.ok) throw new Error();
@@ -134,6 +246,14 @@ async function preview() {
   setTimeout(preview, 100);
 }
 document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => requestAction('mode', {mode:b.dataset.mode}));
+if ($('browser-camera-button')) $('browser-camera-button').onclick = async () => {
+  if (browserCameraStream) {
+    if (state?.phase !== 'idle') { keyHeld = pointerHeld = false; await requestAction('cancel'); }
+    stopBrowserCamera(); return;
+  }
+  if (state?.browser_camera === true && !state.rehearsal) await startBrowserCamera();
+};
+window.addEventListener('beforeunload', stopBrowserCamera);
 const recordButton = $('record');
 recordButton?.addEventListener('pointerdown', e => {if (recordButton.disabled || keyHeld) return; e.preventDefault(); pointerHeld = true; recordButton.setPointerCapture(e.pointerId); requestAction('start');});
 function releasePointer() {if (pointerHeld) {pointerHeld = false; requestAction('stop');}}
@@ -153,4 +273,4 @@ if ($('test-submit')) $('test-submit').onclick = async () => {
   if (!exampleText.trim() && !label) {text('error', 'Add example words or choose a gesture first.'); return;}
   if (await requestAction('rehearse', {text:exampleText, label})) window.location.assign('/');
 };
-poll(); preview();
+poll(); preview(); trackingPoll();

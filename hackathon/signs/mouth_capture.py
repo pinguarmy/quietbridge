@@ -36,6 +36,8 @@ class MouthCapture:
         self._recording = False
         self._limit = False
         self._mouth_box = None
+        self._outer_lips = []
+        self._inner_lips = []
         self._face = False
         self._preview = False
         self.error = None
@@ -102,6 +104,7 @@ class MouthCapture:
         active = self._recording and self._rec is not None
         if not active and not self._preview:
             self._mouth_box = None
+            self._outer_lips = self._inner_lips = []
             return None
         import cv2
         from lipflow.camera import face_crop
@@ -118,8 +121,12 @@ class MouthCapture:
                 rec.mouth_open.append(obs.mouth_open if obs else 0.0)
         self._face = obs is not None
         self._mouth_box = None
+        self._outer_lips = self._inner_lips = []
         if obs is not None:
             h, w = frame_bgr.shape[:2]
+            scale = np.array([w, h], dtype=np.float32)
+            self._outer_lips = (obs.outer_lips / scale).round(5).tolist()
+            self._inner_lips = (obs.inner_lips / scale).round(5).tolist()
             x0, y0 = obs.outer_lips.min(0)
             x1, y1 = obs.outer_lips.max(0)
             self._mouth_box = [round(float(x0 / w), 4), round(float(y0 / h), 4),
@@ -171,6 +178,7 @@ class MouthCapture:
     cancel = discard
 
     def _clear(self):
+        self._outer_lips = self._inner_lips = []
         self._mouth_box = None
         self._rec = self._meta = None
         self._recording = self._limit = False
@@ -182,6 +190,8 @@ class MouthCapture:
         return {"recording": bool(self._recording and rec is not None),
                 "frames": len(rec.ts) if rec is not None else 0,
                 "mouth_box": self._mouth_box,
+                "outer_lips": self._outer_lips,
+                "inner_lips": self._inner_lips,
                 "face": bool(self._face and (self._recording or self._preview)),
                 "preview": self._preview,
                 "quality": round(float(quality), 3),
