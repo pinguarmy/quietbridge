@@ -5,6 +5,8 @@ import os
 from types import SimpleNamespace
 
 import pytest
+
+pytest.importorskip("AppKit", reason="Native onboarding design checks require macOS AppKit")
 from AppKit import NSColor
 
 from lipflow import onboarding

@@ -53,9 +53,9 @@ def make_server(runtime, port=8765):
                         self._send(200, jpeg, "image/jpeg")
                     else:
                         self._json(503, {"error": "No camera frame yet"})
-                elif path in {"/", "/index.html", "/app.js", "/style.css"}:
-                    filename = "index.html" if path == "/" else path[1:]
-                    mime = {"index.html": "text/html", "app.js": "text/javascript", "style.css": "text/css"}[filename]
+                elif path in {"/", "/index.html", "/settings", "/settings.html", "/app.js", "/style.css"}:
+                    filename = {"/": "index.html", "/settings": "settings.html"}.get(path, path[1:])
+                    mime = {"index.html": "text/html", "settings.html": "text/html", "app.js": "text/javascript", "style.css": "text/css"}[filename]
                     self._send(200, (UI / filename).read_bytes(), mime + "; charset=utf-8")
                 else:
                     self._json(404, {"error": "Not found"})

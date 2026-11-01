@@ -15,7 +15,7 @@ python -m hackathon.server --rehearsal  # Python 3.11/3.12; synthetic input, no 
 Open <http://127.0.0.1:8765>. For live camera input, model setup and Peter's gesture integration, see the [local demo guide](hackathon/README.md).
 Rehearsal does not validate real recognition. Windows base-app setup is in the [original Lipflow guide](docs/lipflow-legacy.md). Existing development machines do not need to rerun setup.
 
-**Integration baseline:** the combined runtime, lip adapter, UI, confirmation flow and local speech are implemented. The integration handoff reports 20 passing lightweight tests and a browser rehearsal. Live lip accuracy and latency still need testing on the demo Mac. Peter's gesture recognizer is being integrated; the shared vocabulary contains unverified placeholders that live fusion ignores. Shared types live in [`hackathon/contracts.py`](hackathon/contracts.py).
+**Integration baseline:** the runtime, lip adapter, simple communication screen, separate Settings page, explicit confirmation and local speech are implemented. Peter's four-gesture recognizer is integrated; its four matching phrase mappings are enabled for confirmation-based use, with live verification still pending. Synthetic checks and browser rehearsal do not establish recognition accuracy. The published runtime is single-host; the proposed venue-camera/home-desktop split is not implemented yet. See the [progress audit](docs/progress-audit.md) and shared types in [`hackathon/contracts.py`](hackathon/contracts.py).
 
 ## Work in parallel
 

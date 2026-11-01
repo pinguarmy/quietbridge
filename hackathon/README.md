@@ -13,8 +13,10 @@ python -m hackathon.server --rehearsal
 ```
 
 Open <http://127.0.0.1:8765>. This mode uses explicitly synthetic text and sign events;
-it never opens the camera and does not claim vision accuracy or latency. Try matching
-and conflicting inputs, confirm one displayed alternative, and press Speak. Native
+it never opens the camera and does not claim vision accuracy or latency. Open
+**Settings → Try an example** to preview matching or conflicting inputs. The app
+returns to the communication screen. Choose an alternative when the inputs conflict,
+then explicitly press **Confirm & speak**. Native
 speech uses the installed macOS `say` voice; it requires no cloud service. No message
 is spoken automatically. The visible lip sentence always needs confirmation because
 the current engine does not supply a calibrated confidence score.
@@ -30,6 +32,7 @@ Use the existing Python environment if already installed. For a fresh checkout:
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -e .
 .venv/bin/python -m hackathon.assets --download
+.venv/bin/python -m hackathon.signs.assets --download
 .venv/bin/python -m hackathon.server
 ```
 
@@ -44,7 +47,9 @@ Camera access for the terminal/Python process if macOS asks. Close the original
 Lipflow app or other camera apps before testing. Python owns the only camera; the
 browser receives local JPEG previews and does not request its own camera access.
 
-Select Gestures, Lips or Both together. Hold the record button or Space on the page
+Choose inputs on the separate **Settings** page; the main screen opens with lips
+and gestures enabled. Diagnostics, vocabulary and rehearsal controls stay in Settings.
+Hold the record button or Space on the communication page
 for a 2–4 second sentence, then release. There is a 400 ms tail and a 10 second
 recording limit; Escape or Cancel discards a recording. The hand worker continues
 while the lip model decodes. For sign-only without loading the lip model:
@@ -59,7 +64,7 @@ Models stay local and retain their research-use restrictions; see `NOTICE`.
 
 ## Peter's integration
 
-Provide `hackathon/signs/recognizer.py` with:
+Peter's `hackathon/signs/recognizer.py` is now integrated with this interface:
 
 ```python
 from hackathon.contracts import SignEvent
@@ -79,30 +84,45 @@ stabilization, return `[]` while a gesture stays held, and re-arm after neutral.
 Use ordinary Python strings/floats/ints/bools in events. Scores below 0.75, UNKNOWN,
 nonfinal events, future events and stale events never enter fusion.
 
-Sam will update `hackathon/vocabulary.json` to Peter's exact labels and fixed
-phrases. Current entries are placeholders, all `verified: false`: live fusion ignores
-them. Set an entry to `verified: true` only after the team tests the corresponding
-recognizer output and agrees its phrase. `matches` contains whole word/phrase aliases
+`hackathon/vocabulary.json` now matches Peter's four labels: `THUMB_UP`,
+`THUMB_DOWN`, `OPEN_PALM`, and `POINTING_UP`. The proposed phrases are Yes,
+No, Please stop, and One moment. All four have `enabled: true` for confirmation-based
+use and `verified: false` because live accuracy has not been measured. An unverified
+enabled gesture displays its fixed phrase but requires Confirm & speak. Set
+`enabled: false` to disable a mapping. Set `verified: true` only after the team tests
+the corresponding recognizer output and agrees its phrase. `matches` contains whole word/phrase aliases
 used to rerank lip candidates. The optional `--vocabulary /path/to/mapping.json`
 flag selects another mapping. Restart the server after recognizer or mapping changes.
 This is a small gesture recognizer, not a general BSL/ASL translator.
 
+Use Peter's standalone checker to validate gesture quality. Enabling a mapping
+does not claim recognition accuracy. Older mappings without `enabled` retain the
+old behavior: only `verified: true` permits their events. See
+`hackathon/signs/README.md` for model setup and live trials. Its earlier note about
+the root placeholder labels is superseded by the now-aligned root vocabulary.
+Do not run the standalone checker and integrated server together.
+
 ## Fusion and measurements
 
-- Sign-only uses a fixed phrase for a supported, verified final event.
+- Sign-only uses a fixed phrase for an enabled, supported final event. Unverified
+  mappings require explicit confirmation; verified mappings still require a Speak click.
 - Lip-only shows the top candidate and asks for confirmation.
 - Combined reranks up to three lip candidates when a single sign concept agrees.
-  A keyword cannot prove a whole sentence, so the user confirms before speaking.
+  A keyword cannot prove a whole sentence, so the user explicitly reviews the text
+  and presses Confirm & speak.
 - Conflict shows alternatives; no concatenated glosses or invented sentences.
 - Negation and quantities prevent simple concept agreement. Multiple labels also
   require a choice. Missing lip output can still use a supported sign.
 - Events align to the recording window's final four seconds, using capture time
   rather than decode completion time. Slow decoding does not age valid signs out.
+- For combined input, hold Record first, then gesture and mouth your words. A
+  gesture held before recording will not emit again until the hand returns neutral.
 - Every decision has a revision. A new result invalidates stale confirmation/speech
-  requests. Speech requires an explicit click against the current revision.
+  requests. Speech checks both the current revision and exact reviewed text.
 
-The UI shows measured release-to-text time (including tail, crop preparation and
-decode), crop-preparation-plus-decode time, and local fusion compute time. Hand
+The main UI shows measured release-to-text time when available. Settings →
+Diagnostics shows this time, crop-preparation-plus-decode time and local fusion
+compute time. Hand
 process time, final-event age and TTS dispatch time are included in `/api/state`.
 Dispatch time is not audible speech onset. Missing measurements remain blank.
 Rehearsal never populates vision timing values.

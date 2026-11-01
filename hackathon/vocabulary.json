@@ -1,7 +1,6 @@
 {
-  "HELP": {"phrase": "I need help.", "matches": ["help"], "verified": false},
-  "STOP": {"phrase": "Please stop.", "matches": ["stop"], "verified": false},
-  "YES": {"phrase": "Yes.", "matches": ["yes"], "verified": false},
-  "NO": {"phrase": "No.", "matches": ["no"], "verified": false},
-  "WATER": {"phrase": "I would like some water.", "matches": ["water"], "verified": false}
+  "THUMB_UP": {"display_name": "Thumb up", "phrase": "Yes.", "matches": ["yes"], "enabled": true, "verified": false},
+  "THUMB_DOWN": {"display_name": "Thumb down", "phrase": "No.", "matches": ["no"], "enabled": true, "verified": false},
+  "OPEN_PALM": {"display_name": "Open palm", "phrase": "Please stop.", "matches": ["stop"], "enabled": true, "verified": false},
+  "POINTING_UP": {"display_name": "Pointing up", "phrase": "One moment, please.", "matches": ["one moment", "wait"], "enabled": true, "verified": false}
 }
