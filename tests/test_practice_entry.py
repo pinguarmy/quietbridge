@@ -1,16 +1,25 @@
+import sys
 from types import SimpleNamespace
+
+import pytest
 
 import lipflow.__main__ as cli
 
 
 def test_cli_direct_practice_entry(monkeypatch):
     seen = {}
+    # This checks CLI routing, not a native global keyboard listener.
+    windows = sys.platform == "win32"
+    key = "right_control" if windows else "right_option"
+    module = "lipflow.win.hotkey" if windows else "lipflow.hotkey"
+    monkeypatch.setitem(sys.modules, module, SimpleNamespace(KEYS={key: 1}, DEFAULT_KEY=key))
     monkeypatch.setattr(cli, '_app', lambda: (lambda **kw: seen.update(kw), lambda opts: None))
     cli.main(['onboard', '--start', 'practice'])
     assert seen == {'onboard': True, 'onboarding_start': 'practice'}
 
 
 def test_practice_gate_preserves_permissions_and_shows_once():
+    pytest.importorskip("AppKit", reason="Native practice setup checks require macOS AppKit")
     from lipflow.app import Lipflow
     for allowed in (True, False):
         calls = []
