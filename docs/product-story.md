@@ -30,10 +30,10 @@ a result established by passing software tests.
 ## The experience
 
 1. The opening shows only QuietBridge: BSL letter illustrations hold for four
-   seconds, then flip into the word. Next appears after the animation and opens
+   seconds, then flip into the word. Enter appears after the animation and opens
    `/purpose`; Next opens `/why` for UK context, then Start communicating opens
    `/communicate`. Reduced motion,
-   failed assets or Escape reveal the word and Next immediately. `/communicate`
+   failed assets or Escape reveal the word and Enter immediately. `/communicate`
    still opens the tool directly.
 2. Gesture, or hold the button and mouth a short message. For combined input,
    hold first, then gesture and mouth the words.
@@ -48,9 +48,9 @@ The opening illustrates the letters of QuietBridge using the user-supplied BSL
 alphabet chart, with crops drawn at display time from the unchanged original PNG.
 These are illustrations, not model predictions or full sign translation.
 Its hand tiles remain for four seconds before a staggered, horizontally hinged
-flip reveals the word. The semantic heading is available throughout. Next is
+flip reveals the word. The semantic heading is available throughout. Enter is
 hidden and not focusable during the animation; reduced-motion, failed-data and
-JavaScript-free views show readable content and Next without the animation.
+JavaScript-free views show readable content and Enter without the animation.
 A bounded loading timeout prevents stalled assets from blocking navigation.
 The story does not start speech, record frames or make recognition requests.
 The original chart and display-time crop map are retained under `hackathon/ui/`.
@@ -116,17 +116,19 @@ gesture, body and context labels draw on
 The BSL definition links to the [British Deaf Association](https://bda.org.uk/bsl-deaf-culture/).
 The tool shows the last stabilized gesture, its model score and processing time;
 this is not a live landmark overlay or calibrated accuracy. Preview labels are
-explicitly synthetic. Its collapsed video guide accepts a local file for browser
+explicitly synthetic. Its separate `/guide` page accepts a local file for browser
 playback using a revocable object URL, with no upload or persistent storage.
 
 Shared branding places the symbol before QuietBridge on purpose, communication
 and settings. Native same-origin view transitions progressively enhance page
 changes where supported; navigation remains ordinary links elsewhere. Reduced
 motion disables navigation and control animations. The opening word keeps a
-fixed center while Next appears, and its flipping cards move toward the measured
+fixed center while Enter appears, and its flipping cards move toward the measured
 letter positions before blending into the semantic heading. Message polling does
 not replay entrance animations.
 
 The idea and UK-context screens separate the story into two short desktop views;
 compact spacing at shorter desktop heights preserves readable qualifiers and
 source links. Mobile layouts may scroll naturally; no content is clipped.
+
+The current demo layout reserves separate Hands and Lips panes. The single live camera remains in the Hands pane; the separate lip view is a labelled placeholder awaiting Peter's integration. A fixed-height output bar below the panes reveals only actual selected text and shows progress during real decoding phases. Review and explicit speech controls remain separate. The walkthrough is linked from the footer.

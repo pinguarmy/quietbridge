@@ -256,15 +256,16 @@ class ServerTests(unittest.TestCase):
         self.assertNotIn("skip-animation", page)
         self.assertNotIn("hero-description", page)
         self.assertIn('id="story-next"', page)
+        self.assertIn('href="/purpose">Enter ', page)
         with urlopen(self.url + "/purpose") as res:
             purpose = res.read().decode()
-        self.assertIn("What we describe as communication is the sum of many parts", purpose)
-        self.assertIn("Our aim is to make speech accessible, through every medium of communication", purpose)
+        self.assertIn("The Key Components of Communication:", purpose)
+        self.assertIn("Wispr Flow changed how we work - less time typing, more freedom to think and create. QuietBridge asks: what if speech isn’t an option?", purpose)
         self.assertIn('href="/why"', purpose)
         self.assertNotIn("151,000", purpose)
         with urlopen(self.url + "/why") as res:
             why = res.read().decode()
-        self.assertIn("Communication in the UK", why)
+        self.assertIn("British Sign Language (BSL)", why)
         self.assertIn('href="/communicate"', why)
         self.assertIn('href="/purpose"', why)
         self.assertIn("at some point in their lives", why)
@@ -277,12 +278,17 @@ class ServerTests(unittest.TestCase):
         with urlopen(self.url + "/communicate") as res:
             communication = res.read()
             self.assertIn(b'src="/app.js"', communication)
-            self.assertIn(b'accept="video/*"', communication)
+            self.assertIn(b'href="/guide"', communication)
+            self.assertNotIn(b'<video', communication)
             self.assertIn(b'id="gesture-label"', communication)
             self.assertIn("img-src 'self' blob:", res.headers["Content-Security-Policy"])
             self.assertIn("media-src 'self' blob:", res.headers["Content-Security-Policy"])
         with urlopen(self.url + "/video-guide.js") as res:
             self.assertIn(b"URL.createObjectURL", res.read())
+        with urlopen(self.url + "/guide") as res:
+            guide = res.read()
+            self.assertIn(b'accept="video/*"', guide)
+            self.assertIn(b'src="/video-guide.js"', guide)
         with urlopen(self.url + "/hand-letters.json") as res:
             data = json.load(res)
         self.assertEqual(data["kind"], "bsl-chart")

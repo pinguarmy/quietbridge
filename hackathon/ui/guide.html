@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#071225"><title>How to use QuietBridge</title>
+  <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/theme.css">
+</head>
+<body>
+<main class="communication-page">
+  <header><a class="brand" href="/"><span class="brand-symbol" aria-hidden="true">◖◗</span><span>QuietBridge</span></a><a class="settings-link" href="/communicate">← Back</a></header>
+  <section class="intro"><h1>How to use QuietBridge</h1></section>
+  <div id="demo-video-slot" class="demo-video-slot guide-player">
+    <p id="demo-video-empty">Choose a walkthrough video to watch it here.</p>
+    <label for="demo-video-file">Choose demo video</label><input id="demo-video-file" type="file" accept="video/*" aria-describedby="demo-video-note">
+    <p id="demo-video-note" class="hint">Local playback only. The file stays in this browser.</p>
+    <video id="demo-video" controls playsinline preload="metadata" hidden></video>
+    <p id="demo-video-status" class="hint" role="status"></p><button id="clear-demo-video" class="text-button" type="button" hidden>Clear preview</button>
+  </div>
+</main>
+<script src="/video-guide.js"></script>
+</body>
+</html>

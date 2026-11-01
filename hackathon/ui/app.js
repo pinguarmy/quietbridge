@@ -3,6 +3,7 @@ const text = (id, value) => { const el = $(id), next = String(value ?? ''); if (
 const hide = (id, value) => { if ($(id)) $(id).hidden = value; };
 let state = null, token = '', actionChain = Promise.resolve(), pointerHeld = false, keyHeld = false;
 let speaking = false, pendingActions = 0, renderedRevision = null, initialized = false, chosenText = null, connectionLost = false;
+let messageAnimation = null;
 
 function requestAction(name, data = {}) {
   pendingActions++;
@@ -97,7 +98,21 @@ function render(s) {
 function updateMessage() {
   if (!state || !$('message')) return;
   const d = state.decision, review = d.status === 'confirmation_needed';
-  text('message', chosenText || (review ? 'Which message did you mean?' : 'Your words will appear here.'));
+  const message = $('message'), nextText = chosenText || '', changed = message.textContent !== nextText;
+  text('message', nextText);
+  const processing = !chosenText && ['tail', 'decoding'].includes(state.phase);
+  $('message-dock')?.classList.toggle('has-message', Boolean(chosenText));
+  $('message-dock')?.classList.toggle('is-processing', processing);
+  $('message-dock')?.setAttribute('aria-busy', String(processing));
+  hide('message-progress', !processing);
+  if (changed) {
+    messageAnimation?.cancel(); messageAnimation = null;
+    if (nextText && message.animate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      messageAnimation = message.animate([{opacity:0.2,transform:'translateY(4px)',filter:'blur(3px)'},{opacity:1,transform:'translateY(0)',filter:'blur(0)'}], {duration:280,easing:'cubic-bezier(.22,1,.36,1)'});
+    }
+  }
+  hide('decision-status', !chosenText && !review);
+  hide('reason', !chosenText && !review);
   $('message').classList.toggle('empty', !chosenText);
   text('decision-status', review ? 'Check your message' : d.status === 'accepted' ? 'Ready to speak' : ({idle:'Waiting', recording:'Listening', tail:'Finishing', decoding:'Reading lips…'})[state.phase]);
   $('decision-status').classList.toggle('review', review);
