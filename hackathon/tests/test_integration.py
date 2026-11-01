@@ -258,7 +258,7 @@ class ServerTests(unittest.TestCase):
         self.assertIn('id="story-next"', page)
         with urlopen(self.url + "/purpose") as res:
             purpose = res.read().decode()
-        self.assertIn("Communication is far more nuanced than just what you hear", purpose)
+        self.assertIn("What we describe as communication is the sum of many parts", purpose)
         self.assertIn("Our aim is to make speech accessible, through every medium of communication", purpose)
         self.assertIn('href="/why"', purpose)
         self.assertNotIn("151,000", purpose)
