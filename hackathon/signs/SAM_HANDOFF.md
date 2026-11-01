@@ -4,12 +4,13 @@
 
 The user explicitly authorized direct integration to `main`; commit `f25f571` was pushed. Do not keep waiting for a PR or describe the browser camera, tracking and training tools as local-only. Coordinate shared-file changes with Sam, but the user's direct-main instruction overrides the earlier PR-only plan. No Git action is part of this documentation update.
 
-The latest automatic-camera and fast-text changes are **in progress, not deployed**. Keep that separate from the already pushed baseline and the currently running processes:
+Latest code is on main through `3e8c193`. Automatic camera sessions, persistent raw transcripts, strict hinted welcome cleanup and Fast settings are deployed. Actual running state was checked:
 
-- <http://127.0.0.1:8765>: main browser-camera demo, stock lip model, Lips Only mode.
+- <http://127.0.0.1:8765>: main browser-camera demo, `personal (welcome pilot)` lip model and `personal motion-v2 (experimental)` gesture model, Combined mode. Only Hi / Welcome / OpenAI / DEE / Hackathon are output concepts; internal legacy `DDE` maps to displayed DEE. REST remains silent. Live gesture replay emitted no events, so model readiness is not evidence of useful live recognition.
+- Final user instruction explicitly constrains Luna to two hint-assisted suggestions: `Welcome to OpenAI DEE Hackathon` or `Hi, Welcome to OpenAI DEE Hackathon`. A backend allowlist rejects other provider text. This is a prepared-phrase reconstruction mode, not unconstrained recognition. Raw output stays accessible separately. Stop camera finalizes and then requests cleanup. The key must be re-entered after backend restart (memory only).
 - <http://127.0.0.1:8766>: tracking and explicit dataset recording lab.
 
-Use the browser camera and its real permission flow. Do not bypass native camera permissions or switch to another capture path to hide a permission failure. The rendered UI was checked in the actual browser: large hand camera on the left, zoomed lips on the right, 20-point outer and 20-point inner lip rings, and text below. The browser fixes allow same-origin blob media under CSP and remove double mirroring. Tracking is not a transcript or evidence of recognition accuracy.
+Use the browser camera and its real permission flow. Do not bypass native camera permissions or switch to another capture path to hide a permission failure. The rendered UI was checked in the actual browser: large hand camera on the left, zoomed lips on the right, 20-point outer and 20-point inner lip rings, and text below. The browser fixes use the same-origin JPEG endpoint instead of blocked blob URLs and remove double mirroring. Tracking is not a transcript or evidence of recognition accuracy.
 
 ## Custom dynamic vocabulary and dataset
 
