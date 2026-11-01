@@ -31,7 +31,8 @@ a result established by passing software tests.
 
 1. The opening shows only QuietBridge: BSL letter illustrations hold for four
    seconds, then flip into the word. Next appears after the animation and opens
-   `/purpose`; Start communicating there opens `/communicate`. Reduced motion,
+   `/purpose`; Next opens `/why` for UK context, then Start communicating opens
+   `/communicate`. Reduced motion,
    failed assets or Escape reveal the word and Next immediately. `/communicate`
    still opens the tool directly.
 2. Gesture, or hold the button and mouth a short message. For combined input,
@@ -57,13 +58,13 @@ The ASL MNIST data remains a separate experiment and is not mixed with these BSL
 The opening does not load or display a mouth sprite. Earlier generated mouth assets
 and prompts are retained as provenance only, separate from the active introduction.
 
-The purpose page uses the user's exact purpose/aim wording and two source-linked
-UK figures: the BDA's approximately 151,000 BSL-user estimate as reported by
+The purpose page uses the user's exact headline/aim wording and communication
+cues. A separate `/why` screen presents two source-linked UK figures: the BDA's approximately 151,000 BSL-user estimate as reported by
 [RNID](https://rnid.org.uk/what-we-do/evidence-hub/prevalence-of-hearing-loss-tinnitus-and-bsl/),
 and [RCSLT's up-to-14-million lifetime communication-difficulty measure](https://www.rcslt.org/policy-and-influencing/uk-wide/).
 The first is not an exact daily-use count and varies by definition; the second is
 not a current count of non-speaking people. Shared navy colors, typography and
-control styles cover the intro, purpose, communication and settings pages. The
+control styles cover the intro, purpose, UK context, communication and settings pages. The
 communication and settings pages remain static and have no four-second delay.
 Neutral user-control footers avoid claiming a particular camera/inference location;
 this UI work does not implement the proposed home-desktop transport.
@@ -125,3 +126,7 @@ motion disables navigation and control animations. The opening word keeps a
 fixed center while Next appears, and its flipping cards move toward the measured
 letter positions before blending into the semantic heading. Message polling does
 not replay entrance animations.
+
+The idea and UK-context screens separate the story into two short desktop views;
+compact spacing at shorter desktop heights preserves readable qualifiers and
+source links. Mobile layouts may scroll naturally; no content is clipped.

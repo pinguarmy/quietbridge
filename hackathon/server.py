@@ -53,8 +53,8 @@ def make_server(runtime, port=8765):
                         self._send(200, jpeg, "image/jpeg")
                     else:
                         self._json(503, {"error": "No camera frame yet"})
-                elif path in {"/", "/index.html", "/purpose", "/purpose.html", "/communicate", "/communicate.html", "/settings", "/settings.html", "/app.js", "/video-guide.js", "/style.css", "/theme.css", "/story.js", "/story.css", "/hand-letters.json", "/assets/bsl-alphabet.png"}:
-                    filename = {"/": "index.html", "/purpose": "purpose.html", "/communicate": "communicate.html", "/settings": "settings.html"}.get(path, path[1:])
+                elif path in {"/", "/index.html", "/purpose", "/purpose.html", "/why", "/why.html", "/communicate", "/communicate.html", "/settings", "/settings.html", "/app.js", "/video-guide.js", "/style.css", "/theme.css", "/story.js", "/story.css", "/hand-letters.json", "/assets/bsl-alphabet.png"}:
+                    filename = {"/": "index.html", "/purpose": "purpose.html", "/why": "why.html", "/communicate": "communicate.html", "/settings": "settings.html"}.get(path, path[1:])
                     mime = {".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png"}[Path(filename).suffix]
                     self._send(200, (UI / filename).read_bytes(), mime if mime.startswith("image/") else mime + "; charset=utf-8")
                 else:

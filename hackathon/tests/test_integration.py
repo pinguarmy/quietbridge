@@ -237,7 +237,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(err.exception.code, 404)
 
     def test_communication_and_settings_pages_are_served(self):
-        for path in ["/", "/purpose", "/communicate", "/settings"]:
+        for path in ["/", "/purpose", "/why", "/communicate", "/settings"]:
             with self.subTest(path=path), urlopen(self.url + path) as res:
                 self.assertIn("text/html", res.headers["Content-Type"])
                 self.assertIn(b"QuietBridge", res.read())
@@ -260,14 +260,20 @@ class ServerTests(unittest.TestCase):
             purpose = res.read().decode()
         self.assertIn("Communication is far more nuanced than just what you hear", purpose)
         self.assertIn("Our aim is to make speech accessible, through every medium of communication", purpose)
-        self.assertIn('href="/communicate"', purpose)
-        self.assertIn("at some point in their lives", purpose)
-        self.assertIn("Not an exact daily-use count.", purpose)
-        self.assertIn("A lifetime measure, not a current non-speaking count.", purpose)
-        self.assertIn("https://rnid.org.uk/", purpose)
-        self.assertIn("https://www.rcslt.org/", purpose)
-        self.assertIn("A visual language with its own grammar", purpose)
-        self.assertIn("https://bda.org.uk/bsl-deaf-culture/", purpose)
+        self.assertIn('href="/why"', purpose)
+        self.assertNotIn("151,000", purpose)
+        with urlopen(self.url + "/why") as res:
+            why = res.read().decode()
+        self.assertIn("Communication in the UK", why)
+        self.assertIn('href="/communicate"', why)
+        self.assertIn('href="/purpose"', why)
+        self.assertIn("at some point in their lives", why)
+        self.assertIn("Not an exact daily-use count.", why)
+        self.assertIn("A lifetime measure, not a current non-speaking count.", why)
+        self.assertIn("https://rnid.org.uk/", why)
+        self.assertIn("https://www.rcslt.org/", why)
+        self.assertIn("A visual language with its own grammar", why)
+        self.assertIn("https://bda.org.uk/bsl-deaf-culture/", why)
         with urlopen(self.url + "/communicate") as res:
             communication = res.read()
             self.assertIn(b'src="/app.js"', communication)
