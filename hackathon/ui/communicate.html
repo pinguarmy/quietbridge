@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Communicate · QuietBridge</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/theme.css">
+</head>
+<body class="communication-view">
+<main class="communication-page">
+  <header><a class="wordmark" href="/">QuietBridge<span aria-hidden="true">◖◗</span></a><a class="settings-link" href="/settings">Settings</a></header>
+  <div id="rehearsal-banner" class="banner" hidden>Preview mode · Camera is off. <a href="/settings#preview">Try an example</a></div>
+  <section class="intro"><h1>What would you like to say?</h1><p id="entry-hint">Show a supported gesture, or hold the button to mouth a sentence.</p></section>
+  <div class="workspace">
+    <section class="camera-panel" aria-label="Camera and recording">
+      <div class="preview"><img id="camera" alt="Your live camera preview" hidden><div id="camera-placeholder"><span class="viewfinder" aria-hidden="true">⌜ &nbsp; ⌝<br>⌞ &nbsp; ⌟</span><p id="camera-message">Getting your camera ready…</p></div><span id="preview-status" class="preview-label">Getting ready</span></div>
+      <p id="gesture-feedback" class="gesture-feedback"><span id="gesture-label" role="status" aria-live="polite">Getting gesture input ready…</span><span id="gesture-metrics"></span></p>
+      <div class="record-controls"><button id="record" class="record" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">Hold to mouth words</span></button><button id="cancel" class="text-button" hidden>Cancel</button></div>
+      <p id="record-hint" class="hint">Or hold Space, then release when you finish.</p>
+      <p class="mode-caption"><span id="mode-caption">Lips and gestures</span> · <a href="/settings">Change</a></p>
+    </section>
+    <section class="message-panel" aria-label="Your message">
+      <div class="message-heading"><h2>Your message</h2><span id="decision-status" class="status">Waiting</span></div>
+      <p id="message" class="message empty" aria-live="polite">Your words will appear here.</p>
+      <p id="reason" class="reason">Check your message before speaking.</p>
+      <div id="alternatives" class="alternatives" role="group" aria-label="Choose the message you intended"></div>
+      <button id="speak" class="speak" disabled><span id="speak-label">Speak message</span></button>
+      <p id="error" class="error" role="alert"></p>
+      <p id="result-timing" class="hint"></p>
+      <p id="last-spoken" class="last-spoken"></p>
+    </section>
+  </div>
+  <details class="demo-guide"><summary>How to use QuietBridge</summary><div id="demo-video-slot" class="demo-video-slot"><p id="demo-video-empty">Choose a demo video to preview it here.</p><label for="demo-video-file">Choose demo video</label><input id="demo-video-file" type="file" accept="video/*" aria-describedby="demo-video-note"><p id="demo-video-note" class="hint">Local preview only. The file stays in this browser.</p><video id="demo-video" controls playsinline preload="metadata" hidden></video><p id="demo-video-status" class="hint" role="status"></p><button id="clear-demo-video" class="text-button" type="button" hidden>Clear preview</button></div></details>
+  <footer><span>You choose what to say, and when to speak.</span><a href="/settings#gestures">Supported gestures</a></footer>
+</main>
+<script src="/app.js"></script>
+<script src="/video-guide.js"></script>
+</body></html>

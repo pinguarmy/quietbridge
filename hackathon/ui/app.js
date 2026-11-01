@@ -21,6 +21,14 @@ function render(s) {
   hide('rehearsal-banner', !s.rehearsal); hide('preview', !s.rehearsal);
   text('camera-status', s.camera); text('lip-status', s.lips); text('hand-status', s.signs);
   text('last-sign', s.last_sign ? s.last_sign.label + ' · ' + s.last_sign.score.toFixed(2) : '—');
+  hide('gesture-feedback', s.mode === 'lips');
+  const lastGesture = s.last_sign;
+  const gestureName = lastGesture ? (s.vocabulary[lastGesture.label]?.display_name || lastGesture.label) : '';
+  text('gesture-label', lastGesture ? (s.rehearsal ? 'Synthetic gesture: ' : 'Last stable gesture: ') + gestureName : s.rehearsal ? 'Preview mode · no live recognition' : s.signs === 'ready' ? 'Gesture input ready' : s.signs === 'unavailable' ? 'Gesture input needs setup' : 'Getting gesture input ready…');
+  const gestureMetrics = [];
+  if (lastGesture) gestureMetrics.push('model score ' + lastGesture.score.toFixed(2));
+  if (!s.rehearsal && Number.isFinite(s.metrics.hand_process_ms)) gestureMetrics.push('processing ' + s.metrics.hand_process_ms.toFixed(1) + ' ms');
+  text('gesture-metrics', gestureMetrics.length ? ' · ' + gestureMetrics.join(' · ') : '');
   text('component-errors', [s.camera_error, s.lip_error, s.sign_error].filter(Boolean).join('\n'));
   const modeName = {combined:'Lips and gestures', lips:'Lips only', signs:'Gestures only'}[s.mode];
   text('mode-caption', modeName);
@@ -140,7 +148,7 @@ function releasePointer() {if (pointerHeld) {pointerHeld = false; requestAction(
 ['pointerup','pointercancel','lostpointercapture'].forEach(event => recordButton?.addEventListener(event, releasePointer));
 document.addEventListener('keydown', e => {
   if (e.code === 'Escape' && state && state.phase !== 'idle') {pointerHeld = keyHeld = false; requestAction('cancel'); return;}
-  if (!recordButton || ['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName) || (e.target.tagName === 'BUTTON' && e.target !== recordButton)) return;
+  if (!recordButton || ['INPUT','SELECT','TEXTAREA','VIDEO','AUDIO','SUMMARY','A'].includes(e.target.tagName) || e.target.closest?.('.demo-guide') || (e.target.tagName === 'BUTTON' && e.target !== recordButton)) return;
   if (e.code === 'Space' && !e.repeat && !recordButton.disabled && !pointerHeld) {e.preventDefault(); keyHeld = true; requestAction('start');}
 });
 document.addEventListener('keyup', e => {if (e.code === 'Space' && keyHeld) {e.preventDefault(); keyHeld = false; requestAction('stop');}});
@@ -151,6 +159,6 @@ if ($('test-submit')) $('test-submit').onclick = async () => {
   const exampleText = state.mode === 'signs' ? '' : $('test-text').value;
   const label = state.mode === 'lips' ? '' : $('test-label').value;
   if (!exampleText.trim() && !label) {text('error', 'Add example words or choose a gesture first.'); return;}
-  if (await requestAction('rehearse', {text:exampleText, label})) window.location.assign('/');
+  if (await requestAction('rehearse', {text:exampleText, label})) window.location.assign('/communicate');
 };
 poll(); preview();

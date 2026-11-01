@@ -29,7 +29,11 @@ a result established by passing software tests.
 
 ## The experience
 
-1. Open directly into the communication screen.
+1. The opening shows only QuietBridge: BSL letter illustrations hold for four
+   seconds, then flip into the word. Next appears after the animation and opens
+   `/purpose`; Start communicating there opens `/communicate`. Reduced motion,
+   failed assets or Escape reveal the word and Next immediately. `/communicate`
+   still opens the tool directly.
 2. Gesture, or hold the button and mouth a short message. For combined input,
    hold first, then gesture and mouth the words.
 3. Review the proposed message. If inputs conflict, choose the intended meaning.
@@ -38,6 +42,31 @@ a result established by passing software tests.
 Keep input settings, supported vocabulary and diagnostics on the separate Settings
 page. Show readiness honestly. Do not automatically speak, hide uncertainty or
 complete an expected phrase from incomplete evidence.
+
+The opening illustrates the letters of QuietBridge using the user-supplied BSL
+alphabet chart, with crops drawn at display time from the unchanged original PNG.
+These are illustrations, not model predictions or full sign translation.
+Its hand tiles remain for four seconds before a staggered, horizontally hinged
+flip reveals the word. The semantic heading is available throughout. Next is
+hidden and not focusable during the animation; reduced-motion, failed-data and
+JavaScript-free views show readable content and Next without the animation.
+A bounded loading timeout prevents stalled assets from blocking navigation.
+The story does not start speech, record frames or make recognition requests.
+The original chart and display-time crop map are retained under `hackathon/ui/`.
+The ASL MNIST data remains a separate experiment and is not mixed with these BSL illustrations.
+The opening does not load or display a mouth sprite. Earlier generated mouth assets
+and prompts are retained as provenance only, separate from the active introduction.
+
+The purpose page uses the user's exact purpose/aim wording and two source-linked
+UK figures: the BDA's approximately 151,000 BSL-user estimate as reported by
+[RNID](https://rnid.org.uk/what-we-do/evidence-hub/prevalence-of-hearing-loss-tinnitus-and-bsl/),
+and [RCSLT's up-to-14-million lifetime communication-difficulty measure](https://www.rcslt.org/policy-and-influencing/uk-wide/).
+The first is not an exact daily-use count and varies by definition; the second is
+not a current count of non-speaking people. Shared navy colors, typography and
+control styles cover the intro, purpose, communication and settings pages. The
+communication and settings pages remain static and have no four-second delay.
+Neutral user-control footers avoid claiming a particular camera/inference location;
+this UI work does not implement the proposed home-desktop transport.
 
 ## A short pitch
 
@@ -76,3 +105,15 @@ The immediate engineering gate remains live validation on Peter's MacBook Pro:
 reliable supported gestures, usable lip output, visible conflict handling, local
 speech, Wi-Fi off and three consecutive successful runs. Optional LLM suggestions
 come later; they are not proof of intended meaning.
+
+The purpose page lists communication cues without a percentage breakdown or a
+claim that this prototype recognizes every cue. Its voice/tone, mouth, face,
+gesture, body and context labels draw on
+[NIDCD](https://www.nidcd.nih.gov/about/nidcd-director-message/cloth-face-coverings-and-distancing-pose-communication-challenges-many),
+[RNID](https://rnid.org.uk/information-and-support/hearing-loss/lipreading/), and
+[University of Surrey's BSL non-manual features](https://bsl.surrey.ac.uk/principles/f-non-manual-features).
+The BSL definition links to the [British Deaf Association](https://bda.org.uk/bsl-deaf-culture/).
+The tool shows the last stabilized gesture, its model score and processing time;
+this is not a live landmark overlay or calibrated accuracy. Preview labels are
+explicitly synthetic. Its collapsed video guide accepts a local file for browser
+playback using a revocable object URL, with no upload or persistent storage.
