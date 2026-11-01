@@ -32,6 +32,7 @@ Use the existing Python environment if already installed. For a fresh checkout:
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -e .
 .venv/bin/python -m hackathon.assets --download
+.venv/bin/python -m hackathon.signs.assets --download
 .venv/bin/python -m hackathon.server
 ```
 
@@ -63,7 +64,7 @@ Models stay local and retain their research-use restrictions; see `NOTICE`.
 
 ## Peter's integration
 
-Provide `hackathon/signs/recognizer.py` with:
+Peter's `hackathon/signs/recognizer.py` is now integrated with this interface:
 
 ```python
 from hackathon.contracts import SignEvent
@@ -83,13 +84,20 @@ stabilization, return `[]` while a gesture stays held, and re-arm after neutral.
 Use ordinary Python strings/floats/ints/bools in events. Scores below 0.75, UNKNOWN,
 nonfinal events, future events and stale events never enter fusion.
 
-Sam will update `hackathon/vocabulary.json` to Peter's exact labels and fixed
-phrases. Current entries are placeholders, all `verified: false`: live fusion ignores
+`hackathon/vocabulary.json` now matches Peter's four labels: `THUMB_UP`,
+`THUMB_DOWN`, `OPEN_PALM`, and `POINTING_UP`. The proposed phrases are Yes,
+No, Please stop, and One moment. All remain `verified: false`: live fusion ignores
 them. Set an entry to `verified: true` only after the team tests the corresponding
 recognizer output and agrees its phrase. `matches` contains whole word/phrase aliases
 used to rerank lip candidates. The optional `--vocabulary /path/to/mapping.json`
 flag selects another mapping. Restart the server after recognizer or mapping changes.
 This is a small gesture recognizer, not a general BSL/ASL translator.
+
+Use Peter's standalone checker to validate gestures before enabling mappings;
+all-false mappings intentionally suppress events in the integrated app. See
+`hackathon/signs/README.md` for model setup and live trials. Its earlier note about
+the root placeholder labels is superseded by the now-aligned root vocabulary.
+Do not run the standalone checker and integrated server together.
 
 ## Fusion and measurements
 
@@ -103,11 +111,14 @@ This is a small gesture recognizer, not a general BSL/ASL translator.
   require a choice. Missing lip output can still use a supported sign.
 - Events align to the recording window's final four seconds, using capture time
   rather than decode completion time. Slow decoding does not age valid signs out.
+- For combined input, hold Record first, then gesture and mouth your words. A
+  gesture held before recording will not emit again until the hand returns neutral.
 - Every decision has a revision. A new result invalidates stale confirmation/speech
-  requests. Speech requires an explicit click against the current revision.
+  requests. Speech checks both the current revision and exact reviewed text.
 
-The UI shows measured release-to-text time (including tail, crop preparation and
-decode), crop-preparation-plus-decode time, and local fusion compute time. Hand
+The main UI shows measured release-to-text time when available. Settings →
+Diagnostics shows this time, crop-preparation-plus-decode time and local fusion
+compute time. Hand
 process time, final-event age and TTS dispatch time are included in `/api/state`.
 Dispatch time is not audible speech onset. Missing measurements remain blank.
 Rehearsal never populates vision timing values.

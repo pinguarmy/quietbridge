@@ -1,5 +1,6 @@
 """Run without model dependencies: python -m unittest discover -s hackathon/tests -v."""
 import json
+from pathlib import Path
 import queue
 import threading
 import time
@@ -9,7 +10,7 @@ from urllib.request import Request, urlopen
 from unittest.mock import Mock, patch
 
 from hackathon.contracts import LipResult, SignEvent
-from hackathon.fusion import fuse
+from hackathon.fusion import fuse, load_vocabulary
 from hackathon.runtime import Runtime, put_latest
 from hackathon.runtime import clock_ms as real_clock_ms
 from hackathon.server import make_server
@@ -32,6 +33,17 @@ class FusionTests(unittest.TestCase):
     def test_fixed_sign_phrase(self):
         d = fuse(None, [sign()], VOCAB, 2000)
         self.assertEqual((d.text, d.status, d.reason), ("I need help.", "accepted", "sign_only"))
+
+    def test_shared_vocabulary_matches_published_recognizer_labels(self):
+        vocabulary = load_vocabulary()
+        declared = json.loads((Path(__file__).parents[1] / "signs" / "labels.json").read_text())["labels"]
+        self.assertTrue(vocabulary)
+        self.assertTrue(set(vocabulary) <= set(declared))
+        for label, entry in vocabulary.items():
+            # Explicit synthetic verification tests wiring, not live accuracy.
+            enabled = {label: {**entry, "verified": True}}
+            decision = fuse(None, [sign(label)], enabled, 2000)
+            self.assertEqual((decision.text, decision.status), (entry["phrase"], "accepted"))
 
     def test_bad_or_unverified_events_do_not_become_speech(self):
         invalid = [sign("UNKNOWN"), sign(score=.5), sign(score=float("nan")), sign(score=1.1),
@@ -76,14 +88,43 @@ class RuntimeTests(unittest.TestCase):
         put_latest(q, 1); put_latest(q, 2); put_latest(q, 3)
         self.assertEqual(q.get_nowait(), 3)
 
+    def test_late_record_release_does_not_change_a_finished_or_cancelled_recording(self):
+        live = Runtime(vocabulary=VOCAB)
+        live.state.update(camera="ready", lips="ready")
+        try:
+            live.action("start", {})
+            live.action("stop", {})
+            end = live.finish_at
+            live.action("stop", {})
+            self.assertEqual(live.finish_at, end)
+            self.assertEqual(live.snapshot()["phase"], "tail")
+            live.action("cancel", {})
+            revision = live.revision
+            live.action("stop", {})
+            self.assertEqual((live.snapshot()["phase"], live.revision), ("idle", revision))
+        finally:
+            live.close()
+
     def test_uncertain_message_cannot_speak_until_confirmed(self):
         self.r.action("rehearse", {"text": "I want water", "label": "HELP"})
         rev = self.r.revision
         with self.assertRaises(ValueError):
-            self.r.action("speak", {"revision": rev})
+            self.r.action("speak", {"revision": rev, "text": "I want water"})
         self.r.speaker.speak.assert_not_called()
         self.r.action("confirm", {"text": "I need help.", "revision": rev})
-        self.r.action("speak", {"revision": rev})
+        self.r.action("speak", {"revision": rev, "text": "I need help."})
+        self.r.speaker.speak.assert_called_once_with("I need help.")
+
+    def test_another_tab_cannot_change_the_words_of_a_speak_request(self):
+        self.r.action("rehearse", {"text": "I want water", "label": "HELP"})
+        rev = self.r.revision
+        self.r.action("confirm", {"text": "I want water", "revision": rev})
+        # Another tab chooses the other alternative before the first tab speaks.
+        self.r.action("confirm", {"text": "I need help.", "revision": rev})
+        with self.assertRaises(ValueError):
+            self.r.action("speak", {"revision": rev, "text": "I want water"})
+        self.r.speaker.speak.assert_not_called()
+        self.r.action("speak", {"revision": rev, "text": "I need help."})
         self.r.speaker.speak.assert_called_once_with("I need help.")
 
     def test_new_result_invalidates_old_confirmation_and_speak(self):

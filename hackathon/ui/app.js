@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const text = (id, value) => { if ($(id)) $(id).textContent = value; };
+const text = (id, value) => { const el = $(id), next = String(value ?? ''); if (el && el.textContent !== next) el.textContent = next; };
 const hide = (id, value) => { if ($(id)) $(id).hidden = value; };
 let state = null, token = '', actionChain = Promise.resolve(), pointerHeld = false, keyHeld = false;
 let speaking = false, pendingActions = 0, renderedRevision = null, initialized = false, chosenText = null, connectionLost = false;
@@ -42,8 +42,13 @@ function render(s) {
     text('record-label', ({recording:'Mouth your words… release to finish', tail:'Finishing…', decoding:'Reading your lips…'})[s.phase] || 'Hold to mouth words');
   }
   hide('cancel', s.phase === 'idle');
-  text('record-hint', s.rehearsal ? 'Try an example from Settings.' : s.mode === 'signs' ? 'Show a supported gesture to the camera.' : s.lips === 'warming' ? 'Getting the lip reader ready…' : s.lips === 'unavailable' ? 'Lip reading needs attention in Settings.' : 'Or hold Space, then release when you finish.');
+  text('record-hint', s.rehearsal ? 'Try an example from Settings.' : s.mode === 'signs' ? 'Show a supported gesture to the camera.' : s.lips === 'warming' ? 'Getting the lip reader ready…' : s.lips === 'unavailable' ? 'Lip reading needs attention in Settings.' : s.mode === 'combined' ? 'Hold Space or the button before mouthing and gesturing.' : 'Or hold Space, then release when you finish.');
   text('entry-hint', s.mode === 'signs' ? 'Show a supported gesture, then speak your message.' : s.mode === 'lips' ? 'Hold the button, mouth a short sentence, then release.' : 'Show a supported gesture, or hold the button to mouth a sentence.');
+  const gesturesReady = s.signs === 'ready' && Object.values(s.vocabulary).some(v => v.verified);
+  if (!s.rehearsal && !gesturesReady && s.mode !== 'lips') {
+    text('entry-hint', s.mode === 'signs' ? 'Gestures need setup. Choose another input in Settings.' : 'Hold the button to mouth a short sentence.');
+    text('record-hint', s.mode === 'signs' ? 'Open Settings to check gesture input.' : 'Gesture input is being set up. You can still use your lips once ready.');
+  }
   const d = s.decision, review = d.status === 'confirmation_needed';
   if (renderedRevision !== s.revision) {
     chosenText = review && d.reason === 'conflict' ? null : (d.text || null);
@@ -72,8 +77,9 @@ function render(s) {
     const entries = Object.entries(s.vocabulary), enabled = entries.filter(([,v]) => v.verified);
     text('vocabulary-summary', enabled.length ? 'These gestures are enabled for live use.' : 'No live gestures are enabled yet. The team is checking the vocabulary.');
     entries.forEach(([label, entry]) => {
-      const el = document.createElement('span'); el.textContent = label + (entry.verified ? '' : ' · being checked'); el.className = entry.verified ? '' : 'pending'; $('labels').append(el);
-      const opt = document.createElement('option'); opt.value = label; opt.textContent = label; $('test-label')?.append(opt);
+      const name = entry.display_name || label;
+      const el = document.createElement('span'); el.textContent = name + (entry.verified ? '' : ' · being checked'); el.className = entry.verified ? '' : 'pending'; $('labels').append(el);
+      const opt = document.createElement('option'); opt.value = label; opt.textContent = name; $('test-label')?.append(opt);
     });
     initialized = true;
   }
@@ -101,7 +107,7 @@ async function speakMessage() {
     if (state.revision !== revision || state.decision.status !== 'accepted' || state.decision.text !== message) {
       text('error', 'The message changed. Please check it again.'); return;
     }
-    await requestAction('speak', {revision});
+    await requestAction('speak', {revision, text:message});
   } finally { speaking = false; updateMessage(); }
 }
 

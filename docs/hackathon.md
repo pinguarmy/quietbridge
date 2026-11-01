@@ -1,41 +1,41 @@
-# QuietBridge：六小时开工计划
+# QuietBridge: six-hour sprint plan
 
-根据团队提供的《LipFlow 6 Hour Hackathon Team Brief》整理。项目已改名 QuietBridge；这份计划不是功能完成报告。
+Adapted from the team's *LipFlow 6 Hour Hackathon Team Brief*. The project is now QuietBridge. This is a plan, not a report of completed features.
 
-## 目标
+## Goal
 
-一个摄像头 → 口型 / 小词表手势 → 本地融合 → 文字 → 点击 Speak 发声。
+One camera → lips / a small gesture vocabulary → local fusion → text → press Speak.
 
-A 做口型、运行时、融合和 UI；B 做手势。共享类型见 `hackathon/contracts.py`，具体分工见根目录 `AGENTS.md`。
+Sam owns lips, runtime, fusion and UI; Peter owns gestures. Import shared types from `hackathon/contracts.py`; see the root `AGENTS.md` for ownership.
 
-## 时间安排
+## Schedule
 
-| 时间 | 交付 |
+| Time | Deliverable |
 | --- | --- |
-| 前 20 分钟 | 两人导入共享类型，选定 4–6 个手势，分支能推送。 |
-| 20–90 分钟 | A 的口型适配返回候选；B 的识别器返回稳定事件。 |
-| 90–150 分钟 | 单摄像头、显示、本地语音跑通；至少 3 个手势可靠。 |
-| 150–195 分钟 | 三种输入模式合起来；之后停止接口重构。 |
-| 195–255 分钟 | 减少误触发，处理冲突确认，实际机器反复演示。 |
-| 最后 90 分钟 | 停止加核心功能；准备同意使用的备用录屏，排练 60–90 秒演示。 |
+| First 20 minutes | Both import the shared types, agree 4–6 gestures and push their branches. |
+| 20–90 minutes | Sam's adapter returns lip candidates; Peter's recognizer returns stable events. |
+| 90–150 minutes | Single camera, display and local speech work; at least 3 gestures are reliable. |
+| 150–195 minutes | Integrate all three modes; stop refactoring interfaces after this. |
+| 195–255 minutes | Reduce false triggers, confirm conflicts and repeat the demo on the actual machine. |
+| Final 90 minutes | Stop adding core features, prepare a consented fallback recording and rehearse a 60–90 second demo. |
 
-口型暂时跑不通就先保证手势演示，口型回放要明确标注。不要为扩大词表或可选 API 拖垮主流程。
+If lips are not ready, guarantee a gesture demo and clearly label any lip replay. Do not sacrifice the core path for a larger vocabulary or optional API.
 
-## 最小验收
+## Minimum acceptance
 
-1. 口型、手势、组合模式都能出文字；冲突显示选项。
-2. 同一手势保持不动不会反复输出；一路缺失时另一路仍能用。
-3. 断网仍能显示文字、点击本地发声。
-4. 显示实际延迟，连续三次跑通；两人都知道如何启动。
+1. Lips-only, gestures-only and combined modes produce text; conflicts offer a choice.
+2. A held pose does not repeat messages; either modality works when the other is missing.
+3. Text and local speech work without Wi-Fi.
+4. Show actual latency, complete three consecutive runs, and make sure both people can start the app.
 
-目标而非实测：手势反馈约 0.3–0.6 秒，口型松开后尽量 2 秒内出结果。本次整理未运行真实识别演示。
+Targets, not measurements: gesture feedback around 0.3–0.6 seconds; aim for lip text within 2 seconds of release. Repository setup alone does not establish live recognition performance.
 
-## 90 秒演示
+## 90-second demo
 
-- 0–15 秒：解释不能依靠声音时的沟通需求。
-- 15–35 秒：手势 → 文字 → 点击 Speak，说明词表有限。
-- 35–55 秒：口型短句 → 文字 → Speak，展示延迟。
-- 55–75 秒：组合一致选结果，组合冲突让用户确认。
-- 75–90 秒：说明复用现有视觉语音模型，核心流程本地运行。
+- 0–15 seconds: explain the need to communicate when speech is unavailable.
+- 15–35 seconds: gesture → text → Speak; explain the limited vocabulary.
+- 35–55 seconds: mouth a short sentence → text → Speak; show latency.
+- 55–75 seconds: show combined agreement and a conflict requiring confirmation.
+- 75–90 seconds: explain the reused visual speech model and local core path.
 
-云端建议可选、异步、最后再做。计划中 API 型号和价格使用前另行核实，不作为固定依赖。
+Cloud suggestions are optional, asynchronous and last. Check API model availability and pricing before use rather than treating the original brief as fixed configuration.

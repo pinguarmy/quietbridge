@@ -141,7 +141,7 @@ class Runtime:
                 self.state.update(phase="recording", recording=True, lip_error="")
             elif name == "stop":
                 if self.state["phase"] != "recording":
-                    raise ValueError("No active recording")
+                    return  # A late key/pointer release after timeout or cancel is harmless.
                 self.release_ms = clock_ms()
                 self.finish_at = self.release_ms + 400
                 self.state.update(phase="tail", recording=False)
@@ -162,6 +162,8 @@ class Runtime:
                 decision = self.state["decision"]
                 if decision["status"] != "accepted" or not decision["text"]:
                     raise ValueError("Confirm a displayed alternative before speaking")
+                if data.get("text") != decision["text"]:
+                    raise ValueError("The message changed. Check it again before speaking")
                 started = time.perf_counter()
                 self.speaker.speak(decision["text"])
                 self.state["last_spoken"] = decision["text"]

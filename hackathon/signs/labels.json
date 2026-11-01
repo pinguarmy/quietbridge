@@ -1,0 +1,30 @@
+{
+  "vocabulary_kind": "pretrained_demo_gestures_not_bsl_or_asl",
+  "live_validated": false,
+  "labels": {
+    "THUMB_UP": {
+      "model_label": "Thumb_Up",
+      "gesture": "Thumb up",
+      "suggested_phrase": "Yes.",
+      "meaning_kind": "demo convention"
+    },
+    "THUMB_DOWN": {
+      "model_label": "Thumb_Down",
+      "gesture": "Thumb down",
+      "suggested_phrase": "No.",
+      "meaning_kind": "demo convention"
+    },
+    "OPEN_PALM": {
+      "model_label": "Open_Palm",
+      "gesture": "Open palm facing camera",
+      "suggested_phrase": "Please stop.",
+      "meaning_kind": "demo convention"
+    },
+    "POINTING_UP": {
+      "model_label": "Pointing_Up",
+      "gesture": "Index finger pointing up",
+      "suggested_phrase": "One moment, please.",
+      "meaning_kind": "demo convention"
+    }
+  }
+}

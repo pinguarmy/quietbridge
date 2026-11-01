@@ -57,21 +57,29 @@ Close the original Lipflow app and any other camera app. Open
 macOS asks, then wait for the camera and lip reader to show **ready**. If the
 wrong camera appears, stop the server and select another `--camera` index.
 
-Select **Lips**. Hold the record button or Space, mouth a clear 2–4 second English
-sentence and release. Confirm the displayed candidate, then press Speak. Record
+Choose **Lips only** in Settings. Hold the record button or Space, mouth a clear
+2–4 second English sentence and release. Review the displayed candidate and
+press Confirm & speak. Record
 the actual transcript, intended transcript and measured release-to-text time.
 Do not use rehearsal numbers as vision performance measurements.
 
-If lips fail, copy the visible error text. The sign-only path remains available
-once Peter's recognizer is integrated. `--sign-only` starts without loading VSR.
+If lips fail, copy the visible error text from Settings → Diagnostics. The sign-only
+path is integrated; `--sign-only` starts without loading VSR.
 
 ## Connect Peter's signs
 
-Peter provides `hackathon/signs/recognizer.py` with `SignRecognizer.process` and
-`close` as defined in the integration guide. Sam updates the configurable
-`hackathon/vocabulary.json` to Peter's exact labels and agreed fixed phrases.
-Placeholder entries remain `verified: false` and are ignored by live fusion.
-Restart after integrating the recognizer or changing the mapping.
+Peter's recognizer is integrated and the root vocabulary matches its four labels.
+Download the gesture model once and run his checker separately from the server:
+
+```sh
+python -m hackathon.signs.assets --download
+python -m hackathon.signs.demo --camera 0 --seconds 60
+```
+
+Use these live trials to agree the fixed phrases. Entries remain `verified: false`
+until tested and are ignored by live fusion. Enable only validated mappings, close
+the checker, and restart the integrated server. For combined input, start recording
+before gesturing, since a held pose does not emit repeatedly.
 
 ## Demo gate
 
@@ -81,6 +89,7 @@ missing modality. Turn Wi-Fi off and verify display and explicit Speak still
 work. Require three consecutive successful live runs. Keep a consented offline
 recording as fallback; do not commit it.
 
-The integration has passed 21 tests using synthetic events and mocked model
-workers. Real recognition, audible speech onset and repeatability on the Pro
-remain live acceptance checks.
+Sam's focused suite has passed 36 tests plus 14 subtests: 24 integration tests and
+12 gesture stabilization/asset tests. This does not load real vision models.
+Real recognition, audible speech onset and repeatability on the Pro remain live
+acceptance checks. Peter owns the separate "hello dev day" phrase work.
