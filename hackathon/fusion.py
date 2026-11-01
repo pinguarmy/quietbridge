@@ -27,7 +27,8 @@ def load_vocabulary(path=VOCABULARY) -> dict:
                 or not isinstance(entry.get("phrase"), str) or not entry["phrase"].strip()
                 or not isinstance(entry.get("matches"), list) or not entry["matches"]
                 or not all(isinstance(m, str) and tokens(m) for m in entry["matches"])
-                or not isinstance(entry.get("verified"), bool)):
+                or not isinstance(entry.get("verified"), bool)
+                or ("enabled" in entry and not isinstance(entry["enabled"], bool))):
             raise ValueError(f"Invalid vocabulary entry: {label}")
     return data
 
@@ -36,7 +37,7 @@ def usable_signs(events: list[SignEvent], vocabulary: dict, now_ms: int,
                  since_ms: int | None = None) -> list[SignEvent]:
     lower = max(now_ms - 4000, since_ms if since_ms is not None else now_ms - 4000)
     return [e for e in events if e.is_final and e.label in vocabulary
-            and vocabulary[e.label].get("verified") is True
+            and vocabulary[e.label].get("enabled", vocabulary[e.label].get("verified")) is True
             and math.isfinite(e.score) and 0.75 <= e.score <= 1
             and 0 <= e.start_ms <= e.end_ms <= now_ms and e.end_ms >= lower]
 
@@ -55,7 +56,8 @@ def fuse(lips: LipResult | None, events: list[SignEvent], vocabulary: dict,
         return Decision(candidates[0], "confirmation_needed", "lip_only", "local")
     entry = vocabulary[labels[0]]
     if not candidates:
-        return Decision(entry["phrase"], "accepted", "sign_only", "local")
+        status = "accepted" if entry.get("verified") is True else "confirmation_needed"
+        return Decision(entry["phrase"], status, "sign_only", "local")
     for candidate in candidates:
         words = tokens(candidate)
         matches = any(tokens(m) <= words for m in entry["matches"])
