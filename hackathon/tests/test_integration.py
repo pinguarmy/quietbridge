@@ -1,5 +1,6 @@
 """Run without model dependencies: python -m unittest discover -s hackathon/tests -v."""
 import json
+import re
 from pathlib import Path
 import queue
 import threading
@@ -249,6 +250,9 @@ class ServerTests(unittest.TestCase):
         self.assertNotIn('src="/app.js"', page)
         self.assertIn("More ways to", page)  # Readable fallback exists before JavaScript.
         self.assertNotIn("Open tool", page)
+        self.assertNotIn("mouth-animation", page)
+        self.assertNotIn("lips-sprite", page)
+        self.assertEqual(re.findall(r'data-sample="([A-Z])"', page), list("DEVDAY"))
         self.assertIn('class="sr-only"', page)
         with urlopen(self.url + "/purpose") as res:
             purpose = res.read().decode()
@@ -268,7 +272,7 @@ class ServerTests(unittest.TestCase):
             x, y, width, height = glyph["crop"]
             self.assertTrue(0 <= x < x + width <= data["width"])
             self.assertTrue(0 <= y < y + height <= data["height"])
-        for asset in ["/assets/lips-sprite-masculine.png", data["image"]]:
+        for asset in [data["image"]]:
             with urlopen(self.url + asset) as res:
                 self.assertEqual(res.headers["Content-Type"], "image/png")
                 self.assertEqual(res.read(8), b"\x89PNG\r\n\x1a\n")

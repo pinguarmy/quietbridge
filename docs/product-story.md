@@ -53,10 +53,9 @@ Unsupported characters use a neutral marker rather than an invented handshape.
 The story does not start speech, record frames or make recognition requests.
 The original chart and display-time crop map are retained under `hackathon/ui/`.
 The ASL MNIST data remains a separate experiment and is not mixed with these BSL illustrations.
-A generated four-pose masculine mouth sprite decoratively moves beside the emerging example
-word, then rests closed; reduced motion keeps the closed pose throughout. It is not
-a live mouth feed, speech synthesis or evidence of recognition. The original PNG
-and its generation prompt are retained together under `hackathon/ui/assets/`.
+Six linked cards illustrate DEV above DAY, then flip into the corresponding letters.
+The opening does not load or display a mouth sprite. Earlier generated mouth assets
+and prompts are retained as provenance only, separate from the active introduction.
 
 The purpose page uses the user's exact purpose/aim wording and two source-linked
 UK figures: the BDA's approximately 151,000 BSL-user estimate as reported by

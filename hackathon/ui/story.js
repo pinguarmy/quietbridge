@@ -9,14 +9,6 @@
   const animations = [];
   let finished = false, timer = null;
 
-  const mouth = document.getElementById('mouth-animation');
-  const sprite = mouth?.dataset?.sprite;
-  if (sprite) {
-    const image = new Image();
-    image.onload = () => { mouth.hidden = false; mouth.classList.add('has-mouth'); };
-    image.src = sprite;
-  }
-
   function finish(focusCTA = false) {
     finished = true;
     clearTimeout(timer);
@@ -110,7 +102,7 @@
         {transform:'translate(' + (targetX-x) + 'px,' + (targetY-y) + 'px) rotateX(-180deg)',opacity:0,offset:1}
       ], {duration:720,delay,easing:'cubic-bezier(.25,.5,.3,1)',fill:'forwards'}));
     }));
-    samples.forEach((card,index) => animations.push(card.animate([{transform:'rotateX(0deg)'},{transform:'rotateX(-180deg)'}],{duration:650,delay:index*90,easing:'cubic-bezier(.25,.5,.3,1)',fill:'forwards'})));
+    samples.forEach((card,index) => animations.push(card.animate([{transform:'rotateX(0deg)'},{transform:'rotateX(-180deg)'}],{duration:650,delay:index*40,easing:'cubic-bezier(.25,.5,.3,1)',fill:'forwards'})));
     timer = setTimeout(() => {
       finished = true; body.classList.remove('is-settling'); body.classList.add('is-complete');
       status.textContent = 'Your words. Your choice.';
