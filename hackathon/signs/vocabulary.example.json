@@ -1,0 +1,6 @@
+{
+  "THUMB_UP": {"phrase": "Yes.", "matches": ["yes"], "verified": false},
+  "THUMB_DOWN": {"phrase": "No.", "matches": ["no"], "verified": false},
+  "OPEN_PALM": {"phrase": "Please stop.", "matches": ["stop"], "verified": false},
+  "POINTING_UP": {"phrase": "One moment, please.", "matches": ["one moment", "wait"], "verified": false}
+}
