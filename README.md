@@ -15,7 +15,7 @@ python -m hackathon.server --rehearsal  # Python 3.11/3.12，无需模型的模�
 打开 <http://127.0.0.1:8765>。真实摄像头、模型准备与 Peter 的手势接入见[本地演示指南](hackathon/README.md)。
 模拟输入不代表真实识别已验证。Windows 基础应用安装见[原 Lipflow 指南](docs/lipflow-legacy.md)。已安装的开发机无需重跑 setup。
 
-**当前状态：**组合运行时、口型适配、UI、确认流程和本地语音已实现；20 项轻量集成测试通过，浏览器模拟输入演练已验证。真实口型准确率与延迟仍待演示 Mac 实测；手势识别器等待 Peter 接入。当前词表是未验证占位项，不进入真实融合。共享类型见 [`hackathon/contracts.py`](hackathon/contracts.py)。
+**当前状态：**组合运行时、口型适配、简洁沟通页、独立设置页、确认流程和本地语音已实现；21 项轻量集成测试通过，浏览器模拟输入演练已验证。真实口型准确率与延迟仍待演示 Mac 实测；手势识别器等待 Peter 接入。当前词表是未验证占位项，不进入真实融合。共享类型见 [`hackathon/contracts.py`](hackathon/contracts.py)。
 
 ## 两人并行开工
 

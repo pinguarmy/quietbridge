@@ -13,8 +13,10 @@ python -m hackathon.server --rehearsal
 ```
 
 Open <http://127.0.0.1:8765>. This mode uses explicitly synthetic text and sign events;
-it never opens the camera and does not claim vision accuracy or latency. Try matching
-and conflicting inputs, confirm one displayed alternative, and press Speak. Native
+it never opens the camera and does not claim vision accuracy or latency. Open
+**Settings → Try an example** to preview matching or conflicting inputs. The app
+returns to the communication screen. Choose an alternative when the inputs conflict,
+then explicitly press **Confirm & speak**. Native
 speech uses the installed macOS `say` voice; it requires no cloud service. No message
 is spoken automatically. The visible lip sentence always needs confirmation because
 the current engine does not supply a calibrated confidence score.
@@ -44,7 +46,9 @@ Camera access for the terminal/Python process if macOS asks. Close the original
 Lipflow app or other camera apps before testing. Python owns the only camera; the
 browser receives local JPEG previews and does not request its own camera access.
 
-Select Gestures, Lips or Both together. Hold the record button or Space on the page
+Choose inputs on the separate **Settings** page; the main screen opens with lips
+and gestures enabled. Diagnostics, vocabulary and rehearsal controls stay in Settings.
+Hold the record button or Space on the communication page
 for a 2–4 second sentence, then release. There is a 400 ms tail and a 10 second
 recording limit; Escape or Cancel discards a recording. The hand worker continues
 while the lip model decodes. For sign-only without loading the lip model:
@@ -92,7 +96,8 @@ This is a small gesture recognizer, not a general BSL/ASL translator.
 - Sign-only uses a fixed phrase for a supported, verified final event.
 - Lip-only shows the top candidate and asks for confirmation.
 - Combined reranks up to three lip candidates when a single sign concept agrees.
-  A keyword cannot prove a whole sentence, so the user confirms before speaking.
+  A keyword cannot prove a whole sentence, so the user explicitly reviews the text
+  and presses Confirm & speak.
 - Conflict shows alternatives; no concatenated glosses or invented sentences.
 - Negation and quantities prevent simple concept agreement. Multiple labels also
   require a choice. Missing lip output can still use a supported sign.

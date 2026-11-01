@@ -81,6 +81,6 @@ missing modality. Turn Wi-Fi off and verify display and explicit Speak still
 work. Require three consecutive successful live runs. Keep a consented offline
 recording as fallback; do not commit it.
 
-The integration has passed 20 tests using synthetic events and mocked model
+The integration has passed 21 tests using synthetic events and mocked model
 workers. Real recognition, audible speech onset and repeatability on the Pro
 remain live acceptance checks.

@@ -157,6 +157,12 @@ class ServerTests(unittest.TestCase):
             urlopen(self.url + "/../pyproject.toml")
         self.assertEqual(err.exception.code, 404)
 
+    def test_communication_and_settings_pages_are_served(self):
+        for path in ["/", "/settings"]:
+            with self.subTest(path=path), urlopen(self.url + path) as res:
+                self.assertIn("text/html", res.headers["Content-Type"])
+                self.assertIn(b"QuietBridge", res.read())
+
 
 class WorkerTests(unittest.TestCase):
     def wait_for(self, condition):
