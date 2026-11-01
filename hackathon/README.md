@@ -1,4 +1,4 @@
-# LipFlow local hackathon demo
+# QuietBridge local hackathon demo
 
 Sam owns the integration outside `hackathon/signs/`; Peter owns that directory. The
 shared dataclasses in `hackathon/contracts.py` were pushed on `main` in commit

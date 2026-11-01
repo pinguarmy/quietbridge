@@ -105,7 +105,7 @@ def main():
                       vocabulary=load_vocabulary(args.vocabulary) if args.vocabulary else None)
     server = make_server(runtime, args.port)
     runtime.start()
-    print(f"LipFlow: http://127.0.0.1:{server.server_port}", flush=True)
+    print(f"QuietBridge: http://127.0.0.1:{server.server_port}", flush=True)
     print("REHEARSAL — synthetic inputs, no recognition" if args.rehearsal else
           "LOCAL — no cloud inference. Wait for warmup before recording.", flush=True)
     try:
