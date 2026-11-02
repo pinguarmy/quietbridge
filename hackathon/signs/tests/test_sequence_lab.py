@@ -479,3 +479,229 @@ def test_state_includes_profile_metadata(conn, server):
     assert state["profile"]["id"] == state["active_profile"]
     assert "gestures" in state["profile"]
     assert "lip_prompts" in state["profile"]
+
+
+# -- paired recording flow -----------------------------------------------
+
+from hackathon.signs.tests.test_mouth_capture import FakeTracker
+
+
+def _paired_start(conn, server, profile="default", label="HELLO",
+                  text="Hello, how are you?", split="train", session="pair_s1"):
+    return _json(conn, server, "POST", "/api/paired/start",
+                 body=json.dumps({
+                     "profile": profile,
+                     "label": label,
+                     "text": text,
+                     "split": split,
+                     "session": session,
+                 }),
+                 headers={"Content-Type": "application/json"})
+
+
+def test_paired_validation(conn, server):
+    # Missing / empty profile
+    res, err = _paired_start(conn, server, profile="")
+    assert res.status == 400
+    assert "profile" in err["error"]
+
+    # Invalid profile
+    res, err = _paired_start(conn, server, profile="non_existent_profile_xyz")
+    assert res.status == 400
+
+    # Invalid split
+    res, err = _paired_start(conn, server, split="invalid_split")
+    assert res.status == 400
+
+    # Invalid session
+    res, err = _paired_start(conn, server, session="")
+    assert res.status == 400
+
+    # Text not in lip prompts
+    res, err = _paired_start(conn, server, text="Unknown prompt not configured")
+    assert res.status == 400
+    assert "lip prompts" in err["error"]
+
+    # Label not in gestures and not REST
+    res, err = _paired_start(conn, server, label="NOT_A_GESTURE")
+    assert res.status == 400
+    assert "gestures or REST" in err["error"]
+
+    # REST label is explicitly allowed
+    res, data = _paired_start(conn, server, label="REST", session="s_rest")
+    assert res.status == 200
+    assert data["paired"] is True
+    assert data["label"] == "REST"
+    _json(conn, server, "POST", "/api/paired/discard")
+
+    # While paired recording is active, starting another should be 409
+    res, data = _paired_start(conn, server, label="HELLO", session="s_conflict")
+    assert res.status == 200
+    res2, err2 = _paired_start(conn, server, label="HELLO", session="s_conflict2")
+    assert res2.status == 409
+    # Standalone start should also be 409
+    res3, _ = _start(conn, server, session="s_conflict3")
+    assert res3.status == 409
+    _json(conn, server, "POST", "/api/paired/discard")
+
+
+def test_paired_recording_contract(conn, server, monkeypatch):
+    server.mouth._tracker_factory = FakeTracker
+    monkeypatch.setattr("lipflow.dictation.clip_problem", lambda rec: None)
+    monkeypatch.setattr("lipflow.dictation.rois_for",
+                        lambda rec: np.zeros((20, 96, 96), dtype=np.uint8))
+
+    res, start_data = _paired_start(conn, server, profile="default", label="HELLO",
+                                    text="Hello, how are you?", split="train", session="pair_contract_s1")
+    assert res.status == 200
+    assert start_data["recording"] is True
+    assert start_data["paired"] is True
+    pair_id = start_data["pair_id"]
+    assert pair_id
+
+    # Post 3 frames
+    for _ in range(3):
+        res_f, frame = _post_frame(conn, server)
+        assert res_f.status == 200
+        assert frame["paired"] is True
+        assert frame["recording"] is True
+
+    # Stop paired trial
+    res, stop_data = _json(conn, server, "POST", "/api/paired/stop", body=b"{}")
+    assert res.status == 200
+    assert stop_data["pair_id"] == pair_id
+    assert stop_data["saved_count"] == 1
+    seq_path = Path(stop_data["saved"]["sequence"])
+    mouth_path = Path(stop_data["saved"]["mouth"])
+    assert seq_path.is_file()
+    assert mouth_path.is_file()
+
+    # Check Sequence NPZ contract
+    with np.load(seq_path, allow_pickle=False) as seq_z:
+        assert str(seq_z["pair_id"]) == pair_id
+        assert str(seq_z["profile_id"]) == "default"
+        assert str(seq_z["session_id"]) == "pair_contract_s1"
+        assert str(seq_z["split"]) == "train"
+        assert str(seq_z["label"]) == "HELLO"
+        assert str(seq_z["expected_text"]) == "Hello, how are you?"
+        seq_trial_id = str(seq_z["trial_id"])
+        assert len(seq_trial_id) > 0
+        assert seq_z["landmarks"].shape == (3, 2, 21, 3)
+        assert seq_z["timestamps_ms"].shape == (3,)
+
+    # Check Mouth NPZ contract
+    with np.load(mouth_path, allow_pickle=False) as mouth_z:
+        assert str(mouth_z["pair_id"]) == pair_id
+        assert str(mouth_z["profile_id"]) == "default"
+        assert str(mouth_z["session_id"]) == "pair_contract_s1"
+        assert str(mouth_z["split"]) == "train"
+        assert str(mouth_z["gesture_label"]) == "HELLO"
+        assert str(mouth_z["text"]) == "Hello, how are you?"
+        mouth_trial_id = str(mouth_z["trial_id"])
+        assert len(mouth_trial_id) > 0
+        assert mouth_trial_id != seq_trial_id  # distinct trial IDs
+        assert mouth_z["rois"].shape == (20, 96, 96)
+        assert mouth_z["timestamps_ms"].shape == (3,)
+        assert mouth_z["mouth_open"].shape == mouth_z["timestamps_ms"].shape
+        assert mouth_z["face_present"].shape == mouth_z["timestamps_ms"].shape
+        assert mouth_z["mouth_open"].dtype == np.float32
+        assert mouth_z["face_present"].dtype == bool
+
+    # Cross-module contract: the fusion evaluator consumes the actual API output.
+    from hackathon.evaluate_fusion import load_pairs
+    pairs = load_pairs(server.profile_manager.get_profile("default"), "train")
+    assert len(pairs) == 1
+    assert pairs[0][0] == pair_id
+    assert pairs[0][1]["trial_id"].item() != pairs[0][2]["trial_id"].item()
+    assert len(pairs[0][2]["rois"]) == 20
+    assert len(pairs[0][2]["timestamps_ms"]) == 3
+
+    # Second trial with same session never overwrites
+    res2, start_data2 = _paired_start(conn, server, profile="default", label="WATER",
+                                      text="I would like some water.", split="train", session="pair_contract_s1")
+    assert res2.status == 200
+    pair_id2 = start_data2["pair_id"]
+    assert pair_id2 != pair_id
+    _post_frame(conn, server)
+    res_stop2, stop_data2 = _json(conn, server, "POST", "/api/paired/stop", body=b"{}")
+    assert res_stop2.status == 200
+    seq_path2 = Path(stop_data2["saved"]["sequence"])
+    mouth_path2 = Path(stop_data2["saved"]["mouth"])
+    assert seq_path2 != seq_path
+    assert mouth_path2 != mouth_path
+    assert seq_path.is_file() and seq_path2.is_file()
+    assert mouth_path.is_file() and mouth_path2.is_file()
+
+
+def test_paired_discard(conn, server, monkeypatch):
+    server.mouth._tracker_factory = FakeTracker
+    monkeypatch.setattr("lipflow.dictation.clip_problem", lambda rec: None)
+
+    res, _ = _paired_start(conn, server, session="s_discard_test")
+    assert res.status == 200
+    _post_frame(conn, server)
+    res_d, disc = _json(conn, server, "POST", "/api/paired/discard", body=b"{}")
+    assert res_d.status == 200
+    assert disc["discarded"] is True
+    assert disc["recording"] is False
+    assert disc["paired"] is False
+
+    res_st, st = _json(conn, server, "GET", "/api/state", token=False)
+    assert st["recording"] is False
+    assert st["paired"] is False
+
+
+def test_paired_session_split_isolation(conn, server, monkeypatch):
+    server.mouth._tracker_factory = FakeTracker
+    monkeypatch.setattr("lipflow.dictation.clip_problem", lambda rec: None)
+    monkeypatch.setattr("lipflow.dictation.rois_for",
+                        lambda rec: np.zeros((20, 96, 96), dtype=np.uint8))
+
+    # Save a paired trial in train
+    _paired_start(conn, server, split="train", session="sess_leak_guard")
+    _post_frame(conn, server)
+    _json(conn, server, "POST", "/api/paired/stop", body=b"{}")
+
+    # Reject paired start in validation with same session
+    res, err = _paired_start(conn, server, split="validation", session="sess_leak_guard")
+    assert res.status == 400
+    assert "split leakage" in err["error"]
+
+    # Reject paired start in test with same session
+    res, err = _paired_start(conn, server, split="test", session="sess_leak_guard")
+    assert res.status == 400
+    assert "split leakage" in err["error"]
+
+
+def test_paired_stop_failure_preserves_diagnostics(conn, server, monkeypatch):
+    server.mouth._tracker_factory = FakeTracker
+    monkeypatch.setattr("lipflow.dictation.clip_problem", lambda rec: None)
+
+    # 1. Zero frames: sequence has no frames captured
+    _paired_start(conn, server, session="s_zero_frames")
+    res, err = _json(conn, server, "POST", "/api/paired/stop", body=b"{}")
+    assert res.status == 400
+    assert "no frames captured" in err["error"]
+    _json(conn, server, "POST", "/api/paired/discard")
+
+    # 2. Mouth failure: clip_problem returns problem
+    monkeypatch.setattr("lipflow.dictation.clip_problem", lambda rec: ["Too short", "need more frames"])
+    _paired_start(conn, server, session="s_mouth_fail")
+    _post_frame(conn, server)
+    res, err = _json(conn, server, "POST", "/api/paired/stop", body=b"{}")
+    assert res.status == 400
+    assert "mouth capture failed" in err["error"]
+    assert "Too short" in err["error"]
+    _json(conn, server, "POST", "/api/paired/discard")
+
+
+def test_lab_html_contains_paired_ui(conn, server):
+    # Verify the actual lab.html file served at GET / (without monkeypatching LAB_HTML)
+    # has the paired tab, paired box, selectors, and clear collection disclaimer
+    from hackathon.signs import lab as lab_module
+    raw_html = lab_module.LAB_HTML.read_text(encoding="utf-8")
+    assert 'id="pairedTab"' in raw_html
+    assert 'id="pairedBox"' in raw_html
+    assert 'id="pairedGestureSelect"' in raw_html
+    assert 'id="pairedPromptSelect"' in raw_html
+    assert "Paired data collection only" in raw_html or "no recognition" in raw_html.lower()

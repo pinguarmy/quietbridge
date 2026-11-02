@@ -90,6 +90,10 @@ button:focus-visible{outline:3px solid #92b69d;outline-offset:2px}
 .dialog-buttons{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
 .dialog-buttons button{min-height:40px;padding:8px 16px;font-size:14px}
 .dialog-buttons .btn-cancel{background:#e7ece3;color:#354d44}
+.paired-box{background:#edf4ee;border:1px solid #c7dccb;border-radius:10px;padding:12px;margin:10px 0}
+.paired-box label{display:block;font-size:12px;font-weight:700;color:#285d48;text-transform:uppercase;margin:8px 0 4px}
+.paired-box select{width:100%;font:inherit;font-size:14px;padding:6px 8px;border-radius:6px;border:1px solid #b6c4b9;background:#fff}
+.paired-note{font-size:12px;color:#204838;line-height:1.4;margin-bottom:8px}
 </style>
 </head>
 <body>
@@ -107,6 +111,7 @@ button:focus-visible{outline:3px solid #92b69d;outline-offset:2px}
   <nav class="tabs" aria-label="Recording type">
     <button id="gesturesTab" class="selected" type="button">Gestures</button>
     <button id="lipsTab" type="button">Lips</button>
+    <button id="pairedTab" type="button">Paired</button>
   </nav>
 </header>
 
@@ -167,6 +172,15 @@ button:focus-visible{outline:3px solid #92b69d;outline-offset:2px}
 
   <section class="lesson" aria-label="Current recording lesson">
     <div id="round" class="kicker">Stage 2 · Training Round</div>
+    <div id="pairedBox" class="paired-box" hidden>
+      <div class="paired-note">
+        <strong>Paired Multimodal Collection:</strong> Synchronous gesture + silent lip recording. Saves paired dataset samples; no recognition or transcription claimed.
+      </div>
+      <label for="pairedGestureSelect">Profile Gesture (or REST):</label>
+      <select id="pairedGestureSelect"></select>
+      <label for="pairedPromptSelect">Intended Lip Prompt:</label>
+      <select id="pairedPromptSelect"></select>
+    </div>
     <div id="pose" class="pose" aria-hidden="true">👋</div>
     <h2 id="meaning" class="meaning">HELLO</h2>
     <div id="concept" class="concept">Hello / Greeting</div>
@@ -281,8 +295,8 @@ const TARGET_FPS=25;
 const UPLOAD_INTERVAL_MS=40; // 1000 / 25 fps
 let framesReceivedCount=0,recordingStartTime=0;
 
-// Default stage targets: train: 5 gestures / 3 lips; validation: 3 gestures / 2 lips; test: 3 gestures / 2 lips
-const STAGE_TARGETS={train:{gestures:5,lips:3},validation:{gestures:3,lips:2},test:{gestures:3,lips:2}};
+// Default stage targets: train: 5 gestures / 3 lips / 3 paired; validation: 3 gestures / 2 lips / 2 paired; test: 3 gestures / 2 lips / 2 paired
+const STAGE_TARGETS={train:{gestures:5,lips:3,paired:3},validation:{gestures:3,lips:2,paired:2},test:{gestures:3,lips:2,paired:2}};
 
 const sessionStoreKey='quietbridge-guided-sessions-v3';
 let sessionStore={};
@@ -389,14 +403,30 @@ function render(){
   $('setupLayout').hidden=true;
 
   const isLip=mode==='lips';
-  $('gesturesTab').classList.toggle('selected',!isLip);
+  const isPaired=mode==='paired';
+  $('gesturesTab').classList.toggle('selected',mode==='gestures');
   $('lipsTab').classList.toggle('selected',isLip);
-  $('title').textContent=isLip?'Mouth the prompt. Record one try.':'Copy the gesture. Record one try.';
-  $('intro').textContent=isLip?'Practice custom lip phrases silently for the face tracker.':'Per-profile custom gesture sequences and lip clips. Data remains local on this Mac.';
+  $('pairedTab').classList.toggle('selected',isPaired);
 
-  $('mouthPrompt').hidden=!isLip;
-  $('mouthNote').hidden=!isLip;
-  $('trackingNote').hidden=!isLip;
+  if(isPaired){
+    $('title').textContent='Record paired gesture + lip trial.';
+    $('intro').textContent='Synchronized recording of hand landmarks and silent mouth crops. Paired data collection only — no recognition or transcription claimed.';
+  }else if(isLip){
+    $('title').textContent='Mouth the prompt. Record one try.';
+    $('intro').textContent='Practice custom lip phrases silently for the face tracker.';
+  }else{
+    $('title').textContent='Copy the gesture. Record one try.';
+    $('intro').textContent='Per-profile custom gesture sequences and lip clips. Data remains local on this Mac.';
+  }
+
+  $('pairedBox').hidden=!isPaired;
+  $('mouthPrompt').hidden=!isLip&&!isPaired;
+  $('mouthNote').hidden=!isLip&&!isPaired;
+  $('trackingNote').hidden=false;
+  $('trackingNote').textContent=isPaired
+    ?'Paired data collection only · No recognition or transcription claimed'
+    :(isLip?'Silent mouth tracking only · not a transcript or trained recognizer':'Tracking only · not a transcript or trained recognizer');
+
   $('pose').hidden=isLip;
   $('meaning').hidden=isLip;
   $('concept').hidden=isLip;
@@ -408,7 +438,58 @@ function render(){
   const prog=getProgressData(activeProfile.id,currentStage,mode);
   const targetCount=STAGE_TARGETS[currentStage]?.[mode]||3;
 
-  if(isLip){
+  if(isPaired){
+    const gestures=activeProfile.gestures||[];
+    const prompts=activeProfile.lip_prompts||[];
+    const gSel=$('pairedGestureSelect');
+    const pSel=$('pairedPromptSelect');
+    const curG=gSel.value;
+    const curP=pSel.value;
+    gSel.innerHTML='';
+    gestures.forEach(g=>{
+      const opt=document.createElement('option');
+      opt.value=g.label;
+      opt.textContent=`${g.emoji||'✋'} ${g.display_name||g.label} (${g.label})`;
+      gSel.appendChild(opt);
+    });
+    if(!gestures.some(g=>g.label==='REST')){
+      const opt=document.createElement('option');
+      opt.value='REST';
+      opt.textContent='😌 Rest (REST negative class)';
+      gSel.appendChild(opt);
+    }
+    pSel.innerHTML='';
+    prompts.forEach(p=>{
+      const opt=document.createElement('option');
+      opt.value=p;
+      opt.textContent=p;
+      pSel.appendChild(opt);
+    });
+    if(curG&&Array.from(gSel.options).some(o=>o.value===curG)){
+      gSel.value=curG;
+    }else if(gestures[prog.index%Math.max(gestures.length,1)]){
+      gSel.value=gestures[prog.index%gestures.length].label;
+    }
+    if(curP&&Array.from(pSel.options).some(o=>o.value===curP)){
+      pSel.value=curP;
+    }else if(prompts[prog.index%Math.max(prompts.length,1)]){
+      pSel.value=prompts[prog.index%prompts.length];
+    }
+
+    const selectedLabel=gSel.value;
+    const g=gestures.find(x=>x.label===selectedLabel)||{label:'REST',emoji:'😌',display_name:'Rest',concept:'Rest / negative class',description:'Relax into a loose half-fist, or lower your hands.',hint:'Record ordinary relaxed moments as the negative class.'};
+    $('pose').textContent=g.emoji||'✋';
+    $('meaning').textContent=g.display_name?`${g.display_name} (${g.label})`:g.label;
+    $('concept').textContent=g.concept?`Concept: ${g.concept}`:'';
+    $('instruction').textContent=g.description||g.text||'';
+    $('hint').textContent=g.hint||'';
+
+    $('mouthPrompt').textContent=pSel.value||'No prompt configured';
+    $('round').textContent=`Stage: ${$('stageName').textContent} · Paired Multimodal`;
+    while(prog.counts.length<=prog.index)prog.counts.push(0);
+    $('progress').textContent=`${prog.counts[prog.index]||0} / ${targetCount} paired recordings`;
+    $('next').textContent='Next pair →';
+  }else if(isLip){
     const prompts=activeProfile.lip_prompts||[];
     if(prog.index>=prompts.length)prog.index=0;
     while(prog.counts.length<prompts.length)prog.counts.push(0);
@@ -438,9 +519,12 @@ function render(){
 
 function checkStageCompletion(){
   const prog=getProgressData(activeProfile.id,currentStage,mode);
-  const items=mode==='lips'?(activeProfile.lip_prompts||[]):(activeProfile.gestures||[]);
+  let items;
+  if(mode==='lips') items=activeProfile.lip_prompts||[];
+  else if(mode==='paired') items=activeProfile.gestures||[];
+  else items=activeProfile.gestures||[];
   const targetCount=STAGE_TARGETS[currentStage]?.[mode]||3;
-  const allMet=items.length>0&&prog.counts.length===items.length&&prog.counts.every(c=>c>=targetCount);
+  const allMet=items.length>0&&prog.counts.length>=items.length&&items.every((_,i)=>(prog.counts[i]||0)>=targetCount);
 
   if(allMet){
     $('advanceBox').hidden=false;
@@ -479,6 +563,9 @@ function controls(){
   $('next').disabled=recording||working||currentStage==='setup';
   $('gesturesTab').disabled=recording||working;
   $('lipsTab').disabled=recording||working;
+  $('pairedTab').disabled=recording||working;
+  $('pairedGestureSelect').disabled=recording||working;
+  $('pairedPromptSelect').disabled=recording||working;
 }
 
 function clearMouth(message){
@@ -606,8 +693,10 @@ async function sendFrame(){
       const seconds=((Date.now()-started)/1000).toFixed(1);
       if(mode==='gestures'){
         note(`${seconds}s · ${frames} frames · Coordinates recorded, not recognized/trained. Finish & save when done.`);
-      }else{
+      }else if(mode==='lips'){
         note(`${seconds}s · ${frames} mouth frames. Speak silently at a natural pace; finish when done.`);
+      }else{
+        note(`${seconds}s · ${frames} frames · Synchronized pair recorded. Paired data collection only.`);
       }
     }
     if(d.mouth?.limit_reached||d.limit_reached){
@@ -669,7 +758,10 @@ $('btnNewSession').onclick=()=>{
 
 function advanceItem(){
   const prog=getProgressData(activeProfile.id,currentStage,mode);
-  const items=mode==='lips'?(activeProfile.lip_prompts||[]):(activeProfile.gestures||[]);
+  let items;
+  if(mode==='lips') items=activeProfile.lip_prompts||[];
+  else if(mode==='paired') items=activeProfile.gestures||[];
+  else items=activeProfile.gestures||[];
   if(!items.length)return;
   prog.index=(prog.index+1)%items.length;
   saveProgressData(activeProfile.id,currentStage,mode,prog);
@@ -695,6 +787,23 @@ $('lipsTab').onclick=()=>{
   render();
 };
 
+$('pairedTab').onclick=()=>{
+  if(recording||working)return;
+  mode='paired';
+  note('Ready. Select gesture & intended prompt, then Start recording.');
+  render();
+};
+
+$('pairedGestureSelect').onchange=()=>{
+  if(recording||working)return;
+  render();
+};
+
+$('pairedPromptSelect').onchange=()=>{
+  if(recording||working)return;
+  render();
+};
+
 $('record').onclick=async()=>{
   if(working)return;
   working=true;
@@ -716,7 +825,7 @@ $('record').onclick=async()=>{
           session:session,
           profile:activeProfile.id
         });
-      }else{
+      }else if(mode==='lips'){
         const prompts=activeProfile.lip_prompts||[];
         const prog=getProgressData(activeProfile.id,currentStage,mode);
         const p=prompts[prog.index];
@@ -727,21 +836,39 @@ $('record').onclick=async()=>{
           session:session,
           profile:activeProfile.id
         });
+      }else if(mode==='paired'){
+        const gLabel=$('pairedGestureSelect').value;
+        const pText=$('pairedPromptSelect').value;
+        if(!gLabel)throw Error('Select a profile gesture or REST');
+        if(!pText)throw Error('Select an intended lip prompt');
+        await action('paired/start',{
+          profile:activeProfile.id,
+          label:gLabel,
+          text:pText,
+          split:split,
+          session:session
+        });
       }
       recording=true;
       frames=0;
       framesReceivedCount=0;
       started=Date.now();
       recordingStartTime=Date.now();
-      note(mode==='lips'
-        ?'Recording. Mouth these words silently at a natural pace.'
-        :'Recording. Pause still for 0.5s, do the gesture once, return to REST for 0.5s.');
+      if(mode==='lips'){
+        note('Recording. Mouth these words silently at a natural pace.');
+      }else if(mode==='gestures'){
+        note('Recording. Pause still for 0.5s, do the gesture once, return to REST for 0.5s.');
+      }else{
+        note('Recording paired trial. Perform gesture and mouth prompt silently. Paired collection only.');
+      }
     }else{
       if(!frames)throw Error('No frames received yet. Wait for live camera guide, then save.');
       if(mode==='gestures'){
         await action('stop');
-      }else{
+      }else if(mode==='lips'){
         await action('mouth/stop',{});
+      }else if(mode==='paired'){
+        await action('paired/stop',{});
       }
       recording=false;
       const prog=getProgressData(activeProfile.id,currentStage,mode);
@@ -749,9 +876,13 @@ $('record').onclick=async()=>{
       prog.counts[prog.index]=(prog.counts[prog.index]||0)+1;
       saveProgressData(activeProfile.id,currentStage,mode,prog);
 
-      note(mode==='lips'
-        ?'Mouth crops saved on this Mac. Take a pause before next prompt.'
-        :'Coordinates saved on this Mac. Take a pause before next gesture.');
+      if(mode==='lips'){
+        note('Mouth crops saved on this Mac. Take a pause before next prompt.');
+      }else if(mode==='gestures'){
+        note('Coordinates saved on this Mac. Take a pause before next gesture.');
+      }else{
+        note('Paired trial saved: hand coordinates + mouth crops. Paired data capture only.');
+      }
 
       const targetCount=STAGE_TARGETS[currentStage]?.[mode]||3;
       if(prog.counts[prog.index]>=targetCount){
@@ -775,8 +906,10 @@ $('discard').onclick=async()=>{
   try{
     if(mode==='gestures'){
       await action('discard');
-    }else{
+    }else if(mode==='lips'){
       await action('mouth/discard');
+    }else if(mode==='paired'){
+      await action('paired/discard');
     }
     recording=false;
     note('Trial discarded without saving.');
@@ -973,11 +1106,15 @@ window.addEventListener('pagehide',()=>{
 request('/api/state').then(async s=>{
   token=s.token;
   await loadProfiles();
-  if(mode==='gestures'&&s.recording){
+  if(s.paired){
+    mode='paired';
+    recording=true;
+    frames=s.recorded_frames||0;
+    note('An earlier paired trial is active. Finish & save it before switching lessons.',true);
+  }else if(mode==='gestures'&&s.recording){
     recording=true;
     note('An earlier gesture trial is active. Finish & save it before switching lessons.',true);
-  }
-  if(s.mouth?.recording){
+  }else if(s.mouth?.recording){
     mode='lips';
     recording=true;
     frames=s.mouth.frames||0;

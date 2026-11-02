@@ -146,6 +146,9 @@ class _Recording:
     landmarks: list = field(default_factory=list)  # per frame (2, 21, 3) float32
     hand_present: list = field(default_factory=list)  # per frame (2,) bool
     handedness: list = field(default_factory=list)  # per frame (2,) strings
+    pair_id: str | None = None
+    profile_id: str | None = None
+    expected_text: str | None = None
 
 
 class _LabServer(ThreadingHTTPServer):
@@ -165,6 +168,7 @@ class _LabServer(ThreadingHTTPServer):
         self.max_seconds = max_seconds
         self.lock = threading.Lock()
         self.recording: _Recording | None = None
+        self.paired_recording: dict | None = None
         self.saved_count = 0
         self.last_saved = ""
         self._last_timestamp_ms: int | None = None
@@ -230,33 +234,26 @@ def _save_sequence(server: _LabServer, rec: _Recording) -> Path:
     out_dir = target_root / rec.split
     out_dir.mkdir(parents=True, exist_ok=True)
     destination = out_dir / f"{rec.session}_{trial_id}.npz"
+    payload = {
+        "timestamps_ms": np.asarray(rec.timestamps_ms, dtype=np.int64),
+        "landmarks": np.stack(rec.landmarks).astype(np.float32),
+        "hand_present": np.stack(rec.hand_present).astype(bool),
+        "handedness": np.stack(rec.handedness),
+        "label": np.asarray(rec.label),
+        "split": np.asarray(rec.split),
+        "session_id": np.asarray(rec.session),
+        "trial_id": np.asarray(trial_id),
+    }
+    if rec.pair_id is not None:
+        payload["pair_id"] = np.asarray(rec.pair_id)
+    if rec.profile_id is not None:
+        payload["profile_id"] = np.asarray(rec.profile_id)
+    if rec.expected_text is not None:
+        payload["expected_text"] = np.asarray(rec.expected_text)
+
     # Exclusive creation: never overwrite an existing recording.
     with destination.open("xb") as archive:
-        np.savez_compressed(
-            archive,
-            timestamps_ms=np.asarray(rec.timestamps_ms, dtype=np.int64),
-            landmarks=np.stack(rec.landmarks).astype(np.float32),
-            hand_present=np.stack(rec.hand_present).astype(bool),
-            handedness=np.stack(rec.handedness),
-            label=np.asarray(rec.label),
-            split=np.asarray(rec.split),
-            session_id=np.asarray(rec.session),
-            trial_id=np.asarray(trial_id),
-        )
-    return destination
-    # Exclusive creation: never overwrite an existing recording.
-    with destination.open("xb") as archive:
-        np.savez_compressed(
-            archive,
-            timestamps_ms=np.asarray(rec.timestamps_ms, dtype=np.int64),
-            landmarks=np.stack(rec.landmarks).astype(np.float32),
-            hand_present=np.stack(rec.hand_present).astype(bool),
-            handedness=np.stack(rec.handedness),
-            label=np.asarray(rec.label),
-            split=np.asarray(rec.split),
-            session_id=np.asarray(rec.session),
-            trial_id=np.asarray(trial_id),
-        )
+        np.savez_compressed(archive, **payload)
     return destination
 
 
@@ -412,19 +409,22 @@ class _Handler(BaseHTTPRequestHandler):
                 combined_support = list(dict.fromkeys(GESTURE_SUPPORT + prof_labels))
                 payload = {
                     "token": self.server.token,
-                    "recording": rec is not None,
+                    "recording": rec is not None or bool(self.server.mouth.snapshot()["recording"]),
+                    "paired": self.server.paired_recording is not None,
                     "saved_count": self.server.saved_count,
                     "last_saved": self.server.last_saved,
                     "model_ready": self.server.engine is not None,
                     "gesture_support": combined_support,
                     "note": STATE_NOTE,
-                    "recorded_frames": len(rec.timestamps_ms) if rec else 0,
-                    "limit_reached": bool(rec and rec.limit_reached),
+                    "recorded_frames": len(rec.timestamps_ms) if rec else (self.server.mouth.snapshot().get("frames", 0)),
+                    "limit_reached": bool((rec and rec.limit_reached) or self.server.mouth.snapshot().get("limit_reached")),
                     "lips": self.server.lips.snapshot(),
                     "mouth": self.server.mouth.snapshot(),
                     "active_profile": active_p.id,
                     "profile": active_p.to_dict(include_stats=True),
                 }
+                if self.server.paired_recording is not None:
+                    payload["paired_recording"] = dict(self.server.paired_recording)
             self._send_json(200, payload)
             return
         self._error(404, "not found")
@@ -442,6 +442,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_stop()
         elif self.path == "/api/discard":
             self._handle_discard()
+        elif self.path.startswith("/api/paired/"):
+            self._handle_paired()
         elif self.path.startswith("/api/lips/"):
             self._handle_lips()
         elif self.path.startswith("/api/mouth/"):
@@ -486,9 +488,10 @@ class _Handler(BaseHTTPRequestHandler):
                 "events": [asdict(event) for event in result.events],
                 "hand_count": len(result.hands),
                 "process_ms": process_ms,
-                "recording": rec is not None,
-                "recorded_frames": len(rec.timestamps_ms) if rec else 0,
-                "limit_reached": bool(rec and rec.limit_reached),
+                "recording": rec is not None or bool(mouth_state.get("recording")),
+                "recorded_frames": len(rec.timestamps_ms) if rec else (mouth_state.get("frames", 0)),
+                "limit_reached": bool((rec and rec.limit_reached) or mouth_state.get("limit_reached")),
+                "paired": self.server.paired_recording is not None,
             }
         # Same decoded camera frame, independent latest-frame lip worker. Hand
         # inference and browser controls never wait for a VSR decode.
@@ -509,6 +512,8 @@ class _Handler(BaseHTTPRequestHandler):
                 if action == "preview":
                     self.server.mouth.preview()
                 elif action == "start":
+                    if self.server.paired_recording is not None:
+                        raise ValueError("paired recording in progress; stop or discard first")
                     if self.server.recording is not None:
                         raise ValueError("Finish the gesture trial before recording lips")
                     if data.get("profile"):
@@ -516,8 +521,12 @@ class _Handler(BaseHTTPRequestHandler):
                         self.server.mouth.set_root(prof.mouths_dir)
                     self.server.mouth.start(data.get("text", ""), data.get("split", ""), data.get("session", ""))
                 elif action == "stop":
+                    if self.server.paired_recording is not None:
+                        raise ValueError("paired recording in progress; use /api/paired/stop")
                     self.server.mouth.stop()
                 elif action == "discard":
+                    if self.server.paired_recording is not None:
+                        raise ValueError("paired recording in progress; use /api/paired/discard")
                     self.server.mouth.discard()
                 else:
                     raise ValueError("Unknown mouth capture action")
@@ -542,6 +551,212 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200, {"lips": self.server.lips.snapshot()})
 
+    def _handle_paired(self):
+        action = self.path.removeprefix("/api/paired/")
+        if action == "start":
+            self._handle_paired_start()
+        elif action == "stop":
+            self._handle_paired_stop()
+        elif action == "discard":
+            self._handle_paired_discard()
+        else:
+            self._error(404, "unknown paired action")
+
+    def _handle_paired_start(self):
+        body = self._read_body(MAX_JSON_BYTES)
+        if body is None:
+            return
+        try:
+            data = json.loads(body)
+        except ValueError:
+            self._error(400, "invalid JSON body")
+            return
+        if not isinstance(data, dict):
+            self._error(400, "Expected a JSON object")
+            return
+
+        profile_id = data.get("profile")
+        text = data.get("text")
+        label = data.get("label")
+        split = data.get("split")
+        session = data.get("session")
+
+        if not profile_id or not isinstance(profile_id, str):
+            self._error(400, "profile must be a non-empty string")
+            return
+        if not isinstance(label, str) or not _LABEL_RE.match(label):
+            self._error(400, "label must be a safe UPPER_SNAKE_CASE identifier")
+            return
+        if split not in ("train", "validation", "test"):
+            self._error(400, "split must be 'train', 'validation', or 'test'")
+            return
+        if not _valid_session(session):
+            self._error(400, "session must be a non-empty filename-safe identifier")
+            return
+        if not isinstance(text, str) or not text.strip():
+            self._error(400, "text must be a non-empty string")
+            return
+        text = text.strip()
+
+        with self.server.lock:
+            if self.server.paired_recording is not None:
+                self._error(409, "already recording paired trial; stop or discard first")
+                return
+            if self.server.recording is not None:
+                self._error(409, "already recording gesture trial; stop or discard first")
+                return
+            if self.server.mouth.snapshot()["recording"]:
+                self._error(409, "already recording mouth trial; stop or discard first")
+                return
+
+            try:
+                prof = self.server.profile_manager.get_profile(profile_id)
+            except Exception as error:
+                self._error(400, f"profile error: {error}")
+                return
+
+            prof_gesture_labels = {g["label"] for g in prof.gestures} | {"REST"}
+            if label not in prof_gesture_labels:
+                self._error(400, f"label {label!r} does not belong to profile gestures or REST")
+                return
+
+            if text not in prof.lip_prompts:
+                self._error(400, f"text {text!r} does not belong to profile lip prompts")
+                return
+
+            try:
+                _check_session_split(prof.sequences_dir, split, session)
+                _check_session_split(prof.mouths_dir, split, session)
+            except ValueError as error:
+                self._error(400, str(error))
+                return
+
+            pair_id = uuid.uuid4().hex
+            self.server.paired_recording = {
+                "pair_id": pair_id,
+                "profile_id": prof.id,
+                "label": label,
+                "text": text,
+                "split": split,
+                "session": session,
+                "start_monotonic": time.monotonic(),
+            }
+            self.server.recording = _Recording(
+                label=label,
+                split=split,
+                session=session,
+                start_monotonic=time.monotonic(),
+                data_root=prof.sequences_dir,
+                pair_id=pair_id,
+                profile_id=prof.id,
+                expected_text=text,
+            )
+            self.server.mouth.set_root(prof.mouths_dir)
+            try:
+                self.server.mouth.start(
+                    text=text,
+                    split=split,
+                    session=session,
+                    pair_id=pair_id,
+                    profile_id=prof.id,
+                    gesture_label=label,
+                )
+            except Exception as error:
+                self.server.recording = None
+                self.server.paired_recording = None
+                self._error(400, f"failed to start mouth capture: {error}")
+                return
+
+        self._send_json(200, {
+            "recording": True,
+            "paired": True,
+            "pair_id": pair_id,
+            "profile": prof.id,
+            "label": label,
+            "text": text,
+            "split": split,
+            "session": session,
+        })
+
+    def _handle_paired_stop(self):
+        self._read_body(MAX_JSON_BYTES)
+        with self.server.lock:
+            if self.server.paired_recording is None:
+                self._error(400, "not recording a paired trial")
+                return
+
+            rec = self.server.recording
+            if rec is None or not rec.timestamps_ms:
+                self._error(400, "no frames captured in gesture sequence; nothing to save")
+                return
+
+            if self.server.mouth._rec is None:
+                self._error(400, "no mouth recording to stop")
+                return
+
+            pair_info = self.server.paired_recording
+            pair_id = pair_info["pair_id"]
+            profile_id = pair_info["profile_id"]
+            label = pair_info["label"]
+            text = pair_info["text"]
+            split = pair_info["split"]
+            session = pair_info["session"]
+
+            try:
+                mouth_snap = self.server.mouth.stop()
+                mouth_path = mouth_snap.get("last_saved") or self.server.mouth.last_saved
+            except Exception as mouth_error:
+                self._error(400, f"mouth capture failed: {mouth_error}")
+                return
+
+            try:
+                seq_path = _save_sequence(self.server, rec)
+            except Exception as seq_error:
+                self._send_json(500, {
+                    "error": f"sequence save failed: {seq_error}",
+                    "sequence_error": str(seq_error),
+                    "mouth_saved": str(mouth_path),
+                    "pair_id": pair_id,
+                    "profile_id": profile_id,
+                    "split": split,
+                    "session": session,
+                })
+                return
+
+            self.server.recording = None
+            self.server.paired_recording = None
+            self.server.saved_count += 1
+            self.server.last_saved = str(seq_path)
+
+            payload = {
+                "saved": {
+                    "sequence": str(seq_path),
+                    "mouth": str(mouth_path),
+                },
+                "pair_id": pair_id,
+                "profile_id": profile_id,
+                "label": label,
+                "text": text,
+                "split": split,
+                "session": session,
+                "sequence_frames": len(rec.timestamps_ms),
+                "saved_count": self.server.saved_count,
+            }
+        self._send_json(200, payload)
+
+    def _handle_paired_discard(self):
+        self._read_body(MAX_JSON_BYTES)
+        with self.server.lock:
+            had = (
+                self.server.paired_recording is not None
+                or self.server.recording is not None
+                or self.server.mouth._rec is not None
+            )
+            self.server.recording = None
+            self.server.mouth.discard()
+            self.server.paired_recording = None
+        self._send_json(200, {"discarded": had, "recording": False, "paired": False})
+
     def _handle_start(self):
         body = self._read_body(MAX_JSON_BYTES)
         if body is None:
@@ -565,6 +780,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._error(400, "session must be a non-empty filename-safe identifier")
             return
         with self.server.lock:
+            if self.server.paired_recording is not None:
+                self._error(409, "paired recording in progress; stop or discard first")
+                return
             if self.server.mouth.snapshot()["recording"]:
                 self._error(409, "Finish the mouth trial before recording gestures")
                 return
@@ -604,6 +822,8 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ValueError("Expected a JSON object")
             profile_id = data.get("id")
             with self.server.lock:
+                if self.server.paired_recording is not None:
+                    raise ValueError("Cannot switch profile while paired recording is in progress")
                 if self.server.recording is not None:
                     raise ValueError("Cannot switch profile while recording is in progress")
                 if self.server.mouth.snapshot()["recording"]:
@@ -630,6 +850,8 @@ class _Handler(BaseHTTPRequestHandler):
             gestures = data.get("gestures")
             lip_prompts = data.get("lip_prompts")
             with self.server.lock:
+                if self.server.paired_recording is not None:
+                    raise ValueError("Cannot create/switch profile while paired recording is in progress")
                 if self.server.recording is not None:
                     raise ValueError("Cannot create/switch profile while recording is in progress")
                 if self.server.mouth.snapshot()["recording"]:
@@ -662,6 +884,8 @@ class _Handler(BaseHTTPRequestHandler):
             gestures = data.get("gestures")
             lip_prompts = data.get("lip_prompts")
             with self.server.lock:
+                if self.server.paired_recording is not None:
+                    raise ValueError("Cannot update profile while paired recording is in progress")
                 if self.server.recording is not None:
                     raise ValueError("Cannot update profile while recording is in progress")
                 if self.server.mouth.snapshot()["recording"]:
@@ -681,6 +905,9 @@ class _Handler(BaseHTTPRequestHandler):
     def _handle_stop(self):
         self._read_body(MAX_JSON_BYTES)
         with self.server.lock:
+            if self.server.paired_recording is not None:
+                self._error(409, "paired recording in progress; use /api/paired/stop")
+                return
             rec = self.server.recording
             if rec is None:
                 self._error(400, "not recording")
@@ -708,6 +935,9 @@ class _Handler(BaseHTTPRequestHandler):
     def _handle_discard(self):
         self._read_body(MAX_JSON_BYTES)
         with self.server.lock:
+            if self.server.paired_recording is not None:
+                self._error(409, "paired recording in progress; use /api/paired/discard")
+                return
             had = self.server.recording is not None
             self.server.recording = None
         self._send_json(200, {"discarded": had, "recording": False})

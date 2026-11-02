@@ -84,6 +84,22 @@ uv run python -m hackathon.signs.train_language \
 
 The language report records held-out and general-English perplexity. A candidate is saved only when validation improves without excessive general regression. Review the report before selecting it with `--lip-language-model`; no candidate is deployed automatically.
 
+## Paired fusion evaluation
+
+Use the recording lab's **Paired** mode to capture the same expression as aligned mouth crops and hand landmarks. Both files share a `pair_id`, profile, session and split, while retaining independent trial IDs. Ordinary single-modality recordings can remain in the same profile directories.
+
+After promoting the models to evaluate, run the same paired samples through both paths:
+
+```sh
+uv run python -m hackathon.evaluate_fusion \
+  --profile alice --split test \
+  --output "$HOME/.local/share/quietbridge/profiles/alice/models/fusion-diagnostic.json"
+```
+
+The report compares lips-only and fusion WER and exact intent, counts corrections and regressions, and retains raw candidates plus gesture diagnostics. Optional model flags select explicit candidates without promoting them. The output is diagnostic and never changes the active model.
+
+For capture-only checks, `uv run python -m hackathon.signs.capture_analysis <mouth.npz>` reports actual fps, frame gaps, face coverage and mouth-activity edges. Older recordings without activity metadata report those fields as null.
+
 ## Fusion and safety
 
 - Lip candidates retain decoder scores and capture timing; scores are not calibrated probabilities.

@@ -66,7 +66,10 @@ class MouthCapture:
         self._preview = True
         return self.snapshot()
 
-    def start(self, text: str, split: str, session: str) -> dict:
+    def start(self, text: str, split: str, session: str,
+              pair_id: str | None = None,
+              profile_id: str | None = None,
+              gesture_label: str | None = None) -> dict:
         text = (text or "").strip()
         if not text or len(text) > MAX_TEXT:
             raise ValueError(f"text must be 1-{MAX_TEXT} characters")
@@ -76,11 +79,24 @@ class MouthCapture:
             raise ValueError("session must be 1-64 chars of [A-Za-z0-9_-]")
         if self._rec is not None:
             raise ValueError("a recording is still open; stop or discard it first")
+        if pair_id is not None and not str(pair_id).strip():
+            raise ValueError("pair_id must be a non-empty string")
+        if profile_id is not None and not str(profile_id).strip():
+            raise ValueError("profile_id must be a non-empty string")
+        if gesture_label is not None and not str(gesture_label).strip():
+            raise ValueError("gesture_label must be a non-empty string")
         self._check_session_split(session, split)
         from lipflow.camera import Recording
         self._ensure_tracker()
         self._rec = Recording(started=time.perf_counter())
-        self._meta = (text, split, session)
+        self._meta = {
+            "text": text,
+            "split": split,
+            "session": session,
+            "pair_id": pair_id,
+            "profile_id": profile_id,
+            "gesture_label": gesture_label,
+        }
         self._recording, self._limit, self.error = True, False, None
         return self.snapshot()
 
@@ -162,16 +178,51 @@ class MouthCapture:
         return self.snapshot()
 
     def _save(self, rec, rois, meta) -> str:
-        text, split, session = meta
+        if isinstance(meta, dict):
+            text = meta["text"]
+            split = meta["split"]
+            session = meta["session"]
+            pair_id = meta.get("pair_id")
+            profile_id = meta.get("profile_id")
+            gesture_label = meta.get("gesture_label")
+        else:
+            text, split, session = meta[:3]
+            pair_id = meta[3] if len(meta) > 3 else None
+            profile_id = meta[4] if len(meta) > 4 else None
+            gesture_label = meta[5] if len(meta) > 5 else None
+
         trial = uuid.uuid4().hex
         folder = os.path.join(self.root, split)
         os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, f"{session}_{trial}.npz")
         ts_ms = np.asarray([int(round(t * 1000)) for t in rec.ts], dtype=np.int64)
+        n = len(ts_ms)
+        mouth_open = np.asarray(
+            rec.mouth_open[:n] if len(rec.mouth_open) >= n else (rec.mouth_open + [0.0] * (n - len(rec.mouth_open))),
+            dtype=np.float32,
+        )
+        anchors = rec.anchors[:n] if len(rec.anchors) >= n else (rec.anchors + [None] * (n - len(rec.anchors)))
+        face_present = np.asarray([a is not None for a in anchors], dtype=bool)
+
+        save_dict = {
+            "text": np.array(text),
+            "rois": rois,
+            "timestamps_ms": ts_ms,
+            "mouth_open": mouth_open,
+            "face_present": face_present,
+            "session_id": np.array(session),
+            "trial_id": np.array(trial),
+            "split": np.array(split),
+        }
+        if pair_id is not None:
+            save_dict["pair_id"] = np.array(pair_id)
+        if profile_id is not None:
+            save_dict["profile_id"] = np.array(profile_id)
+        if gesture_label is not None:
+            save_dict["gesture_label"] = np.array(gesture_label)
+
         with open(path, "xb") as f:  # never overwrite an existing trial
-            np.savez(f, text=np.array(text), rois=rois, timestamps_ms=ts_ms,
-                     session_id=np.array(session), trial_id=np.array(trial),
-                     split=np.array(split))
+            np.savez(f, **save_dict)
         return path
 
     def discard(self) -> dict:

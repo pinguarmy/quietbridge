@@ -135,7 +135,15 @@ def make_server(runtime, port=8765):
             except ValueError:
                 length = 0
             if length > 512 * 1024:
-                self.close_connection = True
+                # Drain the declared request without retaining it. Closing before
+                # the body is read races the client's send and can surface as a
+                # BrokenPipe instead of the intended 413 response.
+                remaining = length
+                while remaining:
+                    chunk = self.rfile.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
                 self._json(413, {"error": "Frame exceeds 512 KiB"})
                 return
             if length <= 0:

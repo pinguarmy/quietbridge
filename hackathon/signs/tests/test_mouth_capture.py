@@ -253,3 +253,48 @@ def test_set_root_isolates_profiles(cap, tmp_path):
     cap.feed(frame(), 0)
     cap.stop()
     assert len(list(prof2_dir.glob("train/*.npz"))) == 1
+
+
+def test_mouth_open_and_face_present_arrays(cap, tmp_path):
+    from hackathon.signs.capture_analysis import analyze_npz
+
+    cap.start("diagnostics test", "train", "s_diag")
+    # Feed 2 frames with face
+    cap.feed(frame(), 100)
+    cap.feed(frame(), 140)
+    # Feed 1 frame without face
+    cap.fake_tracker.see_face = False
+    cap.feed(frame(), 180)
+    snap = cap.stop()
+    path = snap["last_saved"]
+    with np.load(path, allow_pickle=False) as z:
+        assert "mouth_open" in z.files
+        assert "face_present" in z.files
+        assert z["mouth_open"].shape == z["timestamps_ms"].shape
+        assert z["face_present"].shape == z["timestamps_ms"].shape
+        assert z["mouth_open"].dtype == np.float32
+        assert z["face_present"].dtype == bool
+        assert list(z["face_present"]) == [True, True, False]
+        np.testing.assert_allclose(z["mouth_open"][:2], [0.2, 0.2])
+        assert z["mouth_open"][2] == 0.0
+
+    analysis = analyze_npz(path)
+    assert analysis["raw_frames"] == 3
+    assert analysis["face_ratio"] == pytest.approx(0.667, abs=1e-2)
+    assert analysis["duration_ms"] == 80.0
+
+
+def test_paired_metadata_saved(cap, tmp_path):
+    cap.start("paired prompt", "train", "s_pair",
+              pair_id="pair-123", profile_id="alice", gesture_label="HELLO")
+    cap.feed(frame(), 100)
+    snap = cap.stop()
+    path = snap["last_saved"]
+    with np.load(path, allow_pickle=False) as z:
+        assert str(z["pair_id"]) == "pair-123"
+        assert str(z["profile_id"]) == "alice"
+        assert str(z["gesture_label"]) == "HELLO"
+        assert str(z["text"]) == "paired prompt"
+        assert str(z["session_id"]) == "s_pair"
+        assert str(z["split"]) == "train"
+        assert len(str(z["trial_id"])) == 32
