@@ -80,6 +80,7 @@ function render(s) {
   text('profile-name', s.profile_name || 'Stock configuration');
   const lipModel = s.lip_model || {};
   text('lip-model', (lipModel.mode || 'stock') + (lipModel.vsr_sha256 ? ' · ' + lipModel.vsr_sha256.slice(0,12) : ''));
+  text('language-model', lipModel.language_model_sha256 ? 'personal · ' + lipModel.language_model_sha256.slice(0,12) : 'stock');
   text('component-errors', [s.profile_warning, s.camera_error, s.lip_error, s.sign_error].filter(Boolean).join('\n'));
   const modeName = {combined:'Lips and gestures', lips:'Lips only', signs:'Gestures only'}[s.mode];
   text('mode-caption', modeName);
