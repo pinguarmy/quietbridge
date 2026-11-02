@@ -432,3 +432,26 @@ def profile_lip_model(profile: Profile) -> Path:
 
 def profile_language_model(profile: Profile) -> Path:
     return profile.profile_dir / "models" / "lm.pth"
+
+
+def profile_configuration(
+    profile: Profile, vocabulary_path: Path | str | None = None
+) -> tuple[dict[str, Any] | None, Path | None, str]:
+    """Resolve compatible recognizer/vocabulary pairs and an explicit warning."""
+    from .fusion import load_vocabulary
+
+    motion_model = profile_motion_model(profile)
+    has_motion = motion_model.is_file()
+    vocabulary = (
+        load_vocabulary(vocabulary_path)
+        if vocabulary_path
+        else profile_vocabulary(profile)
+        if has_motion
+        else None
+    )
+    warning = (
+        f"Profile {profile.name!r} has no trained motion model; using stock gestures"
+        if not has_motion and not vocabulary_path
+        else ""
+    )
+    return vocabulary, motion_model if has_motion else None, warning

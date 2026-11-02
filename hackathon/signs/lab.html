@@ -279,9 +279,11 @@ button:focus-visible{outline:3px solid #92b69d;outline-offset:2px}
   </div>
   <div class="btn-group" style="flex-wrap:wrap">
     <button id="viewReport" type="button">View report</button>
+    <button id="evaluateRecognition" type="button">Evaluate recognition</button>
     <button id="promoteModel" type="button">Promote candidate</button>
     <button id="rollbackModel" type="button">Rollback</button>
   </div>
+  <div id="comparisonMetrics" style="margin-top:8px;" hidden></div>
   <pre id="modelReport" style="white-space:pre-wrap;overflow-wrap:anywhere" hidden></pre>
 </section>
 
@@ -975,7 +977,11 @@ function modelControls(){
   const blocked=recording||working||modelBusy||!token;
   const candidate=(modelData?.candidates||[]).find(c=>c.id===$('candidateSelect').value && c.kind===$('modelKind').value);
   for(const id of ['trainMotion','trainVisual','trainLanguage','refreshModels','rollbackModel','modelKind','candidateSelect']) $(id).disabled=blocked;
-  $('viewReport').disabled=blocked||!candidate||!candidate.report;
+  const isLang = $('modelKind').value === 'language';
+  const canEval = !blocked && candidate && isLang && candidate.status === 'completed' && candidate.eval_status !== 'running';
+  $('evaluateRecognition').disabled = !canEval;
+  $('evaluateRecognition').hidden = !isLang;
+  $('viewReport').disabled=blocked||!candidate||(!candidate.report && !candidate.comparison);
   $('promoteModel').disabled=blocked||!candidate||!candidate.promotable;
 }
 function renderModels(){
@@ -989,7 +995,13 @@ function renderModels(){
     const option=document.createElement('option'); option.value=c.id;
     const filename=c.model_path?.split(/[\\/]/).pop()||'no model file';
     const selection=c.selected===true?'selected by trainer':c.selected===false?'not selected by trainer':'selection unavailable';
-    option.textContent=`${c.id} · ${filename} · ${c.status} · ${selection}`; select.appendChild(option);
+    let label=`${c.id} · ${filename} · ${c.status} · ${selection}`;
+    if(c.kind==='language'){
+      if(c.eval_status==='running') label+=' · evaluating';
+      else if(c.comparison_passed===true) label+=' · gate passed';
+      else if(c.comparison_passed===false) label+=' · gate failed';
+    }
+    option.textContent=label; select.appendChild(option);
   });
   if(candidates.some(c=>c.id===previous))select.value=previous;
   const active=modelData?.active?.[kind];
@@ -1000,11 +1012,47 @@ function renderModels(){
 }
 function renderCandidateSummary(){
   const c=(modelData?.candidates||[]).find(item=>item.id===$('candidateSelect').value && item.kind===$('modelKind').value);
-  if(!c){$('candidateSummary').textContent='No candidate selected.'; return}
+  if(!c){
+    $('candidateSummary').textContent='No candidate selected.';
+    if($('comparisonMetrics')) $('comparisonMetrics').hidden=true;
+    return;
+  }
   const selection=c.selected===true?'Selected by trainer':c.selected===false?'Not selected by trainer':'Trainer selection unavailable';
   const failures=c.report?.failures;
-  const details=[`Status: ${c.status}`,selection,`Model file: ${c.model_path||'unavailable'}`,`Report: ${c.report_path||'unavailable'}`,c.error?`Error: ${c.error}`:'',failures?.length?`Report failures: ${typeof failures==='string'?failures:JSON.stringify(failures)}`:'',c.promotable?'Eligible for promotion':'Not eligible for promotion'];
+  const details=[`Status: ${c.status}`,selection,`Model file: ${c.model_path||'unavailable'}`,`Report: ${c.report_path||'unavailable'}`,c.error?`Error: ${c.error}`:'',failures?.length?`Report failures: ${typeof failures==='string'?failures:JSON.stringify(failures)}`:''];
+
+  if(c.kind==='language'){
+    if(c.eval_status==='running'){
+      details.push('Recognition: evaluating…');
+    }else if(c.eval_error){
+      details.push(`Recognition error: ${c.eval_error}`);
+    }else if(c.comparison){
+      const stock=c.comparison?.variants?.stock?.metrics;
+      const cand=c.comparison?.variants?.candidate?.metrics;
+      const fmtWer=v=>v!=null?(v*100).toFixed(1)+'%':'N/A';
+      const stockStr=`Stock WER: ${fmtWer(stock?.wer)} (target: ${fmtWer(stock?.target_wer)})`;
+      const candStr=`Candidate WER: ${fmtWer(cand?.wer)} (target: ${fmtWer(cand?.target_wer)})`;
+      const gateStr=c.comparison_passed?'Passed':'Failed (WER or target degraded)';
+      details.push(`Recognition: ${stockStr} vs ${candStr} [Gate: ${gateStr}]`);
+    }else{
+      details.push('Recognition: Not evaluated (required for promotion)');
+    }
+  }
+
+  details.push(c.promotable?'Eligible for promotion':'Not eligible for promotion');
   $('candidateSummary').textContent=details.filter(Boolean).join(' | ');
+
+  if($('comparisonMetrics')){
+    if(c.kind==='language' && c.comparison?.variants){
+      const stock=c.comparison.variants.stock?.metrics;
+      const cand=c.comparison.variants.candidate?.metrics;
+      const fmtWer=v=>v!=null?(v*100).toFixed(1)+'%':'N/A';
+      $('comparisonMetrics').innerHTML=`<strong>Recognition Evaluation:</strong> Stock WER: <code>${fmtWer(stock?.wer)}</code> (target: <code>${fmtWer(stock?.target_wer)}</code>) | Candidate WER: <code>${fmtWer(cand?.wer)}</code> (target: <code>${fmtWer(cand?.target_wer)}</code>) &mdash; <span style="font-weight:bold;color:${c.comparison_passed?'#1a7f37':'#cf222e'}">${c.comparison_passed?'&check; Gate Passed':'&cross; Gate Failed'}</span>`;
+      $('comparisonMetrics').hidden=false;
+    }else{
+      $('comparisonMetrics').hidden=true;
+    }
+  }
 }
 async function refreshModelStatus(){
   if(recording||working||modelBusy)return;
@@ -1026,10 +1074,18 @@ for(const [id,kind] of [['trainMotion','motion'],['trainVisual','lips'],['trainL
 $('refreshModels').onclick=refreshModelStatus;
 $('modelKind').onchange=renderModels;
 $('candidateSelect').onchange=()=>{ $('modelReport').hidden=true; renderCandidateSummary(); modelControls() };
+$('evaluateRecognition').onclick=()=>{
+  const candidate_id=$('candidateSelect').value;
+  if(!candidate_id)return;
+  modelAction('evaluate',{kind:'language',candidate_id});
+};
 $('viewReport').onclick=()=>{
   const candidate=(modelData?.candidates||[]).find(c=>c.id===$('candidateSelect').value && c.kind===$('modelKind').value);
-  if(!candidate?.report)return;
-  $('modelReport').textContent=typeof candidate.report==='string'?candidate.report:JSON.stringify(candidate.report,null,2);
+  if(!candidate?.report && !candidate?.comparison)return;
+  const content=candidate.comparison
+    ? { training_report: candidate.report, recognition_comparison: candidate.comparison }
+    : candidate.report;
+  $('modelReport').textContent=typeof content==='string'?content:JSON.stringify(content,null,2);
   $('modelReport').hidden=false;
 };
 $('promoteModel').onclick=()=>{

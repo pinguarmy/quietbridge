@@ -106,6 +106,10 @@ function render(s) {
   text('last-sign', s.last_sign ? s.last_sign.label + ' · ' + s.last_sign.score.toFixed(2) : '—');
   text('sign-input', s.sign_input || '—');
   text('profile-name', s.profile_name || 'Stock configuration');
+  const profileSelect = $('profile-select');
+  if (profileSelect && profilesLoaded && !profileSelect.matches(':focus') && s.profile_id) {
+    if (profileSelect.value !== s.profile_id) profileSelect.value = s.profile_id;
+  }
   const lipModel = s.lip_model || {};
   text('lip-model', (lipModel.mode || 'stock') + (lipModel.vsr_sha256 ? ' · ' + lipModel.vsr_sha256.slice(0,12) : ''));
   text('language-model', lipModel.language_model_sha256 ? 'personal · ' + lipModel.language_model_sha256.slice(0,12) : 'stock');
@@ -362,4 +366,66 @@ if ($('test-submit')) $('test-submit').onclick = async () => {
   if (!exampleText.trim() && !label) {text('error', 'Add example words or choose a gesture first.'); return;}
   if (await requestAction('rehearse', {text:exampleText, label})) window.location.assign('/');
 };
+let profilesLoaded = false;
+async function loadProfilesList() {
+  const select = $('profile-select');
+  if (!select) return;
+  try {
+    const res = await fetch('/api/profiles');
+    if (!res.ok) return;
+    const data = await res.json();
+    select.replaceChildren();
+    (data.profiles || []).forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = `${p.name} (${p.id})`;
+      if (p.id === data.active_profile) opt.selected = true;
+      select.appendChild(opt);
+    });
+    profilesLoaded = true;
+  } catch (_) {}
+}
+
+async function handleProfileSwitch() {
+  const select = $('profile-select');
+  const btn = $('profile-switch-btn');
+  if (!select || !btn) return;
+  const targetId = select.value;
+  if (!targetId) return;
+  if (browserCameraStream) {
+    text('profile-switch-error', 'Stop the browser camera before switching profile.');
+    return;
+  }
+  text('profile-switch-error', '');
+  text('profile-switch-status', 'Switching profile…');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/profile/select', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Lipflow-Token': token },
+      body: JSON.stringify({ id: targetId })
+    });
+    const result = await res.json();
+    if (!res.ok) {
+      throw new Error(result.error || `Switch failed (${res.status})`);
+    }
+    text('profile-switch-status', `Active profile is now ${result.profile?.name || targetId}.`);
+    render(result);
+    if ($('labels')) {
+      $('labels').replaceChildren();
+      if ($('test-label')) $('test-label').replaceChildren(new Option('No gesture', ''));
+      initialized = false;
+      render(result);
+    }
+  } catch (err) {
+    text('profile-switch-error', err.message);
+    text('profile-switch-status', '');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+if ($('profile-switch-btn')) $('profile-switch-btn').onclick = handleProfileSwitch;
+if ($('profile-select')) loadProfilesList();
+
 poll(); preview(); trackingPoll();

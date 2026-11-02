@@ -6,6 +6,7 @@ import copy
 from dataclasses import asdict
 import importlib
 import os
+from pathlib import Path
 import queue
 import threading
 import time
@@ -93,21 +94,44 @@ class _MotionWindow:
         return [SignEvent(label, float(score), self.frames[0][0], timestamp_ms, True)]
 
 
+class ProfileSwitchConflict(RuntimeError):
+    """Raised when profile switch is attempted while runtime is busy."""
+    pass
+
+
 class Runtime:
     def __init__(self, *, rehearsal=False, browser_camera=False, camera=0, enable_lips=True, vocabulary=None,
                  lip_model=None, lip_language_model=None, motion_model=None, profile_name=None,
                  profile=None, configuration_warning="", max_utterance_seconds=30.0,
-                 lip_activity_config=None):
+                 lip_activity_config=None, profile_manager=None,
+                 explicit_lip_model=None, explicit_lip_language_model=None,
+                 explicit_motion_model=None, explicit_vocabulary_path=None):
         if rehearsal and browser_camera:
             raise ValueError("Browser camera and rehearsal modes are mutually exclusive")
         self.rehearsal = rehearsal
         self.browser_camera = browser_camera
         self.camera_source = camera
         self.profile = profile
+        if profile_manager is not None:
+            self.profile_manager = profile_manager
+        elif profile is not None:
+            from .profiles import ProfileManager
+            self.profile_manager = ProfileManager(root_dir=profile.root_dir)
+        else:
+            from .profiles import ProfileManager
+            self.profile_manager = ProfileManager()
         self.enable_lips = enable_lips
-        self.lip_model_path = lip_model
-        self.lip_language_model_path = lip_language_model
-        self.motion_model_path = motion_model if motion_model is not None else (os.environ.get("QUIETBRIDGE_MOTION_MODEL", "").strip() or None)
+
+        # Track explicit CLI / external overrides so profile switching respects precedence
+        self._explicit_lip_model = explicit_lip_model if explicit_lip_model is not None else (lip_model if profile is None and lip_model is not None else None)
+        self._explicit_lip_language_model = explicit_lip_language_model if explicit_lip_language_model is not None else (lip_language_model if profile is None and lip_language_model is not None else None)
+        self._explicit_motion_model = explicit_motion_model if explicit_motion_model is not None else (motion_model if profile is None and motion_model is not None else None)
+        self._explicit_vocabulary_path = explicit_vocabulary_path
+        self._explicit_vocabulary = vocabulary if profile is None and vocabulary is not None else None
+
+        self.lip_model_path = lip_model if lip_model is not None else self._explicit_lip_model
+        self.lip_language_model_path = lip_language_model if lip_language_model is not None else self._explicit_lip_language_model
+        self.motion_model_path = (motion_model if motion_model is not None else self._explicit_motion_model) or (os.environ.get("QUIETBRIDGE_MOTION_MODEL", "").strip() or None)
         self.max_utterance_ms = round(float(max_utterance_seconds) * 1000)
         if self.max_utterance_ms < 1000:
             raise ValueError("Maximum utterance length must be at least one second")
@@ -123,6 +147,9 @@ class Runtime:
                                    if rehearsal else self.vocabulary)
         self.lock = threading.RLock()
         self.stop = threading.Event()
+        self._worker_stop = threading.Event()
+        self._worker_generation = 0
+        self._switching_profile = False
         # Idle preview keeps only the latest frame. Active capture uses a bounded
         # chronological buffer (90 decoded frames) and reports every overflow.
         self.hand_frames = queue.Queue(maxsize=90)
@@ -150,6 +177,8 @@ class Runtime:
         self._camera_session_active = None  # None preserves the manual protocol.
         self._camera_generation = 0
         self._record_generation = 0
+        self._lip_cancel_boundary = None
+        self._lip_cancel_generation = 0
         self._auto_open_since = self._auto_quiet_since = None
         self._auto_open_frames = 0
         self._starting_auto_chunk = False
@@ -158,13 +187,14 @@ class Runtime:
         self.session_signs = []  # Stable events validated when received in this session.
         self.state = {
             "mode": "combined" if enable_lips else "signs", "phase": "idle",
-            "profile_name": profile_name or "Stock configuration",
+            "profile_name": profile_name or (profile.name if profile else "Stock configuration"),
+            "profile_id": profile.id if profile else "default",
             "profile_warning": configuration_warning,
             "camera": "rehearsal" if rehearsal else ("waiting" if browser_camera else "starting"),
             "lips": "rehearsal" if rehearsal else ("warming" if enable_lips else "disabled"),
             "signs": "rehearsal" if rehearsal else "loading",
             "sign_input": "rehearsal" if rehearsal else "loading",
-            "lip_model": {"mode": "stock", "status": "rehearsal" if rehearsal else "loading"},
+            "lip_model": self._rehearsal_lip_model_info() if rehearsal else {"mode": "stock", "status": "loading"},
             "camera_error": "", "lip_error": "", "sign_error": "", "error": "",
             "decision": asdict(Decision("", "unavailable", "sign_only", "local")),
             "candidates": [], "candidate_scores": [], "alternatives": [], "last_sign": None,
@@ -177,19 +207,60 @@ class Runtime:
                         "error": "", "source_revision": 0},
         }
 
+    def _rehearsal_lip_model_info(self):
+        if self.lip_model_path or self.lip_language_model_path:
+            from .lips_adapter import _file_sha256
+            info = {"mode": "personal" if self.lip_model_path else "stock", "status": "rehearsal"}
+            if self.lip_model_path:
+                info["vsr_path"] = str(self.lip_model_path)
+                try:
+                    info["vsr_sha256"] = _file_sha256(self.lip_model_path)
+                except Exception:
+                    pass
+            if self.lip_language_model_path:
+                info["language_model_path"] = str(self.lip_language_model_path)
+                try:
+                    info["language_model_sha256"] = _file_sha256(self.lip_language_model_path)
+                except Exception:
+                    pass
+            return info
+        return {"mode": "stock", "status": "rehearsal"}
+
     def start(self):
         if self.rehearsal:
             return
+        self._start_workers()
+
+    def _start_workers(self):
+        if self.rehearsal:
+            return
+        self._worker_stop = threading.Event()
+        worker_gen = self._worker_generation
         workers = [] if self.browser_camera else [("capture", self._capture)]
         workers += [("hands", self._hands), *([("lips", self._lips)] if self.enable_lips else [])]
         for name, target in workers:
-            thread = threading.Thread(target=target, name=f"demo-{name}", daemon=True)
+            def run_worker(t=target):
+                try:
+                    t(worker_gen, self._worker_stop)
+                except TypeError:
+                    t()
+            thread = threading.Thread(target=run_worker, name=f"demo-{name}", daemon=True)
             self.threads.append(thread)
             thread.start()
 
+    def _stop_workers(self, timeout=2.0):
+        if hasattr(self, "_worker_stop") and self._worker_stop is not None:
+            self._worker_stop.set()
+        threads = list(self.threads)
+        self.threads.clear()
+        for thread in threads:
+            thread.join(timeout=timeout)
+
     def snapshot(self):
         with self.lock:
-            return copy.deepcopy({**self.state, "revision": self.revision,
+            prof_id = self.profile.id if self.profile else "default"
+            return copy.deepcopy({**self.state, "profile_id": prof_id, "active_profile": prof_id,
+                                  "revision": self.revision,
                                   "confirmed": self.confirmed_revision == self.revision,
                                   "rehearsal": self.rehearsal, "browser_camera": self.browser_camera,
                                   "speech_available": self.speaker.available, "vocabulary": self.vocabulary})
@@ -286,6 +357,8 @@ class Runtime:
 
     def action(self, name, data):
         with self.lock:
+            if getattr(self, "_switching_profile", False):
+                raise ProfileSwitchConflict("A profile switch is in progress")
             self.state["error"] = ""
             if name == "camera_session":
                 if self.rehearsal or not self.browser_camera:
@@ -324,11 +397,10 @@ class Runtime:
                     if not (self.state["session_finalizing"] and self._window_motion):
                         self.events.clear()
                     self.state["last_sign"] = None
-                    for frames in (self.hand_frames, self.lip_frames):
-                        try:
-                            frames.get_nowait()
-                        except queue.Empty:
-                            pass
+                    try:
+                        self.hand_frames.get_nowait()
+                    except queue.Empty:
+                        pass
             elif name == "mode":
                 if self.state["phase"] != "idle":
                     raise ValueError("Finish the current recording before changing mode")
@@ -376,6 +448,15 @@ class Runtime:
                 if self._window_motion:
                     self.hand_control.put(("finish", self.finish_at, self.record_generation))
             elif name == "cancel":
+                boundary = clock_ms()
+                self._lip_cancel_boundary = boundary
+                self._lip_cancel_generation += 1
+                # Producers hold the runtime lock, so removing the cancelled
+                # window here cannot race a newly accepted camera frame.
+                with self.lip_frames.mutex:
+                    retained = [packet for packet in self.lip_frames.queue if packet[1] > boundary]
+                    self.lip_frames.queue.clear()
+                    self.lip_frames.queue.extend(retained)
                 self._record_generation += 1
                 self.state["session_finalizing"] = False
                 self._auto_reset()
@@ -556,6 +637,8 @@ class Runtime:
         import cv2
 
         with self.lock:
+            if getattr(self, "_switching_profile", False):
+                return False
             if self.browser_camera and self._camera_session_active is False:
                 return False
             now = clock_ms() if timestamp_ms is None else timestamp_ms
@@ -572,7 +655,7 @@ class Runtime:
             self.state["camera"] = "ready"
             return True
 
-    def _capture(self):
+    def _capture(self, worker_gen=0, worker_stop=None):
         cap = None
         try:
             import cv2
@@ -587,34 +670,42 @@ class Runtime:
             cap.set(cv2.CAP_PROP_FPS, 30)
             last_preview = 0
             last_frame = time.perf_counter()
-            while not self.stop.is_set():
+            while not self.stop.is_set() and (worker_stop is None or not worker_stop.is_set()):
+                if worker_gen != self._worker_generation:
+                    break
                 ok, frame = cap.read()
                 now = clock_ms()
                 if not ok:
                     if time.perf_counter() - last_frame > 2:
                         raise RuntimeError("Camera stopped delivering frames")
-                    self.stop.wait(0.01)
+                    if worker_stop is not None:
+                        worker_stop.wait(0.01)
+                    else:
+                        self.stop.wait(0.01)
                     continue
                 last_frame = time.perf_counter()
                 # Frames are read-only for consumers; preview processing uses a new array.
                 with self.lock:
-                    self._queue_camera_frame(frame, now)
-                    self.state["camera"] = "ready"
-                    self._note_frame_time(now)
+                    if worker_gen == self._worker_generation:
+                        self._queue_camera_frame(frame, now)
+                        self.state["camera"] = "ready"
+                        self._note_frame_time(now)
                 if now - last_preview >= 100:
                     ok, encoded = cv2.imencode(".jpg", cv2.flip(frame, 1), [cv2.IMWRITE_JPEG_QUALITY, 75])
                     if ok:
                         with self.lock:
-                            self.jpeg = encoded.tobytes()
+                            if worker_gen == self._worker_generation:
+                                self.jpeg = encoded.tobytes()
                     last_preview = now
         except Exception as exc:
             with self.lock:
-                self.state.update(camera="unavailable", camera_error=str(exc))
+                if worker_gen == self._worker_generation:
+                    self.state.update(camera="unavailable", camera_error=str(exc))
         finally:
             if cap is not None:
                 cap.release()
 
-    def _hands(self):
+    def _hands(self, worker_gen=0, worker_stop=None):
         recognizer = None
         active_generation = None
         try:
@@ -626,13 +717,16 @@ class Runtime:
             motion = getattr(recognizer, "_motion", None) is not None
             motion_auto = motion and getattr(recognizer, "motion_auto", False)
             with self.lock:
-                self.state.update(signs="ready",
-                                  sign_input="motion_auto" if motion_auto else "motion" if motion else "stock")
+                if worker_gen == self._worker_generation:
+                    self.state.update(signs="ready",
+                                      sign_input="motion_auto" if motion_auto else "motion" if motion else "stock")
             last = 0
             active_start = None
             active_generation = None
             pending_finish = None
-            while not self.stop.is_set():
+            while not self.stop.is_set() and (worker_stop is None or not worker_stop.is_set()):
+                if worker_gen != self._worker_generation:
+                    break
                 while True:
                     try:
                         command, value, generation = self.hand_control.get_nowait()
@@ -677,7 +771,7 @@ class Runtime:
                         started = time.perf_counter()
                         events = recognizer.process(frame, ts)
                         with self.lock:
-                            if camera_generation == self._camera_generation:
+                            if camera_generation == self._camera_generation and worker_gen == self._worker_generation:
                                 if hasattr(recognizer, "last_tracking"):
                                     self.tracking["hands"] = recognizer.last_tracking
                                     self.tracking["hands_timestamp_ms"] = ts
@@ -702,7 +796,8 @@ class Runtime:
                     continue
                 events = recognizer.finish(pending_finish)
                 with self.lock:
-                    valid = (self.record_generation == active_generation
+                    valid = (worker_gen == self._worker_generation
+                             and self.record_generation == active_generation
                              and self.record_start == active_start
                              and self.state["phase"] in {"tail", "decoding"})
                     if valid:
@@ -718,23 +813,24 @@ class Runtime:
                 active_start = active_generation = pending_finish = None
         except Exception as exc:
             with self.lock:
-                self.tracking["hands"] = []
-                self.tracking.pop("hands_timestamp_ms", None)
-                self.state.update(signs="unavailable", sign_error=str(exc))
-                if active_generation is not None and self.record_generation == active_generation:
-                    # Let a combined lip result finish without this modality.
-                    self._window_motion_done = True
-                    if self.state["mode"] == "signs":
-                        since = self.record_start
-                        self.state.update(phase="idle", recording=False)
-                        self._publish(None, [], clock_ms(), since)
-                        self.record_start = self.release_ms = self.finish_at = None
-                        self.record_generation = None
+                if worker_gen == self._worker_generation:
+                    self.tracking["hands"] = []
+                    self.tracking.pop("hands_timestamp_ms", None)
+                    self.state.update(signs="unavailable", sign_error=str(exc))
+                    if active_generation is not None and self.record_generation == active_generation:
+                        # Let a combined lip result finish without this modality.
+                        self._window_motion_done = True
+                        if self.state["mode"] == "signs":
+                            since = self.record_start
+                            self.state.update(phase="idle", recording=False)
+                            self._publish(None, [], clock_ms(), since)
+                            self.record_start = self.release_ms = self.finish_at = None
+                            self.record_generation = None
         finally:
             if recognizer is not None:
                 recognizer.close()
 
-    def _lips(self):
+    def _lips(self, worker_gen=0, worker_stop=None):
         adapter = None
         active_generation = None
         try:
@@ -745,13 +841,17 @@ class Runtime:
             else:
                 adapter = LipsAdapter()
             with self.lock:
-                self.state["lips"] = "ready"
-                self.state["lip_model"] = {**getattr(adapter, "model_info", {"mode": "stock"}),
-                                           "status": "ready"}
+                if worker_gen == self._worker_generation:
+                    self.state["lips"] = "ready"
+                    self.state["lip_model"] = {**getattr(adapter, "model_info", {"mode": "stock"}),
+                                               "status": "ready"}
             active_start = None
             active_generation = None
             last_processed_ts = None
-            while not self.stop.is_set():
+            applied_cancel_generation = None
+            while not self.stop.is_set() and (worker_stop is None or not worker_stop.is_set()):
+                if worker_gen != self._worker_generation:
+                    break
                 packet = None
                 try:
                     packet = self.lip_frames.get(timeout=0.05)
@@ -761,6 +861,16 @@ class Runtime:
                     start, phase, end = self.record_start, self.state["phase"], self.finish_at
                     generation, mode = self.record_generation, self.state["mode"]
                     camera_generation = self._camera_generation
+                    cancel_boundary = self._lip_cancel_boundary
+                    if cancel_boundary is not None and self._lip_cancel_generation != applied_cancel_generation:
+                        if hasattr(adapter, "cancel"):
+                            adapter.cancel(cancel_boundary)
+                        else:
+                            adapter.recording = None
+                        applied_cancel_generation = self._lip_cancel_generation
+                        active_start = active_generation = None
+                    if packet is not None and cancel_boundary is not None and packet[1] <= cancel_boundary:
+                        packet = None
                     if (self.browser_camera and self._camera_session_active is False
                             and not self.state["session_finalizing"]):
                         adapter.recording = None
@@ -786,7 +896,9 @@ class Runtime:
                         adapter.process(*packet)
                         last_processed_ts = packet[1]
                         with self.lock:
-                            if camera_generation != self._camera_generation:
+                            if (camera_generation != self._camera_generation or worker_gen != self._worker_generation
+                                    or (self._lip_cancel_boundary is not None
+                                        and packet[1] <= self._lip_cancel_boundary)):
                                 continue
                             if hasattr(adapter, "last_tracking"):
                                 self.tracking["mouth"] = adapter.last_tracking
@@ -811,13 +923,22 @@ class Runtime:
                         continue
                     if self._window_motion and not self._window_motion_done:
                         continue  # fusion waits for this window's motion result
+                    # Producers enqueue chronologically under this same lock. Drain
+                    # every queued in-window frame before decoding, skipping later
+                    # frames rather than letting them hold up finalization.
+                    with self.lip_frames.mutex:
+                        pending_capture = any(active_start <= ts <= self.finish_at
+                                              for _, ts in self.lip_frames.queue)
+                    if pending_capture:
+                        continue
                     self.state["phase"] = "decoding"
                     released = self.release_ms
                     record_generation = self._record_generation
                 try:
                     result = adapter.finish()
                     with self.lock:
-                        if (self.record_start != active_start
+                        if (worker_gen != self._worker_generation
+                                or self.record_start != active_start
                                 or self.record_generation != active_generation
                                 or self.state["phase"] != "decoding"):
                             continue  # cancelled/changed while inference ran
@@ -831,7 +952,8 @@ class Runtime:
                             **getattr(adapter, "last_metrics", {}))
                 except Exception as exc:
                     with self.lock:
-                        if (self.record_start == active_start
+                        if (worker_gen == self._worker_generation
+                                and self.record_start == active_start
                                 and self.record_generation == active_generation):
                             self.state["lip_error"] = str(exc)
                             if self.state["session_active"] or self.state["session_finalizing"]:
@@ -841,7 +963,8 @@ class Runtime:
                                 self._publish(None, events, self.finish_at, active_start)
                 finally:
                     with self.lock:
-                        if (self.record_start == active_start
+                        if (worker_gen == self._worker_generation
+                                and self.record_start == active_start
                                 and self.record_generation == active_generation):
                             self._auto_reset()
                             self.state.update(phase="idle", recording=False)
@@ -850,24 +973,164 @@ class Runtime:
                     active_start = active_generation = None
         except Exception as exc:
             with self.lock:
-                self.tracking["mouth"] = None
-                self.tracking.pop("mouth_timestamp_ms", None)
-                self.state.update(lips="unavailable", lip_error=str(exc), phase="idle", recording=False)
-                if active_generation is not None and self.record_generation == active_generation:
-                    if self._window_motion:
-                        self.hand_control.put(("cancel", None, active_generation))
-                    self.record_start = self.release_ms = self.finish_at = None
-                    self.record_generation = None
-                    self._window_motion = False
+                if worker_gen == self._worker_generation:
+                    self.tracking["mouth"] = None
+                    self.tracking.pop("mouth_timestamp_ms", None)
+                    self.state.update(lips="unavailable", lip_error=str(exc), phase="idle", recording=False)
+                    if self.state["session_finalizing"]:
+                        self._publish_session(None)
+                    if active_generation is not None and self.record_generation == active_generation:
+                        if self._window_motion:
+                            self.hand_control.put(("cancel", None, active_generation))
+                        self.record_start = self.release_ms = self.finish_at = None
+                        self.record_generation = None
+                        self._window_motion = False
         finally:
             if adapter is not None:
                 adapter.close()
 
+    def switch_profile(self, profile_id: str):
+        if not isinstance(profile_id, str) or not profile_id.strip():
+            raise ValueError("Profile id must be a non-empty string")
+        profile_id = profile_id.strip()
+
+        with self.lock:
+            if getattr(self, "_switching_profile", False):
+                raise ProfileSwitchConflict("A profile switch is already in progress")
+            if self.browser_camera and self._camera_session_active is True:
+                raise ProfileSwitchConflict("Cannot switch profile while browser camera is active. Stop camera first.")
+            if self.state["phase"] != "idle" or self.state.get("recording"):
+                raise ProfileSwitchConflict("Cannot switch profile while recording or decoding is in progress")
+            if (self.state.get("session_active")
+                    or self.state.get("session_finalizing")
+                    or self.state.get("auto_recognition")):
+                raise ProfileSwitchConflict("Cannot switch profile while continuous session is active or finalizing")
+
+            if self.profile_manager is None:
+                from .profiles import ProfileManager
+                self.profile_manager = ProfileManager(root_dir=self.profile.root_dir if self.profile else None)
+            new_profile = self.profile_manager.get_profile(profile_id)
+
+            from .profiles import (profile_configuration, profile_language_model,
+                                   profile_lip_model, profile_motion_model)
+
+            if self._explicit_vocabulary_path is not None:
+                new_vocab, new_motion, new_warning = profile_configuration(new_profile, self._explicit_vocabulary_path)
+            elif self._explicit_vocabulary is not None:
+                new_vocab = copy.deepcopy(self._explicit_vocabulary)
+                new_motion = profile_motion_model(new_profile) if profile_motion_model(new_profile).is_file() else None
+                new_warning = ""
+            else:
+                new_vocab, new_motion, new_warning = profile_configuration(new_profile)
+
+            if new_vocab is None:
+                new_vocab = load_vocabulary()
+
+            # Motion model resolution
+            if self._explicit_motion_model is not None:
+                target_motion = self._explicit_motion_model
+            else:
+                target_motion = new_motion
+
+            if target_motion is not None and not Path(target_motion).is_file():
+                raise FileNotFoundError(f"Motion model not found: {target_motion}")
+
+            # Lip models resolution
+            if self._explicit_lip_model is not None:
+                target_lip = self._explicit_lip_model
+            else:
+                p_lip = profile_lip_model(new_profile)
+                target_lip = p_lip if p_lip.is_file() else None
+
+            if target_lip is not None and not Path(target_lip).is_file():
+                raise FileNotFoundError(f"Lip model not found: {target_lip}")
+
+            if self._explicit_lip_language_model is not None:
+                target_lm = self._explicit_lip_language_model
+            else:
+                p_lm = profile_language_model(new_profile)
+                target_lm = p_lm if p_lm.is_file() else None
+
+            if target_lm is not None and not Path(target_lm).is_file():
+                raise FileNotFoundError(f"Language model not found: {target_lm}")
+
+            self._switching_profile = True
+
+        try:
+            self._stop_workers()
+
+            with self.lock:
+                self._worker_generation += 1
+
+                for q in (self.hand_frames, self.lip_frames, self.hand_control):
+                    while True:
+                        try:
+                            q.get_nowait()
+                        except queue.Empty:
+                            break
+                self.frame_times.clear()
+                self.capture_dropped_frames = 0
+                self.events.clear()
+                self.seen.clear()
+                self.session.reset()
+                self.session_signs.clear()
+                self.tracking = {"hands": [], "mouth": None}
+                self.jpeg = None
+                self._last_frame_timestamp_ms = None
+                self._camera_generation += 1
+
+                self.profile = new_profile
+                self.motion_model_path = target_motion
+                self.lip_model_path = target_lip
+                self.lip_language_model_path = target_lm
+                self.vocabulary = new_vocab
+                self._fusion_vocabulary = ({k: {**v, "verified": True} for k, v in self.vocabulary.items()}
+                                           if self.rehearsal else self.vocabulary)
+
+                self.revision += 1
+                self.confirmed_revision = None
+                self.record_start = self.release_ms = self.finish_at = None
+                self.record_generation = None
+                self._window_motion = False
+                self._window_motion_done = False
+                self._auto_reset()
+                self._cleanup_generation += 1
+
+                self.state.update({
+                    "profile_name": new_profile.name,
+                    "profile_id": new_profile.id,
+                    "profile_warning": new_warning,
+                    "camera": "rehearsal" if self.rehearsal else ("waiting" if self.browser_camera else "starting"),
+                    "lips": "rehearsal" if self.rehearsal else ("warming" if self.enable_lips else "disabled"),
+                    "signs": "rehearsal" if self.rehearsal else "loading",
+                    "sign_input": "rehearsal" if self.rehearsal else "loading",
+                    "lip_model": self._rehearsal_lip_model_info() if self.rehearsal else {"mode": "stock", "status": "loading"},
+                    "gesture_model": "personal motion-v2 (experimental)" if self.motion_model_path else "stock",
+                    "camera_error": "", "lip_error": "", "sign_error": "", "error": "",
+                    "decision": asdict(Decision("", "unavailable", "sign_only", "local")),
+                    "candidates": [], "candidate_scores": [], "alternatives": [], "last_sign": None,
+                    "metrics": {}, "last_spoken": "", "last_correction": "", "recording": False,
+                    "auto_recognition": False,
+                    "session_active": False, "session_finalizing": False,
+                    "session_text": "", "session_chunks": [], "session_gestures": [],
+                    "cleanup": {"status": "idle" if self.cleanup.public_config()["enabled"] else "disabled",
+                                "suggestion": "", "latency_ms": 0, "error": "", "source_revision": self.revision},
+                })
+
+                self.profile_manager.set_active_profile(new_profile.id)
+
+                if not self.rehearsal and not self.stop.is_set():
+                    self._start_workers()
+
+                return new_profile
+        finally:
+            with self.lock:
+                self._switching_profile = False
+
     def close(self):
         self.stop.set()
+        self._stop_workers()
         with self.lock:
             self._cleanup_generation += 1
         self.cleanup.close()
         self.speaker.close()
-        for thread in self.threads:
-            thread.join(timeout=1)

@@ -490,6 +490,10 @@ class _Handler(BaseHTTPRequestHandler):
                     self.server.models.promote(profile, kind, data.get("candidate_id"))
                 elif action == "rollback":
                     self.server.models.rollback(profile, kind)
+                elif action in ("evaluate", "evaluate_language"):
+                    if kind and kind != "language":
+                        raise ValueError("Recognition evaluation is only supported for language candidates")
+                    self.server.models.evaluate_language(profile, data.get("candidate_id"))
                 else:
                     self._error(404, "unknown model action")
                     return

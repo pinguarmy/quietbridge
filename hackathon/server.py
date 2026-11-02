@@ -7,22 +7,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import secrets
 
-from .runtime import Runtime
+from .runtime import Runtime, ProfileSwitchConflict
+from .profiles import ProfileManager, profile_configuration
 
 UI = Path(__file__).with_name("ui")
-
-
-def profile_configuration(profile, vocabulary_path=None):
-    """Resolve compatible recognizer/vocabulary pairs and an explicit warning."""
-    from .fusion import load_vocabulary
-    from .profiles import profile_motion_model, profile_vocabulary
-    motion_model = profile_motion_model(profile)
-    has_motion = motion_model.is_file()
-    vocabulary = (load_vocabulary(vocabulary_path) if vocabulary_path else
-                  profile_vocabulary(profile) if has_motion else None)
-    warning = (f"Profile {profile.name!r} has no trained motion model; using stock gestures"
-               if not has_motion and not vocabulary_path else "")
-    return vocabulary, motion_model if has_motion else None, warning
 
 
 def make_server(runtime, port=8765):
@@ -61,6 +49,14 @@ def make_server(runtime, port=8765):
                     self._json(200, {**runtime.snapshot(), "token": token})
                 elif path == "/api/cleanup/config":
                     self._json(200, runtime.cleanup_config())
+                elif path == "/api/profiles":
+                    manager = getattr(runtime, "profile_manager", None) or ProfileManager()
+                    with runtime.lock:
+                        active_id = runtime.profile.id if runtime.profile else manager.active_profile_id
+                    self._json(200, {
+                        "active_profile": active_id,
+                        "profiles": manager.list_profiles(include_stats=True),
+                    })
                 elif path == "/api/tracking":
                     self._json(200, runtime.tracking_snapshot())
                 elif path == "/api/frame":
@@ -95,6 +91,9 @@ def make_server(runtime, port=8765):
                 return
             if self.path == "/api/frame":
                 self._handle_frame()
+                return
+            if self.path in {"/api/profile/select", "/api/action/profile_select"}:
+                self._handle_profile_select()
                 return
             cleanup_path = self.path in {"/api/cleanup/config", "/api/cleanup/test"}
             if not cleanup_path and not self.path.startswith("/api/action/"):
@@ -164,6 +163,38 @@ def make_server(runtime, port=8765):
             runtime.receive_frame(frame)
             self._json(200, {"ok": True})
 
+        def _handle_profile_select(self):
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 8192:
+                    raise ValueError("Invalid request size")
+                body = self.rfile.read(length)
+                try:
+                    data = json.loads(body)
+                except ValueError:
+                    raise ValueError("Invalid JSON body")
+                if not isinstance(data, dict):
+                    raise ValueError("Expected a JSON object")
+                profile_id = data.get("id") or data.get("profile")
+                if not profile_id or not isinstance(profile_id, str):
+                    raise ValueError("Profile id must be a non-empty string")
+                profile = runtime.switch_profile(profile_id.strip())
+                payload = profile.to_dict(include_stats=True)
+                payload["active_profile"] = profile.id
+                payload["profile"] = profile.to_dict(include_stats=True)
+                payload["ok"] = True
+                payload.update(runtime.snapshot())
+                payload["token"] = token
+                self._json(200, payload)
+            except ProfileSwitchConflict as exc:
+                self._json(409, {"error": str(exc)})
+            except (KeyError, ValueError, FileNotFoundError) as exc:
+                self._json(400, {"error": str(exc)})
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except Exception as exc:
+                self._json(500, {"error": str(exc)})
+
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.daemon_threads = True
     return server
@@ -201,7 +232,11 @@ def main():
                       profile_name=profile.name if use_profile else None,
                       profile=profile if use_profile else None,
                       configuration_warning=profile_warning,
-                      max_utterance_seconds=args.max_utterance_seconds)
+                      max_utterance_seconds=args.max_utterance_seconds,
+                      profile_manager=profiles,
+                      explicit_lip_model=args.lip_model,
+                      explicit_lip_language_model=args.lip_language_model,
+                      explicit_vocabulary_path=args.vocabulary)
     server = make_server(runtime, args.port)
     runtime.start()
     print(f"QuietBridge: http://127.0.0.1:{server.server_port}", flush=True)

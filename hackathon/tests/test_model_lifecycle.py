@@ -140,3 +140,159 @@ def test_failed_job_cannot_promote_and_profile_isolation(training):
     assert lifecycle.status(other)["candidates"] == []
     with pytest.raises(ValueError):
         lifecycle.promote(other, "lips", candidate["id"])
+
+
+def _setup_valid_language_candidate(training):
+    lifecycle, profile, calls = training
+    candidate = lifecycle.start_training(profile, "language")
+    calls[0][2].returncode = 0
+    Path(candidate["model_path"]).write_bytes(b"candidate-lm")
+    Path(candidate["report_path"]).write_text(
+        json.dumps({"counts": {"validation": 3}, "selection": {"selected": "candidate"}, "saved": True})
+    )
+    return lifecycle, profile, candidate, calls
+
+
+def test_language_candidate_without_comparison_not_promotable(training):
+    lifecycle, profile, candidate, _ = _setup_valid_language_candidate(training)
+    status = lifecycle.status(profile)
+    cand_record = status["candidates"][0]
+    assert cand_record["status"] == "completed"
+    assert cand_record["promotable"] is False
+    with pytest.raises(ValueError, match="not eligible for promotion"):
+        lifecycle.promote(profile, "language", candidate["id"])
+
+
+def test_language_evaluation_arguments_and_visual_model_flag(training):
+    lifecycle, profile, candidate, calls = _setup_valid_language_candidate(training)
+    # 1. No promoted lip.pth -> visual model omitted (stock)
+    lifecycle.evaluate_language(profile, candidate["id"])
+    assert len(calls) == 2
+    argv, kwargs, proc = calls[1]
+    assert argv[1:3] == ["-m", "hackathon.evaluate_language"]
+    assert argv[argv.index("--data") + 1] == str(profile.mouths_dir)
+    assert argv[argv.index("--candidate") + 1] == str(candidate["model_path"])
+    cand_dir = Path(candidate["model_path"]).parent
+    assert argv[argv.index("--output") + 1] == str(cand_dir / "comparison.json")
+    assert "--visual-model" not in argv
+    assert kwargs.get("shell") is False
+
+    # Complete this eval
+    proc.returncode = 0
+    comp_file = cand_dir / "comparison.json"
+    comp_file.write_text(json.dumps({
+        "variants": {
+            "stock": {"metrics": {"wer": 0.5, "target_wer": 0.2}},
+            "candidate": {"metrics": {"wer": 0.3, "target_wer": 0.1}}
+        }
+    }))
+    assert lifecycle.status(profile)["candidates"][0]["promotable"] is True
+
+    # 2. When promoted lip.pth exists -> pass --visual-model
+    lip_path = profile.profile_dir / "models" / "lip.pth"
+    lip_path.parent.mkdir(parents=True, exist_ok=True)
+    lip_path.write_bytes(b"visual-lip")
+
+    second_candidate = lifecycle.start_training(profile, "language")
+    calls[2][2].returncode = 0
+    Path(second_candidate["model_path"]).write_bytes(b"cand-2")
+    Path(second_candidate["report_path"]).write_text(
+        json.dumps({"counts": {"validation": 2}, "selection": {"selected": "candidate"}, "saved": True})
+    )
+    lifecycle.evaluate_language(profile, second_candidate["id"])
+    assert len(calls) == 4
+    argv_second = calls[3][0]
+    assert "--visual-model" in argv_second
+    assert argv_second[argv_second.index("--visual-model") + 1] == str(lip_path)
+
+
+def test_language_evaluation_reuses_existing_and_refuses_overwrite(training):
+    lifecycle, profile, candidate, calls = _setup_valid_language_candidate(training)
+    cand_dir = Path(candidate["model_path"]).parent
+    comp_file = cand_dir / "comparison.json"
+    comp_file.write_text(json.dumps({
+        "variants": {
+            "stock": {"metrics": {"wer": 0.4, "target_wer": 0.2}},
+            "candidate": {"metrics": {"wer": 0.2, "target_wer": 0.1}}
+        }
+    }))
+    # Calling evaluate_language reuses existing valid comparison without launching subprocess
+    res = lifecycle.evaluate_language(profile, candidate["id"])
+    assert len(calls) == 1  # Only the training call, no new Popen call
+    assert res["eval_status"] == "completed"
+    assert res["promotable"] is True
+
+    # Now create another candidate with an invalid/corrupted comparison.json
+    cand2 = lifecycle.start_training(profile, "language")
+    calls[1][2].returncode = 0
+    Path(cand2["model_path"]).write_bytes(b"cand-2")
+    Path(cand2["report_path"]).write_text(
+        json.dumps({"counts": {"validation": 2}, "selection": {"selected": "candidate"}, "saved": True})
+    )
+    cand2_dir = Path(cand2["model_path"]).parent
+    cand2_comp = cand2_dir / "comparison.json"
+    cand2_comp.write_text("corrupted json")
+
+    with pytest.raises(ValueError, match="Refusing to overwrite"):
+        lifecycle.evaluate_language(profile, cand2["id"])
+    assert len(calls) == 2  # No new Popen started
+
+
+def test_language_evaluation_failure_safe_summary(training, monkeypatch):
+    lifecycle, profile, candidate, calls = _setup_valid_language_candidate(training)
+
+    def popen_fail(argv, **kwargs):
+        proc = FakeProcess()
+        proc.stderr = io.BytesIO(b"RuntimeError: Out of memory in beam search\n")
+        proc.returncode = 1
+        calls.append((argv, kwargs, proc))
+        return proc
+
+    monkeypatch.setattr(model_lifecycle.subprocess, "Popen", popen_fail)
+    lifecycle.evaluate_language(profile, candidate["id"])
+    status = lifecycle.status(profile)
+    cand = status["candidates"][0]
+    assert cand["eval_status"] == "failed"
+    assert "RuntimeError (details withheld)" in cand["eval_error"]
+    assert cand["promotable"] is False
+
+
+def test_language_promotion_gate_wer_and_target_wer(training):
+    lifecycle, profile, candidate, calls = _setup_valid_language_candidate(training)
+    cand_dir = Path(candidate["model_path"]).parent
+    comp_file = cand_dir / "comparison.json"
+
+    # Case 1: Overall WER degraded (candidate > stock) -> not promotable
+    comp_file.write_text(json.dumps({
+        "variants": {
+            "stock": {"metrics": {"wer": 0.2, "target_wer": 0.1}},
+            "candidate": {"metrics": {"wer": 0.3, "target_wer": 0.05}}
+        }
+    }))
+    assert lifecycle.status(profile)["candidates"][0]["promotable"] is False
+    with pytest.raises(ValueError, match="not eligible for promotion"):
+        lifecycle.promote(profile, "language", candidate["id"])
+
+    # Case 2: Overall WER passed, but target_wer increased -> not promotable
+    comp_file.write_text(json.dumps({
+        "variants": {
+            "stock": {"metrics": {"wer": 0.3, "target_wer": 0.1}},
+            "candidate": {"metrics": {"wer": 0.2, "target_wer": 0.2}}
+        }
+    }))
+    assert lifecycle.status(profile)["candidates"][0]["promotable"] is False
+    with pytest.raises(ValueError, match="not eligible for promotion"):
+        lifecycle.promote(profile, "language", candidate["id"])
+
+    # Case 3: Both WER <= stock and target_wer <= stock -> promotable & promote succeeds
+    comp_file.write_text(json.dumps({
+        "variants": {
+            "stock": {"metrics": {"wer": 0.3, "target_wer": 0.1}},
+            "candidate": {"metrics": {"wer": 0.25, "target_wer": 0.1}}
+        }
+    }))
+    status = lifecycle.status(profile)
+    assert status["candidates"][0]["promotable"] is True
+    lifecycle.promote(profile, "language", candidate["id"])
+    active_lm = Path(lifecycle.status(profile)["active"]["language"])
+    assert active_lm.read_bytes() == b"candidate-lm"

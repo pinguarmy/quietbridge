@@ -24,6 +24,9 @@ class FakeModels:
     def rollback(self, profile, kind):
         self.calls.append(("rollback", profile.id, kind))
 
+    def evaluate_language(self, profile, candidate_id):
+        self.calls.append(("evaluate", profile.id, candidate_id))
+
 
 @pytest.fixture
 def api(tmp_path):
@@ -56,12 +59,14 @@ def test_model_actions_use_active_profile_and_return_status(api):
     assert code == 200 and status["profile"] == profile
     for action, payload in (("train", {"kind": "motion"}),
                             ("promote", {"kind": "lips", "candidate_id": "candidate-1"}),
-                            ("rollback", {"kind": "language"})):
+                            ("rollback", {"kind": "language"}),
+                            ("evaluate", {"kind": "language", "candidate_id": "candidate-2"})):
         code, status = request(api, "POST", "/api/models/" + action, payload)
         assert code == 200 and status["profile"] == profile
     assert server.models.calls == [("train", profile, "motion"),
                                     ("promote", profile, "lips", "candidate-1"),
-                                    ("rollback", profile, "language")]
+                                    ("rollback", profile, "language"),
+                                    ("evaluate", profile, "candidate-2")]
 
 
 def test_model_actions_require_token_and_no_recording(api):

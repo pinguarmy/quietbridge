@@ -8,7 +8,21 @@
 <main class="settings-page">
   <header><a class="wordmark" href="/">QuietBridge<span aria-hidden="true">◖◗</span></a><a class="settings-link" href="/">← Back to your message</a></header>
   <section class="intro"><h1>Settings</h1><p>Choose your inputs. Changes apply to this session.</p></section>
-  <section class="settings-section"><h2>Personal profile</h2><p class="section-copy">Active configuration: <strong id="profile-name">Stock configuration</strong></p><p class="hint">Create a profile, customize gestures and record independent training, validation and test sessions in the <a href="/record">recording lab</a>. Restart the main app after training a new model.</p></section>
+  <section class="settings-section">
+    <h2>Personal profile</h2>
+    <p class="section-copy">Active configuration: <strong id="profile-name">Stock configuration</strong></p>
+    <div class="preview-form" style="display:flex;gap:12px;align-items:center;margin:12px 0;">
+      <label style="margin:0;">Profile
+        <select id="profile-select" aria-label="Select personal profile">
+          <option value="" disabled selected>Loading profiles…</option>
+        </select>
+      </label>
+      <button id="profile-switch-btn" type="button" class="speak" style="margin-top:auto;">Switch profile</button>
+    </div>
+    <p id="profile-switch-status" class="hint" role="status" aria-live="polite"></p>
+    <p id="profile-switch-error" class="error" role="alert"></p>
+    <p class="hint">Create a profile, customize gestures and record independent training, validation and test sessions in the <a href="/record">recording lab</a>.</p>
+  </section>
   <section class="settings-section"><h2>How would you like to communicate?</h2><div class="mode-switch" role="group" aria-label="Input mode"><button data-mode="combined">Lips and gestures</button><button data-mode="lips">Lips only</button><button data-mode="signs">Gestures only</button></div><p id="mode-hint" class="hint">Either input can work on its own.</p></section>
   <section id="gestures" class="settings-section"><h2>Supported gestures</h2><p id="vocabulary-summary" class="section-copy">Checking the supported vocabulary…</p><div id="labels" class="label-list"></div><p class="hint">A small gesture vocabulary, rather than a general BSL or ASL translator.</p></section>
   <section id="cleanup" class="settings-section" aria-labelledby="cleanup-heading">
