@@ -59,7 +59,7 @@
       });
       const result = await response.json();
       if (!response.ok) throw new Error();
-      status(`Connection successful · ${Number(result.latency_ms) || 0} ms`);
+      status(result.latency_ms == null ? 'Connection successful.' : `Connection successful · ${result.latency_ms} ms`);
     } catch (_) {
       status(''); error('Connection test failed. Check the provider settings and try again.');
     } finally { setBusy(false); }

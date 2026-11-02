@@ -15,6 +15,8 @@ import os
 import random
 import re
 import time
+from collections.abc import Iterable
+from pathlib import Path
 
 import torch
 
@@ -89,32 +91,71 @@ def perplexity(lm, seqs, eos, device) -> float:
     return math.exp(nll / max(n, 1))
 
 
-def train(epochs: int = 3, lr: float = 3e-5, bs: int = 32, max_general_loss: float = 1.15, seed: int = 0) -> dict:
+def train(
+    epochs: int = 3,
+    lr: float = 3e-5,
+    bs: int = 32,
+    max_general_loss: float = 1.15,
+    seed: int = 0,
+    phrases: Iterable[str] | None = None,
+    validation_phrases: Iterable[str] | None = None,
+    output_path: str | os.PathLike | None = None,
+    device: str | torch.device | None = None,
+) -> dict:
     from espnet.asr.asr_utils import get_model_conf, torch_load
     from espnet.nets.lm_interface import dynamic_import_lm
     from .vsr import LipReader
 
+    target_path: Path | None = None
+    if output_path is not None:
+        target_path = Path(output_path).expanduser().resolve()
+        if target_path.exists():
+            raise FileExistsError(f"Candidate output path already exists: {target_path}")
+
     random.seed(seed)
     torch.manual_seed(seed)
-    if not os.path.exists(PHRASES):
-        raise FileNotFoundError("No phrases yet. Run `lipflow import-wispr` first.")
+
     units = os.path.join(os.path.dirname(__file__), "unigram5000_units.txt")
     token_list = ["<blank>"] + [l.split()[0] for l in open(units, encoding="utf-8").read().splitlines()] + ["<eos>"]
     eos = len(token_list) - 1
     tok = Tok(token_list)
 
-    sents = sorted({s for line in open(PHRASES, encoding="utf-8") for s in normalise(line)})
-    random.shuffle(sents)
-    seqs = [tok(s)[:58] for s in sents]
-    n_val = max(20, len(seqs) // 10)
-    val, tr = seqs[:n_val], seqs[n_val:]
+    if phrases is None:
+        if not os.path.exists(PHRASES):
+            raise FileNotFoundError("No phrases yet. Run `lipflow import-wispr` first.")
+        tr_sents = sorted({s for line in open(PHRASES, encoding="utf-8") for s in normalise(line)})
+    else:
+        tr_sents = [s for line in phrases for s in normalise(line)]
+
+    if validation_phrases is not None:
+        val_sents = [s for line in validation_phrases for s in normalise(line)]
+        if not tr_sents:
+            raise ValueError("No valid training sentences after normalization")
+        if not val_sents:
+            raise ValueError("No valid validation sentences after normalization")
+        val = [tok(s)[:58] for s in val_sents]
+        tr = [tok(s)[:58] for s in tr_sents]
+        all_sents = tr_sents + val_sents
+    else:
+        sents = tr_sents
+        if not sents:
+            raise ValueError("No valid sentences found")
+        random.shuffle(sents)
+        seqs = [tok(s)[:58] for s in sents]
+        n_val = max(20, len(seqs) // 10)
+        val, tr = seqs[:n_val], seqs[n_val:]
+        all_sents = sents
+
     general = [tok(s) for s in GENERAL_SAMPLE]
 
     lm_path = os.path.join(MODELS, "lm", "model.pth")
     args = get_model_conf(lm_path, os.path.join(MODELS, "lm", "model.json"))
     lm = dynamic_import_lm(getattr(args, "model_module", "default"), args.backend)(len(token_list), args)
     torch_load(lm_path, lm)
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    if device is None or device == "auto":
+        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    else:
+        device = torch.device(device)
     lm.to(device)
 
     before = {"yours": perplexity(lm, val, eos, device), "general": perplexity(lm, general, eos, device)}
@@ -136,9 +177,16 @@ def train(epochs: int = 3, lr: float = 3e-5, bs: int = 32, max_general_loss: flo
     after = {"yours": best, "general": None}
     saved = best_state is not None
     if saved:
-        os.makedirs(os.path.dirname(PERSONAL_LM), exist_ok=True)
-        torch.save(best_state, PERSONAL_LM)
+        if target_path is not None:
+            if target_path.exists():
+                raise FileExistsError(f"Candidate output path already exists: {target_path}")
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            with target_path.open("xb") as f:
+                torch.save(best_state, f)
+        else:
+            os.makedirs(os.path.dirname(PERSONAL_LM), exist_ok=True)
+            torch.save(best_state, PERSONAL_LM)
         lm.load_state_dict(best_state)
         after["general"] = perplexity(lm, general, eos, device)
-    return {"sentences": len(sents), "train": len(tr), "val": len(val), "before": before, "after": after,
+    return {"sentences": len(all_sents), "train": len(tr), "val": len(val), "before": before, "after": after,
             "saved": saved, "seconds": time.time() - t0}

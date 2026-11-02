@@ -140,6 +140,7 @@ class _Recording:
     split: str
     session: str
     start_monotonic: float
+    data_root: Path | None = None
     limit_reached: bool = False
     timestamps_ms: list = field(default_factory=list)
     landmarks: list = field(default_factory=list)  # per frame (2, 21, 3) float32
@@ -150,15 +151,16 @@ class _Recording:
 class _LabServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, engine, data_root, max_frames, max_seconds):
+    def __init__(self, address, engine, data_root, max_frames, max_seconds, profile_manager=None):
         super().__init__(address, _Handler)
         self.engine = engine
         from .lip_lab import LipLab
         from .mouth_capture import MouthCapture
+        from hackathon.profiles import ProfileManager, get_default_root
+
         self.lips = LipLab()
         self.mouth = MouthCapture()
         self.token = secrets.token_urlsafe(24)
-        self.data_root = Path(data_root).expanduser()
         self.max_frames = max_frames
         self.max_seconds = max_seconds
         self.lock = threading.Lock()
@@ -166,6 +168,24 @@ class _LabServer(ThreadingHTTPServer):
         self.saved_count = 0
         self.last_saved = ""
         self._last_timestamp_ms: int | None = None
+
+        if profile_manager is not None:
+            self.profile_manager = profile_manager
+        else:
+            if data_root is not None and Path(data_root).name in ("seq", "sequences"):
+                pm_root = Path(data_root).parent
+            elif data_root is not None:
+                pm_root = Path(data_root)
+            else:
+                pm_root = get_default_root()
+            self.profile_manager = ProfileManager(root_dir=pm_root)
+
+        if data_root is not None:
+            self.data_root = Path(data_root).expanduser()
+        else:
+            active_p = self.profile_manager.get_active_profile()
+            self.data_root = active_p.sequences_dir
+            self.mouth.set_root(active_p.mouths_dir)
 
     def server_close(self):
         self.lips.close()
@@ -192,21 +212,38 @@ def _valid_session(session) -> bool:
 
 
 def _check_session_split(data_root: Path, split: str, session: str) -> None:
-    other = "test" if split == "train" else "train"
-    other_dir = data_root / other
-    if other_dir.is_dir() and any(other_dir.glob(f"{session}_*.npz")):
-        raise ValueError(
-            f"session {session!r} already has sequences in {other}; refusing split leakage"
-        )
+    for other in ("train", "validation", "test"):
+        if other == split:
+            continue
+        other_dir = data_root / other
+        if other_dir.is_dir() and any(other_dir.glob(f"{session}_*.npz")):
+            raise ValueError(
+                f"session {session!r} already has sequences in {other}; refusing split leakage"
+            )
 
 
 def _save_sequence(server: _LabServer, rec: _Recording) -> Path:
     """Write the buffered sequence as one .npz and return its path."""
-    _check_session_split(server.data_root, rec.split, rec.session)
+    target_root = rec.data_root if rec.data_root is not None else server.data_root
+    _check_session_split(target_root, rec.split, rec.session)
     trial_id = str(uuid.uuid4())
-    out_dir = server.data_root / rec.split
+    out_dir = target_root / rec.split
     out_dir.mkdir(parents=True, exist_ok=True)
     destination = out_dir / f"{rec.session}_{trial_id}.npz"
+    # Exclusive creation: never overwrite an existing recording.
+    with destination.open("xb") as archive:
+        np.savez_compressed(
+            archive,
+            timestamps_ms=np.asarray(rec.timestamps_ms, dtype=np.int64),
+            landmarks=np.stack(rec.landmarks).astype(np.float32),
+            hand_present=np.stack(rec.hand_present).astype(bool),
+            handedness=np.stack(rec.handedness),
+            label=np.asarray(rec.label),
+            split=np.asarray(rec.split),
+            session_id=np.asarray(rec.session),
+            trial_id=np.asarray(trial_id),
+        )
+    return destination
     # Exclusive creation: never overwrite an existing recording.
     with destination.open("xb") as archive:
         np.savez_compressed(
@@ -353,21 +390,40 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if self.path == "/api/profiles":
+            with self.server.lock:
+                payload = {
+                    "active_profile": self.server.profile_manager.active_profile_id,
+                    "profiles": self.server.profile_manager.list_profiles(include_stats=True),
+                }
+            self._send_json(200, payload)
+            return
+        if self.path == "/api/profile":
+            with self.server.lock:
+                active_p = self.server.profile_manager.get_active_profile()
+                payload = active_p.to_dict(include_stats=True)
+            self._send_json(200, payload)
+            return
         if self.path == "/api/state":
             with self.server.lock:
                 rec = self.server.recording
+                active_p = self.server.profile_manager.get_active_profile()
+                prof_labels = [g["label"] for g in active_p.gestures]
+                combined_support = list(dict.fromkeys(GESTURE_SUPPORT + prof_labels))
                 payload = {
                     "token": self.server.token,
                     "recording": rec is not None,
                     "saved_count": self.server.saved_count,
                     "last_saved": self.server.last_saved,
                     "model_ready": self.server.engine is not None,
-                    "gesture_support": list(GESTURE_SUPPORT),
+                    "gesture_support": combined_support,
                     "note": STATE_NOTE,
                     "recorded_frames": len(rec.timestamps_ms) if rec else 0,
                     "limit_reached": bool(rec and rec.limit_reached),
                     "lips": self.server.lips.snapshot(),
                     "mouth": self.server.mouth.snapshot(),
+                    "active_profile": active_p.id,
+                    "profile": active_p.to_dict(include_stats=True),
                 }
             self._send_json(200, payload)
             return
@@ -390,6 +446,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_lips()
         elif self.path.startswith("/api/mouth/"):
             self._handle_mouth()
+        elif self.path == "/api/profile/select":
+            self._handle_profile_select()
+        elif self.path == "/api/profile/create":
+            self._handle_profile_create()
+        elif self.path == "/api/profile/update":
+            self._handle_profile_update()
         else:
             self._error(404, "not found")
 
@@ -449,6 +511,9 @@ class _Handler(BaseHTTPRequestHandler):
                 elif action == "start":
                     if self.server.recording is not None:
                         raise ValueError("Finish the gesture trial before recording lips")
+                    if data.get("profile"):
+                        prof = self.server.profile_manager.get_profile(data["profile"])
+                        self.server.mouth.set_root(prof.mouths_dir)
                     self.server.mouth.start(data.get("text", ""), data.get("split", ""), data.get("session", ""))
                 elif action == "stop":
                     self.server.mouth.stop()
@@ -457,7 +522,7 @@ class _Handler(BaseHTTPRequestHandler):
                 else:
                     raise ValueError("Unknown mouth capture action")
                 state = self.server.mouth.snapshot()
-        except (ValueError, RuntimeError, OSError) as error:
+        except (ValueError, RuntimeError, OSError, KeyError) as error:
             self._error(400, str(error))
             return
         self._send_json(200, {**state, "mouth": state})
@@ -489,11 +554,12 @@ class _Handler(BaseHTTPRequestHandler):
         label = data.get("label")
         split = data.get("split")
         session = data.get("session")
+        profile_id = data.get("profile")
         if not isinstance(label, str) or not _LABEL_RE.match(label):
             self._error(400, "label must be a safe UPPER_SNAKE_CASE identifier")
             return
-        if split not in ("train", "test"):
-            self._error(400, "split must be 'train' or 'test'")
+        if split not in ("train", "validation", "test"):
+            self._error(400, "split must be 'train', 'validation', or 'test'")
             return
         if not _valid_session(session):
             self._error(400, "session must be a non-empty filename-safe identifier")
@@ -505,8 +571,16 @@ class _Handler(BaseHTTPRequestHandler):
             if self.server.recording is not None:
                 self._error(409, "already recording; stop or discard first")
                 return
+            target_root = self.server.data_root
+            if profile_id:
+                try:
+                    prof = self.server.profile_manager.get_profile(profile_id)
+                    target_root = prof.sequences_dir
+                except Exception as error:
+                    self._error(400, str(error))
+                    return
             try:
-                _check_session_split(self.server.data_root, split, session)
+                _check_session_split(target_root, split, session)
             except ValueError as error:
                 self._error(400, str(error))
                 return
@@ -516,8 +590,93 @@ class _Handler(BaseHTTPRequestHandler):
                 split=split,
                 session=session,
                 start_monotonic=time.monotonic(),
+                data_root=target_root,
             )
         self._send_json(200, {"recording": True, "label": label, "split": split, "session": session})
+
+    def _handle_profile_select(self):
+        body = self._read_body(MAX_JSON_BYTES)
+        if body is None:
+            return
+        try:
+            data = json.loads(body)
+            if not isinstance(data, dict):
+                raise ValueError("Expected a JSON object")
+            profile_id = data.get("id")
+            with self.server.lock:
+                if self.server.recording is not None:
+                    raise ValueError("Cannot switch profile while recording is in progress")
+                if self.server.mouth.snapshot()["recording"]:
+                    raise ValueError("Cannot switch profile while mouth capture is in progress")
+                profile = self.server.profile_manager.set_active_profile(profile_id)
+                self.server.data_root = profile.sequences_dir
+                self.server.mouth.set_root(profile.mouths_dir)
+                payload = profile.to_dict(include_stats=True)
+        except (ValueError, KeyError, OSError) as error:
+            self._error(400, str(error))
+            return
+        self._send_json(200, payload)
+
+    def _handle_profile_create(self):
+        body = self._read_body(MAX_JSON_BYTES * 8)
+        if body is None:
+            return
+        try:
+            data = json.loads(body)
+            if not isinstance(data, dict):
+                raise ValueError("Expected a JSON object")
+            profile_id = data.get("id")
+            name = data.get("name")
+            gestures = data.get("gestures")
+            lip_prompts = data.get("lip_prompts")
+            with self.server.lock:
+                if self.server.recording is not None:
+                    raise ValueError("Cannot create/switch profile while recording is in progress")
+                if self.server.mouth.snapshot()["recording"]:
+                    raise ValueError("Cannot create/switch profile while mouth capture is in progress")
+                profile = self.server.profile_manager.create_profile(
+                    profile_id=profile_id,
+                    name=name,
+                    gestures=gestures,
+                    lip_prompts=lip_prompts,
+                )
+                self.server.profile_manager.set_active_profile(profile.id)
+                self.server.data_root = profile.sequences_dir
+                self.server.mouth.set_root(profile.mouths_dir)
+                payload = profile.to_dict(include_stats=True)
+        except (ValueError, OSError) as error:
+            self._error(400, str(error))
+            return
+        self._send_json(200, payload)
+
+    def _handle_profile_update(self):
+        body = self._read_body(MAX_JSON_BYTES * 8)
+        if body is None:
+            return
+        try:
+            data = json.loads(body)
+            if not isinstance(data, dict):
+                raise ValueError("Expected a JSON object")
+            profile_id = data.get("id") or self.server.profile_manager.active_profile_id
+            name = data.get("name")
+            gestures = data.get("gestures")
+            lip_prompts = data.get("lip_prompts")
+            with self.server.lock:
+                if self.server.recording is not None:
+                    raise ValueError("Cannot update profile while recording is in progress")
+                if self.server.mouth.snapshot()["recording"]:
+                    raise ValueError("Cannot update profile while mouth capture is in progress")
+                profile = self.server.profile_manager.update_profile(
+                    profile_id=profile_id,
+                    name=name,
+                    gestures=gestures,
+                    lip_prompts=lip_prompts,
+                )
+                payload = profile.to_dict(include_stats=True)
+        except (ValueError, KeyError, OSError) as error:
+            self._error(400, str(error))
+            return
+        self._send_json(200, payload)
 
     def _handle_stop(self):
         self._read_body(MAX_JSON_BYTES)
@@ -556,7 +715,8 @@ class _Handler(BaseHTTPRequestHandler):
 
 def create_server(engine=None, port: int = DEFAULT_PORT, data_root=None,
                   max_frames: int = MAX_RECORD_FRAMES,
-                  max_seconds: float = MAX_RECORD_SECONDS) -> _LabServer:
+                  max_seconds: float = MAX_RECORD_SECONDS,
+                  profile_manager=None) -> _LabServer:
     """Build the loopback lab server.
 
     ``engine`` defaults to a real MediaPipe :class:`Engine`; tests pass a
@@ -568,16 +728,18 @@ def create_server(engine=None, port: int = DEFAULT_PORT, data_root=None,
     return _LabServer(
         ("127.0.0.1", port),
         engine=engine,
-        data_root=data_root if data_root is not None else DEFAULT_DATA_ROOT,
+        data_root=data_root,
         max_frames=max_frames,
         max_seconds=max_seconds,
+        profile_manager=profile_manager,
     )
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    parser.add_argument("--data-root", type=Path, default=DEFAULT_DATA_ROOT)
+    parser.add_argument("--data-root", type=Path, default=None)
+    parser.add_argument("--profile", type=str, default=None, help="active profile id")
     parser.add_argument("--model", type=Path, default=None, help="gesture .task model path")
     args = parser.parse_args(argv)
 
@@ -590,6 +752,11 @@ def main(argv=None):
         # lazy backend initialization. Timestamp goes through the server's
         # monotonic helper, so warmup cannot break strict ordering.
         server = create_server(engine=engine, port=args.port, data_root=args.data_root)
+        if args.profile:
+            server.profile_manager.set_active_profile(args.profile)
+            p = server.profile_manager.get_active_profile()
+            server.data_root = p.sequences_dir
+            server.mouth.set_root(p.mouths_dir)
         warmup = np.zeros((64, 64, 3), dtype=np.uint8)
         engine.infer(warmup, server.next_timestamp_ms())
         url = f"http://127.0.0.1:{server.server_address[1]}/"

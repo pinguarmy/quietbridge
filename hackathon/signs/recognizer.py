@@ -9,9 +9,9 @@ Label contract
 --------------
 ``LABEL_MAP`` maps the raw MediaPipe canned-classifier category names to the
 sign labels shared with fusion via ``hackathon.contracts.SignEvent``.
-``SUPPORTED_LABELS`` is the resulting public vocabulary. Only these four labels
-can ever be emitted; any other top-1 category (including ``None``) is treated
-as "no supported gesture".
+``SUPPORTED_LABELS`` is the stock vocabulary. In the default stock mode, only
+these four labels can be emitted; unsupported top-1 categories stay silent.
+The opt-in motion mode emits labels learned by its selected model instead.
 
 Handedness rules
 ----------------
@@ -30,6 +30,7 @@ returns whatever events the stabilizer confirms.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -69,6 +70,10 @@ class SignRecognizer:
         ``hackathon.signs.assets.default_model_path()``. If the file is
         missing, :class:`FileNotFoundError` is raised with a download hint;
         nothing is downloaded implicitly.
+    motion_model_path:
+        Optional motion NPZ path; alternatively set ``QUIETBRIDGE_MOTION_MODEL``.
+        Explicit ``start``/``finish`` windows replace framewise classification;
+        personal static models and the stabilizer are not used in motion mode.
     stabilizer:
         Optional ``EventStabilizer`` instance (or compatible object whose
         ``update`` returns an iterable of ``SignEvent``). Defaults to
@@ -76,12 +81,21 @@ class SignRecognizer:
         ``hackathon.signs.stabilizer``.
     """
 
-    def __init__(self, model_path=None, *, stabilizer=None, personal_model_path=None):
+    def __init__(self, model_path=None, *, stabilizer=None, personal_model_path=None, motion_model_path=None):
+        motion_model_path = motion_model_path or os.environ.get("QUIETBRIDGE_MOTION_MODEL")
+        self._motion = None
+        self._motion_frames = None
+        self._motion_start_ms = None
+        self._motion_last_boundary_ms = None
+        if motion_model_path:
+            from .motion import MotionModel
+
+            self._motion = MotionModel.load(Path(motion_model_path).expanduser())
         # Personal classification is opt-in: an old local model must not silently
         # change a teammate's stock demo. No fallback to stock after rejection.
         personal_model_path = personal_model_path or os.environ.get("QUIETBRIDGE_PERSONAL_GESTURES")
         self._personal = None
-        if personal_model_path:
+        if personal_model_path and self._motion is None:
             from .personal import PersonalGestureModel
 
             self._personal = PersonalGestureModel.load(Path(personal_model_path).expanduser())
@@ -137,6 +151,10 @@ class SignRecognizer:
                 "timestamp_ms must be strictly increasing across calls; "
                 f"got {timestamp_ms} after {self._last_timestamp_ms}"
             )
+        if self._motion_frames is not None and timestamp_ms < self._motion_start_ms:
+            raise ValueError("frame timestamp precedes motion start")
+        if self._motion_last_boundary_ms is not None and timestamp_ms < self._motion_last_boundary_ms:
+            raise ValueError("frame timestamp precedes the last motion boundary")
         self._last_timestamp_ms = timestamp_ms
 
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -157,8 +175,91 @@ class SignRecognizer:
                 "score": float(top.score) if top else 0.0,
             })
 
+        if self._motion is not None:
+            if self._motion_frames is not None:
+                self._motion_frames.append((timestamp_ms, self.last_tracking))
+            return []
+
         label, score = self._pick_personal_label(result) if self._personal is not None else self._pick_label(result)
         return list(self._stabilizer.update(label, score, timestamp_ms))
+
+    def start(self, timestamp_ms=None) -> None:
+        """Start or replace an explicitly segmented motion window.
+
+        Times use the same monotonic millisecond clock as ``process``.
+        """
+        if self._backend is None:
+            raise RuntimeError("SignRecognizer is closed")
+        if self._motion is None:
+            raise RuntimeError("motion model is not configured")
+        timestamp_ms = int(time.perf_counter() * 1000) if timestamp_ms is None else timestamp_ms
+        if self._last_timestamp_ms is not None and timestamp_ms < self._last_timestamp_ms:
+            raise ValueError("start timestamp precedes the last frame")
+        if self._motion_last_boundary_ms is not None and timestamp_ms < self._motion_last_boundary_ms:
+            raise ValueError("start timestamp precedes the last motion boundary")
+        self._motion_last_boundary_ms = timestamp_ms
+        self._motion_start_ms = timestamp_ms
+        self._motion_frames = []
+
+    def cancel(self) -> None:
+        """Discard an active motion window without classifying it.
+
+        The last observed frame or start remains the monotonic boundary.
+        With no active window, including in stock mode, this is a no-op.
+        """
+        if self._motion_frames is None:
+            return
+        if self._motion_frames:
+            self._motion_last_boundary_ms = self._motion_frames[-1][0]
+        else:
+            self._motion_last_boundary_ms = self._motion_start_ms
+        self._motion_frames = None
+        self._motion_start_ms = None
+
+    def finish(self, timestamp_ms: int) -> list[SignEvent]:
+        """Classify the complete window once; rejected and REST trials stay silent."""
+        if self._backend is None:
+            raise RuntimeError("SignRecognizer is closed")
+        if self._motion_frames is None:
+            return []
+        if timestamp_ms < self._motion_start_ms or (
+            self._motion_frames and timestamp_ms < self._motion_frames[-1][0]
+        ):
+            raise ValueError("end timestamp precedes the motion window")
+        self._motion_last_boundary_ms = timestamp_ms
+        frames = self._motion_frames
+        start_ms = self._motion_start_ms
+        self._motion_frames = None
+        self._motion_start_ms = None
+        if len(frames) < 2:
+            return []
+        import numpy as np
+        from .motion import MotionModelError
+
+        landmarks = np.full((len(frames), 2, 21, 3), np.nan, dtype=np.float64)
+        present = np.zeros((len(frames), 2), dtype=bool)
+        handedness = np.full((len(frames), 2), "", dtype="<U16")
+        for i, (_, hands) in enumerate(frames):
+            for j, hand in enumerate(hands[:2]):
+                points = np.asarray(hand["landmarks"], dtype=np.float64)
+                if points.shape != (21, 3) or not np.all(np.isfinite(points)):
+                    continue
+                landmarks[i, j] = points
+                present[i, j] = True
+                handedness[i, j] = hand["handedness"]
+        if not present.any():
+            return []
+        trial = {"landmarks": landmarks, "hand_present": present,
+                 "handedness": handedness,
+                 "timestamps_ms": np.asarray([t for t, _ in frames])}
+        try:
+            label, score = self._motion.predict(trial)
+        except MotionModelError:
+            return []
+        if label is None:
+            return []
+        return [SignEvent(label=label, score=score, start_ms=start_ms,
+                          end_ms=timestamp_ms, is_final=True)]
 
     def _pick_personal_label(self, result) -> tuple[Optional[str], float]:
         from .features import hand_features
@@ -204,6 +305,7 @@ class SignRecognizer:
         """Release the MediaPipe backend. Safe to call more than once."""
         backend = self._backend
         self._backend = None
+        self._motion_frames = None
         if backend is not None:
             backend.close()
 

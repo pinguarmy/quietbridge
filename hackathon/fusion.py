@@ -35,35 +35,54 @@ def load_vocabulary(path=VOCABULARY) -> dict:
 
 def usable_signs(events: list[SignEvent], vocabulary: dict, now_ms: int,
                  since_ms: int | None = None) -> list[SignEvent]:
-    lower = max(now_ms - 4000, since_ms if since_ms is not None else now_ms - 4000)
+    # An explicit recording may last 30 seconds: all events inside that window
+    # remain eligible. Only ambient, unwindowed events use the freshness limit.
+    lower = since_ms if since_ms is not None else now_ms - 4000
+    # Recognizers emit only events accepted by their own model-specific rules.
+    # A MediaPipe classifier score and a MotionModel matching score do not share
+    # a meaningful universal 0.75 probability threshold.
     return [e for e in events if e.is_final and e.label in vocabulary
             and vocabulary[e.label].get("enabled", vocabulary[e.label].get("verified")) is True
-            and math.isfinite(e.score) and 0.75 <= e.score <= 1
+            and math.isfinite(e.score) and 0 <= e.score <= 1
             and 0 <= e.start_ms <= e.end_ms <= now_ms and e.end_ms >= lower]
 
 
 def fuse(lips: LipResult | None, events: list[SignEvent], vocabulary: dict,
          now_ms: int, since_ms: int | None = None) -> Decision:
+    # Beam search already orders candidates by model score. Preserve that order;
+    # gesture evidence can improve it, but scores from different models are not
+    # treated as comparable probabilities.
     candidates = list(dict.fromkeys(c.strip() for c in (lips.candidates if lips else []) if c.strip()))
-    signs = usable_signs(events, vocabulary, now_ms, since_ms)
-    labels = list(dict.fromkeys(e.label for e in signs))
+    signs = sorted(usable_signs(events, vocabulary, now_ms, since_ms),
+                   key=lambda event: (event.start_ms, event.end_ms))
+    labels = list(dict.fromkeys(event.label for event in signs))
     if not candidates and not labels:
         return Decision("", "unavailable", "lip_only" if lips is not None else "sign_only", "local")
-    if len(labels) > 1:
-        return Decision(candidates[0] if candidates else "", "confirmation_needed", "conflict", "local")
     if not labels:
-        # LipResult has no calibrated confidence: a tap always confirms intent.
+        # Lip scores are not calibrated confidence: a tap always confirms intent.
         return Decision(candidates[0], "confirmation_needed", "lip_only", "local")
-    entry = vocabulary[labels[0]]
     if not candidates:
-        status = "accepted" if entry.get("verified") is True else "confirmation_needed"
-        return Decision(entry["phrase"], status, "sign_only", "local")
-    for candidate in candidates:
+        # A sequence of explicit, supported gestures is composable. Unknown or
+        # rejected motions never reach this function and cannot contribute text.
+        text = " ".join(vocabulary[event.label]["phrase"].strip() for event in signs)
+        verified = all(vocabulary[event.label].get("verified") is True for event in signs)
+        return Decision(text, "accepted" if verified else "confirmation_needed",
+                        "sign_only", "local", labels)
+
+    def matched_labels(candidate):
         words = tokens(candidate)
-        matches = any(tokens(m) <= words for m in entry["matches"])
-        # A concept match cannot establish the rest of a sentence, its negation or quantities.
-        if matches and not (words & RISK) and not any(w.isdigit() for w in words):
-            return Decision(candidate, "confirmation_needed", "agreement", "local")
-        if matches and words == tokens(entry["phrase"]):
-            return Decision(candidate, "confirmation_needed", "agreement", "local")
+        matched = []
+        for label in labels:
+            entry = vocabulary[label]
+            alias_match = any(tokens(alias) <= words for alias in entry["matches"])
+            safe = not (words & RISK) and not any(word.isdigit() for word in words)
+            if alias_match and (safe or words == tokens(entry["phrase"])):
+                matched.append(label)
+        return matched
+
+    ranked = [(candidate, matched_labels(candidate)) for candidate in candidates]
+    best, matched = max(ranked, key=lambda item: len(item[1]))
+    if matched:
+        reason = "agreement" if len(matched) == len(labels) else "partial_agreement"
+        return Decision(best, "confirmation_needed", reason, "local", matched)
     return Decision(candidates[0], "confirmation_needed", "conflict", "local")

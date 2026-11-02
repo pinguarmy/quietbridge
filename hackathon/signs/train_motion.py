@@ -40,10 +40,10 @@ SCORE_GATE = 0.75
 
 def evaluate(model, trials, score_gate=None):
     """Evaluate once; no threshold changes here. If score_gate is set, only
-    predictions with score >= gate are counted as emitted (runtime gating)."""
+    predictions with score >= gate are counted as emitted (diagnostic only)."""
     per_label = {}
     confusion = {}
-    n_correct = n_false_positive = n_miss = n_rest_ok = 0
+    n_correct = n_false_positive = n_miss = n_rest_ok = n_mislabels = 0
     t0 = time.perf_counter()
     for t in trials:
         true = t["label"]
@@ -71,6 +71,7 @@ def evaluate(model, trials, score_gate=None):
                 stats["correct"] += 1
             else:
                 n_false_positive += 1
+                n_mislabels += 1
                 stats["wrong_label"] += 1
     elapsed = time.perf_counter() - t0
     n = len(trials)
@@ -81,8 +82,13 @@ def evaluate(model, trials, score_gate=None):
         "accuracy": (n_correct + n_rest_ok) / n if n else 0.0,
         "false_positives": n_false_positive,
         "misses": n_miss,
+        "positive_trials": n - n_rest,
+        "positive_correct": n_correct,
+        "positive_recall": n_correct / (n - n_rest) if n > n_rest else None,
+        "mislabels": n_mislabels,
         "rest_trials": n_rest,
         "rest_correctly_silent": n_rest_ok,
+        "rest_silent_rate": n_rest_ok / n_rest if n_rest else None,
         "per_label": per_label,
         "confusion": {f"{a} -> {b}": c for (a, b), c in sorted(confusion.items())},
         "mean_predict_ms": round(1000.0 * elapsed / n, 2) if n else 0.0,
@@ -94,7 +100,11 @@ def main(argv=None):
     parser.add_argument("--data", default=DEFAULT_DATA,
                         help="sequences root containing train/ and test/")
     parser.add_argument("--output", default=DEFAULT_OUTPUT,
-                        help="model NPZ path (report goes to <name>.report.json)")
+                        help="candidate NPZ path (report goes to <name>.report.json)")
+    parser.add_argument("--session-prefix", default=SESSION_PREFIX,
+                        help="only this session prefix; pass '' for a profile's custom sessions")
+    parser.add_argument("--allow-legacy-no-validation", action="store_true",
+                        help="reproduce old data without an independent validation session")
     parser.add_argument("--overwrite", action="store_true",
                         help="required to replace an existing model file")
     args = parser.parse_args(argv)
@@ -107,10 +117,16 @@ def main(argv=None):
     if report_path.exists() and not args.overwrite:
         parser.error(f"{report_path} exists; pass --overwrite to replace it")
 
-    train_trials = load_trials(data_dir, "train", SESSION_PREFIX)
-    test_trials = load_trials(data_dir, "test", SESSION_PREFIX)
+    train_trials = load_trials(data_dir, "train", args.session_prefix)
+    validation_trials = load_trials(data_dir, "validation", args.session_prefix)
+    test_trials = load_trials(data_dir, "test", args.session_prefix)
     if not train_trials:
-        parser.error(f"no train trials with session prefix {SESSION_PREFIX!r} in {data_dir}")
+        parser.error(f"no train trials with session prefix {args.session_prefix!r} in {data_dir}")
+    if not validation_trials and not args.allow_legacy_no_validation:
+        parser.error("record an independent validation session, or explicitly use --allow-legacy-no-validation")
+    if validation_trials:
+        check_session_leakage(train_trials, validation_trials)
+        check_session_leakage(validation_trials, test_trials)
     check_session_leakage(train_trials, test_trials)
 
     model = MotionModel().fit(train_trials)
@@ -120,8 +136,9 @@ def main(argv=None):
         "model_path": str(output),
         "train_dir": str(data_dir / "train"),
         "test_dir": str(data_dir / "test"),
-        "session_prefix": SESSION_PREFIX,
+        "session_prefix": args.session_prefix,
         "train_trials": len(train_trials),
+        "validation_trials": len(validation_trials),
         "test_trials": len(test_trials),
         "train_labels": {l: sum(1 for t in train_trials if t["label"] == l)
                          for l in sorted({t["label"] for t in train_trials})},
@@ -129,26 +146,47 @@ def main(argv=None):
                         for l in sorted({t["label"] for t in test_trials})},
         "thresholds_calibrated_on": "train leave-one-trial-out only",
         "loo": model.loo_report_,
+        "validation_ungated": evaluate(model, validation_trials) if validation_trials else None,
+        "validation_diagnostics": [
+            {"trial_id": trial["trial_id"], "true": trial["label"], **model.diagnose(trial)}
+            for trial in validation_trials
+        ],
         "test_ungated": evaluate(model, test_trials),
         "test_score_gated_0.75": evaluate(model, test_trials, score_gate=SCORE_GATE),
+        "test_diagnostics": [
+            {"trial_id": trial["trial_id"], "true": trial["label"], **model.diagnose(trial)}
+            for trial in test_trials
+        ],
         "notes": [
             "Test split was never used for threshold tuning.",
             "score is a heuristic matching score, not a probability.",
+            "The 0.75 score gate is diagnostic only; runtime uses model acceptance.",
             "Model classifies pre-segmented trials only; no continuous recognition.",
         ],
     }
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2) + "\n")
 
+    def print_metrics(name, metrics):
+        recall = metrics["positive_recall"]
+        silent = metrics["rest_silent_rate"]
+        recall_text = f"{recall:.2f}" if recall is not None else "n/a"
+        silent_text = f"{silent:.2f}" if silent is not None else "n/a"
+        print(f"{name}: acc={metrics['accuracy']:.2f} fp={metrics['false_positives']} "
+              f"misses={metrics['misses']} mislabels={metrics['mislabels']} "
+              f"positive_recall={metrics['positive_correct']}/{metrics['positive_trials']} "
+              f"({recall_text}) rest_silent={metrics['rest_correctly_silent']}/"
+              f"{metrics['rest_trials']} ({silent_text})")
+
+    if validation_trials:
+        print_metrics("validation", report["validation_ungated"])
     g = report["test_ungated"]
     print(f"train: {report['train_trials']} trials {report['train_labels']}")
     print(f"test:  {report['test_trials']} trials {report['test_labels']}")
     print(f"LOO:   acc={model.loo_report_['raw_accuracy']:.2f} "
           f"reject={model.reject_threshold_:.4f} margin={model.margin_threshold_:.4f}")
-    print(f"test:  acc={g['accuracy']:.2f} fp={g['false_positives']} "
-          f"misses={g['misses']} rest_silent={g['rest_correctly_silent']}/{g['rest_trials']}")
-    gg = report["test_score_gated_0.75"]
-    print(f"gated@0.75: acc={gg['accuracy']:.2f} fp={gg['false_positives']} misses={gg['misses']}")
+    print_metrics("test", g)
+    print_metrics("gated@0.75", report["test_score_gated_0.75"])
     print(f"wrote {output} and {report_path}")
     return 0
 

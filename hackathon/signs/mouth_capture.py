@@ -19,9 +19,9 @@ import uuid
 import numpy as np
 
 DEFAULT_ROOT = os.path.expanduser("~/.local/share/quietbridge/mouths")
-SPLITS = ("train", "test")
+SPLITS = ("train", "validation", "test")
 MAX_TEXT = 300
-LIMIT_SECONDS = 15.0
+LIMIT_SECONDS = 30.0
 MIN_ROIS = 12
 _SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
@@ -44,6 +44,11 @@ class MouthCapture:
         self.last_saved = None
         self.saved_count = 0
         self._last_quality = 0.0
+
+    def set_root(self, data_root):
+        if self._recording:
+            raise ValueError("Cannot change data root while recording is in progress")
+        self.root = os.path.expanduser(str(data_root))
 
     # -- lifecycle ---------------------------------------------------
     def _ensure_tracker(self):

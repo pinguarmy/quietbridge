@@ -68,4 +68,32 @@ def test_metrics_include_raw_wer_exact_phrase_and_contrast_false_welcome():
     assert result["count"] == 2
     assert result["fullphrase_exact"] == 1.0
     assert result["contrast_false_welcome"] == 1.0
+    assert result["target_wer"] == 0.0
     assert result["wer_words"] > 0
+
+
+def test_validation_is_loaded_and_cannot_reuse_train_session(tmp_path):
+    save_trial(tmp_path, "train", "train", "TARGET", "train-session", "train-trial")
+    save_trial(tmp_path, "validation", "val", "TARGET", "validation-session", "validation-trial")
+    data = train_lips.load_dataset(tmp_path)
+    assert len(data["validation"]) == 1
+    save_trial(tmp_path, "test", "test", "CONTRAST", "validation-session", "test-trial")
+    with pytest.raises(ValueError, match="validation and test"):
+        train_lips.load_dataset(tmp_path)
+
+
+def test_training_requires_an_independent_validation_directory(tmp_path):
+    save_trial(tmp_path, "train", "train", "TARGET", "train-session", "train-trial")
+    data = train_lips.load_dataset(tmp_path)
+    with pytest.raises(ValueError, match="Independent validation"):
+        train_lips.independent_partition(data)
+    save_trial(tmp_path, "validation", "val", "TARGET", "validation-session", "validation-trial")
+    fit, val = train_lips.independent_partition(train_lips.load_dataset(tmp_path))
+    assert len(fit) == len(val) == 1
+
+
+def test_candidate_gate_rejects_target_regression_despite_overall_gain():
+    stock = {"wer": 0.5, "target_wer": 0.4, "contrast_false_welcome": 0.0}
+    candidate = {"wer": 0.4, "target_wer": 0.6, "contrast_false_welcome": 0.0}
+    assert train_lips.select_candidate(stock, candidate) == (
+        False, "rejected: target-prompt WER regressed")

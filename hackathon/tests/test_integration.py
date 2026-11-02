@@ -47,7 +47,9 @@ class FusionTests(unittest.TestCase):
             self.assertEqual((decision.text, decision.status), (entry["phrase"], "accepted"))
 
     def test_bad_or_unverified_events_do_not_become_speech(self):
-        invalid = [sign("UNKNOWN"), sign(score=.5), sign(score=float("nan")), sign(score=1.1),
+        # MotionModel applies its own calibrated acceptance before emission.
+        # Stock MediaPipe still applies its 0.75 floor inside SignRecognizer.
+        invalid = [sign("UNKNOWN"), sign(score=-.1), sign(score=float("nan")), sign(score=1.1),
                    sign(final=False), sign(start=2000, end=1500), sign(end=6000), sign(end=100)]
         for event in invalid:
             with self.subTest(event=event):
@@ -68,9 +70,25 @@ class FusionTests(unittest.TestCase):
         d = fuse(LipResult(["I know"], 0), [sign("NO")], VOCAB, 2000)
         self.assertEqual(d.reason, "conflict")
 
-    def test_multiple_labels_never_concatenated(self):
-        d = fuse(None, [sign(), sign("WATER")], VOCAB, 2000)
-        self.assertEqual((d.text, d.status), ("", "confirmation_needed"))
+    def test_supported_gesture_sequence_composes_in_time_order(self):
+        later_water = sign("WATER", start=1600, end=1800)
+        d = fuse(None, [later_water, sign()], VOCAB, 2000)
+        self.assertEqual((d.text, d.status, d.matched_signs),
+                         ("I need help. I want water.", "accepted", ["HELP", "WATER"]))
+
+    def test_multiple_gesture_agreement_and_partial_agreement_remain_reviewed(self):
+        events = [sign(), sign("WATER", start=1600, end=1800)]
+        both = fuse(LipResult(["I need help and I want water"], 0), events, VOCAB, 2000)
+        self.assertEqual((both.reason, both.status, both.matched_signs),
+                         ("agreement", "confirmation_needed", ["HELP", "WATER"]))
+        partial = fuse(LipResult(["I need help"], 0), events, VOCAB, 2000)
+        self.assertEqual((partial.reason, partial.status, partial.matched_signs),
+                         ("partial_agreement", "confirmation_needed", ["HELP"]))
+
+    def test_explicit_long_window_keeps_early_gesture(self):
+        early = sign(start=1000, end=1500)
+        d = fuse(None, [early], VOCAB, 30000, since_ms=1000)
+        self.assertEqual((d.text, d.reason), ("I need help.", "sign_only"))
 
     def test_lip_only_has_no_claim_of_confidence(self):
         self.assertEqual(fuse(LipResult(["Hello"], 9), [], VOCAB, 2000).status, "confirmation_needed")

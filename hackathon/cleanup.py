@@ -39,7 +39,7 @@ def normalize_base_url(value):
 
 class CleanupClient:
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._config = {"base_url": "https://api.openai.com/v1", "model": "", "enabled": False}
         self._api_key = ""
         self._queue = queue.Queue(maxsize=1)
@@ -142,8 +142,8 @@ class CleanupClient:
                                      "gesture_labels": labels[:10]}, ensure_ascii=False)
                 suggestion = self._chat(config, prompt).strip()
                 result = {"status": "ready" if suggestion else "idle", "suggestion": suggestion, "error": ""}
-            except ValueError as exc:
-                result = {"status": "error", "suggestion": "", "error": str(exc)}
+            except Exception as exc:
+                result = {"status": "error", "suggestion": "", "error": str(exc) if isinstance(exc, ValueError) else "Cleanup failed"}
             result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
             if not self._stop.is_set():
                 callback(generation, revision, result)
@@ -154,3 +154,5 @@ class CleanupClient:
             self._queue.put_nowait(None)
         except queue.Full:
             pass
+        if threading.current_thread() is not self._worker:
+            self._worker.join(timeout=7)

@@ -41,6 +41,10 @@ def test_sign_tracking_uses_backend_result_and_handles_no_hands():
     recognizer = SignRecognizer.__new__(SignRecognizer)
     recognizer._backend = Backend()
     recognizer._personal = None
+    recognizer._motion = None
+    recognizer._motion_frames = None
+    recognizer._motion_start_ms = None
+    recognizer._motion_last_boundary_ms = None
     recognizer._stabilizer = Stabilizer()
     recognizer._last_timestamp_ms = None
     frame = np.zeros((8, 8, 3), dtype=np.uint8)
@@ -224,3 +228,27 @@ def test_tracking_endpoint_deepcopy_and_record_redirect():
         server.server_close()
         thread.join(1)
         runtime.close()
+
+
+def test_lip_finish_preserves_scores_and_real_capture_measurements(monkeypatch):
+    adapter = LipsAdapter.__new__(LipsAdapter)
+    adapter.recording = SimpleNamespace(ts=[1.0, 1.1, 1.3], grays=[1, 2, 3],
+                                       anchors=[1, 2, 3], mouth_open=[0.1, 0.2, 0.1])
+
+    class Reader:
+        def encode(self, rois):
+            return "encoded"
+
+        def beam_search_details(self, encoded, nbest):
+            assert encoded == "encoded" and nbest == 3
+            return [{"text": "FIRST", "score": -1.25}, {"text": "SECOND", "score": -2.0}]
+
+    adapter.reader = Reader()
+    monkeypatch.setattr("lipflow.dictation.clip_problem", lambda rec: None)
+    monkeypatch.setattr("lipflow.dictation.rois_for", lambda rec: np.zeros((12, 96, 96), dtype=np.uint8))
+    result = adapter.finish()
+    assert result.candidates == ["FIRST", "SECOND"]
+    assert result.candidate_scores == [-1.25, -2.0]
+    assert (result.start_ms, result.end_ms, result.raw_frames) == (1000, 1300, 3)
+    assert result.capture_fps == 6.67
+    assert result.max_frame_gap_ms == 200

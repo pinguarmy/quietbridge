@@ -17,7 +17,7 @@ import time
 
 from hackathon.lips_adapter import LipsAdapter
 
-MAX_UTTERANCE_S = 15.0
+MAX_UTTERANCE_S = 30.0
 TAIL_S = 0.4
 
 

@@ -147,7 +147,7 @@ def test_limit_stops_appending(cap):
     cap.start("long", "train", "s6")
     cap.feed(frame(), 0)
     cap.feed(frame(), 1000)
-    box = cap.feed(frame(), 16_100)  # beyond 15 s: not appended
+    box = cap.feed(frame(), 30_100)  # beyond 30 s: not appended
     assert cap.snapshot()["frames"] == 2
     assert cap.snapshot()["limit_reached"] is True
     assert box == [0.2, 0.3, 0.2, 0.3]
@@ -202,3 +202,54 @@ def test_tracker_built_lazily_and_closed(tmp_path, monkeypatch):
     assert len(made) == 1  # reused, not rebuilt
     c.close()
     assert made[0].closed and c._tracker is None and c._rec is None
+
+
+def test_validation_split_allowed_and_saved(cap, tmp_path):
+    cap.start("validation prompt", "validation", "s_val")
+    cap.feed(frame(), 1000)
+    snap = cap.stop()
+    assert snap["saved_count"] == 1
+    path = snap["last_saved"]
+    assert path.startswith(str(tmp_path / "validation"))
+    assert (tmp_path / "validation").is_dir()
+    files = list((tmp_path / "validation").glob("s_val_*.npz"))
+    assert len(files) == 1
+    with np.load(files[0], allow_pickle=False) as z:
+        assert str(z["split"]) == "validation"
+        assert str(z["session_id"]) == "s_val"
+
+
+def test_session_leakage_across_all_three_splits(cap):
+    cap.start("a", "train", "s_tri")
+    cap.feed(frame(), 0)
+    cap.stop()
+
+    # Reject in validation
+    with pytest.raises(ValueError, match="another split"):
+        cap.start("b", "validation", "s_tri")
+
+    # Reject in test
+    with pytest.raises(ValueError, match="another split"):
+        cap.start("c", "test", "s_tri")
+
+    # Same split (train) is allowed
+    cap.start("d", "train", "s_tri")
+    cap.discard()
+
+
+def test_set_root_isolates_profiles(cap, tmp_path):
+    prof1_dir = tmp_path / "profiles" / "prof1" / "mouths"
+    prof2_dir = tmp_path / "profiles" / "prof2" / "mouths"
+
+    cap.set_root(prof1_dir)
+    cap.start("for prof1", "train", "s_p1")
+    cap.feed(frame(), 0)
+    cap.stop()
+    assert len(list(prof1_dir.glob("train/*.npz"))) == 1
+    assert not prof2_dir.exists()
+
+    cap.set_root(prof2_dir)
+    cap.start("for prof2", "train", "s_p2")
+    cap.feed(frame(), 0)
+    cap.stop()
+    assert len(list(prof2_dir.glob("train/*.npz"))) == 1

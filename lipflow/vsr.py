@@ -43,7 +43,11 @@ def pick_encoder_device(pref: str = "auto") -> torch.device:
 class LipReader:
     def __init__(self, device: str = "auto", beam_size: int = 20, lm_weight: float = 0.3,
                  ctc_weight: float = 0.1, use_lm: bool = True, personal_weight: "float | None" = None,
-                 personal: bool = True):
+                 personal: bool = True, personal_vsr_path: str | None = None,
+                 personal_lm_path: str | None = None):
+        for label, value in (("lip", personal_vsr_path), ("language", personal_lm_path)):
+            if value is not None and not os.path.isfile(os.path.expanduser(value)):
+                raise FileNotFoundError(f"Personal {label} model not found: {os.path.expanduser(value)}")
         # The 3D-conv + conformer encoder is 17x faster on the Apple GPU; beam search is
         # thousands of tiny ops and runs faster on CPU, so the two are split.
         self.enc_device = pick_encoder_device(device)
@@ -58,13 +62,16 @@ class LipReader:
         self.model = E2E(odim, args)
         state = torch.load(os.path.join(MODELS, "vsr", "model.pth"), map_location="cpu", weights_only=True)
         self.model.load_state_dict(state)
-        # Your face: a fine-tuned copy of the visual model from onboarding (only the changed tensors)
+        # Explicit paths select an experiment without copying it over the
+        # original app's default personal weights. Missing explicit files fail.
         self.personal_vsr = False
+        self.personal_vsr_source = None
         from .paths import PERSONAL_LM, PERSONAL_VSR
-        pv = PERSONAL_VSR
-        if personal and os.path.exists(pv):
+        pv = os.path.abspath(os.path.expanduser(personal_vsr_path or PERSONAL_VSR))
+        if (personal or personal_vsr_path is not None) and os.path.exists(pv):
             self.model.load_state_dict(torch.load(pv, map_location="cpu", weights_only=True), strict=False)
             self.personal_vsr = True
+            self.personal_vsr_source = pv
         self.model.to(self.device).eval()
         self.model.encoder.to(self.enc_device)
 
@@ -81,12 +88,13 @@ class LipReader:
         # How you talk: a copy of the LM fine-tuned on your phrases (lipflow train-lm), scored
         # alongside the general one so the search still knows ordinary English.
         plm = None
-        pl = PERSONAL_LM
-        if lm is not None and personal and os.path.exists(pl):
+        pl = os.path.abspath(os.path.expanduser(personal_lm_path or PERSONAL_LM))
+        if lm is not None and (personal or personal_lm_path is not None) and os.path.exists(pl):
             plm = lm_class(odim, lm_args)
             plm.load_state_dict(torch.load(pl, map_location="cpu", weights_only=True))
             plm.eval()
         self.personal_lm = plm is not None
+        self.personal_lm_source = pl if plm is not None else None
         pw = PERSONAL_LM_WEIGHT if personal_weight is None else personal_weight
         if plm is not None and pw > 0:
             scorers["plm"] = plm
@@ -140,13 +148,23 @@ class LipReader:
         return self._clean("".join(out))
 
     @torch.inference_mode()
-    def beam_search(self, enc: torch.Tensor, nbest: int = 1) -> "str | list[str]":
+    def beam_search_details(self, enc: torch.Tensor, nbest: int = 1) -> list[dict]:
+        """Return text and the decoder's unnormalised score for each candidate."""
         hyps = self.beam(enc)
-        texts = []
+        results = []
+        seen = set()
         for h in hyps[:max(nbest, 1)]:
-            t = self._clean(add_results_to_json([h.asdict()], self.token_list))
-            if t not in texts:
-                texts.append(t)
+            data = h.asdict()
+            text = self._clean(add_results_to_json([data], self.token_list))
+            if text in seen:
+                continue
+            seen.add(text)
+            results.append({"text": text, "score": float(data["score"])})
+        return results
+
+    @torch.inference_mode()
+    def beam_search(self, enc: torch.Tensor, nbest: int = 1) -> "str | list[str]":
+        texts = [item["text"] for item in self.beam_search_details(enc, nbest)]
         return texts if nbest > 1 else texts[0]
 
     @staticmethod

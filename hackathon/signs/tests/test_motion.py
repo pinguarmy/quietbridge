@@ -108,7 +108,9 @@ def test_dropout_mask_interpolates_and_still_matches():
     trial["landmarks"][drop] = np.nan
     trial["handedness"][drop] = ""
     feat, mask = preprocess_trial(trial)
-    assert mask.any() and not mask.all()  # dropouts stay visible in the mask
+    assert mask[:8, 0].all() and mask[-8:, 0].all()
+    assert not mask[12:20, 0].any()  # interior dropout remains missing
+    assert 0.5 <= model.diagnose(trial)["joint_coverage"] < 0.7
     pred, score = model.predict(trial)
     assert pred == "WELCOME"
 
@@ -147,11 +149,35 @@ def test_session_leakage_detected():
     check_session_leakage(train, [make_trial("HELLO", seed=3, session="other")])
 
 
-def test_unsupported_label_rejected():
+@pytest.mark.parametrize("label", ["", "  ", " hello ", None, 42])
+def test_invalid_label_rejected(label):
     bad = make_trial("HELLO", seed=1)
-    bad["label"] = "hello"  # only exact uppercase labels are supported
+    bad["label"] = label
     with pytest.raises(MotionModelError):
         MotionModel().fit([bad])
+
+
+def test_custom_label_roundtrip(tmp_path):
+    trials = [make_trial("HELLO", seed=i) for i in range(4)]
+    for trial in trials:
+        trial["label"] = "My gesture"
+    model = MotionModel().fit(trials + [make_trial("WELCOME", seed=i) for i in range(4)])
+    path = tmp_path / "custom.npz"
+    model.save(path)
+    assert MotionModel.load(path).predict(trials[0])[0] == "My gesture"
+
+
+def test_interior_dropout_below_coverage_rejected():
+    model = MotionModel().fit(make_train())
+    trial = make_trial("HELLO", seed=0)
+    trial["hand_present"][5:35] = False
+    trial["landmarks"][5:35] = np.nan
+    _, mask = preprocess_trial(trial)
+    assert not mask[6:26, 0].any()
+    detail = model.diagnose(trial)
+    assert detail["joint_coverage"] < 0.5
+    assert detail["reject_reason"] == "insufficient_coverage"
+    assert model.predict(trial) == (None, 0.0)
 
 
 def test_masked_distance_no_overlap_is_inf():
@@ -159,3 +185,47 @@ def test_masked_distance_no_overlap_is_inf():
     feat, mask = preprocess_trial(trial)
     empty = np.zeros_like(mask)
     assert masked_distance(feat, mask, feat, empty) == math.inf
+
+
+def test_joint_coverage_threshold_and_diagnostics(tmp_path):
+    model = MotionModel().fit(make_train())
+    trial = make_trial("HELLO", seed=0)
+    detail = model.diagnose(trial)
+    assert detail["raw_label"] == "HELLO"
+    assert detail["accepted"] and detail["reject_reason"] is None
+    assert detail["joint_coverage"] == 1.0
+    assert model.classify(trial) == (detail["raw_label"], detail["score"], True)
+
+    feat, mask = preprocess_trial(trial)
+    half = mask.copy()
+    half[16:] = False
+    assert masked_distance(feat, mask, feat, half) == 0.0
+    half[15] = False
+    assert masked_distance(feat, mask, feat, half) == math.inf
+
+    sparse = make_trial("HELLO", seed=0)
+    sparse["hand_present"][10:] = False
+    sparse["landmarks"][10:] = np.nan
+    result = model.diagnose(sparse)
+    assert result["raw_label"] is None
+    assert result["reject_reason"] == "insufficient_coverage"
+    assert result["joint_coverage"] < 0.5
+    assert model.predict(sparse) == (None, 0.0)
+    path = tmp_path / "model.npz"
+    model.save(path)
+    loaded = MotionModel.load(path)
+    assert loaded.reject_threshold_ == model.reject_threshold_
+    assert loaded.margin_threshold_ == model.margin_threshold_
+    assert loaded.diagnose(sparse) == result
+
+
+def test_diagnose_rejected_distance_and_rest():
+    model = MotionModel().fit(make_train())
+    trial = make_trial("HELLO", seed=0)
+    trial["landmarks"][:, 0, :, 0] += 10
+    result = model.diagnose(trial)
+    assert result["reject_reason"] == "distance"
+    assert not result["accepted"]
+    rest = model.diagnose(make_trial(REST_LABEL, seed=0))
+    assert rest["raw_label"] == REST_LABEL and rest["accepted"]
+    assert model.predict(make_trial(REST_LABEL, seed=0)) == (None, 0.0)

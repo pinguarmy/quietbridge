@@ -39,6 +39,8 @@ N_LANDMARKS = 21
 WRIST = 0
 MIDDLE_MCP = 9
 _EPS = 1e-8
+# Fraction of the union of observed hand/frame slots that must overlap.
+MIN_JOINT_COVERAGE = 0.5
 
 
 class MotionModelError(ValueError):
@@ -90,10 +92,9 @@ def check_session_leakage(train_trials, test_trials):
 
 def _validate_trial(trial, require_label=False):
     if require_label:
-        label = str(trial.get("label", ""))
-        if label not in SUPPORTED_LABELS:
-            raise MotionModelError(
-                f"unsupported label {label!r}; expected one of {SUPPORTED_LABELS}")
+        label = trial.get("label")
+        if not isinstance(label, str) or not label.strip() or label != label.strip():
+            raise MotionModelError("label must be a nonempty string without surrounding whitespace")
     lm = np.asarray(trial["landmarks"], dtype=np.float64)
     if lm.ndim != 4 or lm.shape[1:] != (N_HANDS, N_LANDMARKS, 3):
         raise MotionModelError(
@@ -153,24 +154,27 @@ def preprocess_trial(trial):
     if not np.all(np.isfinite(ts)) or np.any(np.diff(ts) <= 0):
         ts = np.arange(lm.shape[0], dtype=np.float64)  # fallback to frame index
     target_t = np.linspace(ts[0], ts[-1], N_FRAMES)
-    median_dt = float(np.median(np.diff(ts))) if len(ts) > 1 else 1.0
-
     feat = np.zeros((N_FRAMES, N_HANDS, N_LANDMARKS, 3), dtype=np.float64)
     mask = np.zeros((N_FRAMES, N_HANDS), dtype=bool)
     for h in range(N_HANDS):
         idx = np.flatnonzero(hp[:, h])
         if idx.size == 0:
             continue
-        t_src = ts[idx]
-        tol = max(median_dt / 2.0, 1e-3)
-        in_window = (target_t >= t_src[0] - tol) & (target_t <= t_src[-1] + tol)
-        flat = lm[idx, h].reshape(idx.size, -1)  # interpolate present frames only
-        interp = np.stack(
-            [np.interp(target_t, t_src, flat[:, j]) for j in range(flat.shape[1])],
-            axis=1,
-        ).reshape(N_FRAMES, N_LANDMARKS, 3)
-        feat[:, h][in_window] = interp[in_window]
-        mask[:, h] = in_window
+        # Each observed frame owns the interval to its adjacent midpoints.
+        # Interpolate only inside contiguous runs of present frames.
+        boundaries = (ts[:-1] + ts[1:]) / 2.0
+        for run in np.split(idx, np.flatnonzero(np.diff(idx) > 1) + 1):
+            start, end = run[0], run[-1]
+            left = ts[0] if start == 0 else boundaries[start - 1]
+            right = ts[-1] if end == len(ts) - 1 else boundaries[end]
+            in_window = (target_t >= left) & (target_t <= right)
+            flat = lm[run, h].reshape(run.size, -1)
+            interp = np.stack(
+                [np.interp(target_t[in_window], ts[run], flat[:, j])
+                 for j in range(flat.shape[1])], axis=1,
+            ).reshape(-1, N_LANDMARKS, 3)
+            feat[in_window, h] = interp
+            mask[in_window, h] = True
 
     # Per-sequence scale: median wrist->middle-MCP length across present
     # frames of both hands. Single scalar keeps inter-hand relations intact.
@@ -187,8 +191,16 @@ def preprocess_trial(trial):
     return feat.astype(np.float32), mask
 
 
+def joint_coverage(mask_a, mask_b):
+    """Fraction of observed hand/frame slots present in both sequences."""
+    union = np.count_nonzero(mask_a | mask_b)
+    return float(np.count_nonzero(mask_a & mask_b) / union) if union else 0.0
+
+
 def masked_distance(feat_a, mask_a, feat_b, mask_b):
-    """Masked RMS distance over jointly present (frame, hand) slots."""
+    """Masked RMS distance; reject pairs with insufficient joint coverage."""
+    if joint_coverage(mask_a, mask_b) < MIN_JOINT_COVERAGE:
+        return math.inf
     w = (mask_a & mask_b).astype(np.float64)  # (T, H)
     total = w.sum() * N_LANDMARKS * 3
     if total < _EPS:
@@ -261,14 +273,14 @@ class MotionModel:
                 "true": self.labels_[i],
                 "pred": pred,
                 "d1": float(d1),
-                "gap": float(d2 - d1),
-                "correct": bool(pred == self.labels_[i]),
+                "gap": float(d2 - d1) if math.isfinite(d1) else 0.0,
+                "correct": bool(math.isfinite(d1) and pred == self.labels_[i]),
             })
         return stats
 
     def _calibrate_thresholds(self, stats):
         """Grid-search (reject, margin) on LOO stats only. Never sees test."""
-        d1s = sorted({s["d1"] for s in stats})
+        d1s = sorted({s["d1"] for s in stats if math.isfinite(s["d1"])}) or [0.0]
         gaps = sorted({s["gap"] for s in stats})
         candidates_r = [0.0] + d1s + [d1s[-1] * 1.25 + _EPS]
         candidates_m = [0.0] + [g for g in gaps if g > 0]
@@ -318,7 +330,40 @@ class MotionModel:
             if self.labels_[j] != label1:
                 d2 = float(dists[j])
                 break
-        return label1, d1, float(d2 - d1)
+        return label1, d1, float(d2 - d1) if math.isfinite(d1) else 0.0
+
+    def diagnose(self, trial):
+        """Return match details without changing the model or runtime output.
+
+        Coverage is the intersection divided by the union of present
+        hand/frame slots for the nearest template. A zero-overlap trial has
+        no raw label; score is the ungated heuristic score.
+        """
+        if self.templates_ is None:
+            raise MotionModelError("model is not fitted")
+        feat, mask = preprocess_trial(trial)
+        dists = self._distances_to_templates(feat, mask)
+        order = np.argsort(dists)
+        index = int(order[0])
+        d1 = float(dists[index])
+        if not math.isfinite(d1):
+            coverage = max(joint_coverage(mask, m) for m in self.masks_)
+            return {"raw_label": None, "d1": d1, "gap": 0.0, "score": 0.0,
+                    "accepted": False, "reject_reason": "insufficient_coverage",
+                    "joint_coverage": coverage}
+        label = str(self.labels_[index])
+        d2 = next((float(dists[j]) for j in order if self.labels_[j] != label), math.inf)
+        gap = d2 - d1
+        if d1 > self.reject_threshold_ + _EPS:
+            reason = "distance"
+        elif gap < self.margin_threshold_ - _EPS:
+            reason = "margin"
+        else:
+            reason = None
+        return {"raw_label": label, "d1": d1, "gap": gap,
+                "score": self._score(d1), "accepted": reason is None,
+                "reject_reason": reason,
+                "joint_coverage": joint_coverage(mask, self.masks_[index])}
 
     def _score(self, d1):
         # Heuristic matching score (not a probability). 0.75 <=> the match
@@ -331,11 +376,9 @@ class MotionModel:
         REST is returned as a normal label here; accepted is False when the
         reject distance or runner-up margin rule fails.
         """
-        label, d1, gap = self._match(trial)
-        accepted = (d1 <= self.reject_threshold_ + _EPS
-                    and gap >= self.margin_threshold_ - _EPS)
-        score = self._score(d1) if accepted else 0.0
-        return label, score, bool(accepted)
+        result = self.diagnose(trial)
+        return (result["raw_label"], result["score"] if result["accepted"] else 0.0,
+                result["accepted"])
 
     def predict(self, trial):
         """Runtime output: (label or None, score). REST and rejected input

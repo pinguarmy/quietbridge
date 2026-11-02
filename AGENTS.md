@@ -2,45 +2,44 @@
 
 ## Goal
 
-Build a working assistive-communication demo in six hours: lips / a small gesture vocabulary → text → local speech. Support lips-only, gestures-only and combined input. This is not a general sign-language translator.
+Build a local-first assistive-communication tool that a person can use repeatedly: silent lip movements and custom gestures produce reviewable text, then local speech. Each user has an isolated profile, data and model candidates. This is not a general BSL/ASL translator.
 
-**Move fast, reuse what exists, get it working first.** No unnecessary frameworks, major refactors or defensive code for hypothetical problems. Implement the task, run relevant checks and give a short handoff.
+The product lead coordinates architecture and shared files. Delegated work must have disjoint write scopes and return actual checks. Do not restore hackathon-only scope or fixed demo phrases.
 
-Use English for shared documentation, code comments and demo UI so both teammates can work directly with them.
+## Product rules
 
-## Ownership
+- Start with one user and a small custom vocabulary. Expand only after independent validation.
+- Every profile has separate train, validation and test sessions. Never split validation from the same recording session as training.
+- Train candidates beside the profile, review validation and final-test reports, then explicitly promote them. Never overwrite the stock model or an existing candidate.
+- Display which model and profile are active. Missing explicit model paths fail visibly; do not silently load an old personal model.
+- Display text first and speak only after the user's action. Conflicts and uncertain inputs require confirmation. Never invent a sentence from UNKNOWN.
+- The core path works offline. Optional API suggestions remain asynchronous and revision-bound.
 
-- A · Sam: lip adapter, single-camera runtime, fusion, UI and speech; owns files and dependencies outside `hackathon/signs/`.
-- B · Peter: gesture recognition; owns `hackathon/signs/`. Ask Sam for shared-file changes.
-- Branches: `feat/lips-ui-fusion` and `feat/sign-recognizer`. Open separate PRs; Sam merges into `main`. No force pushes.
-- Import shared types from `hackathon/contracts.py`; do not create another schema. Agree interface changes with the other person first.
+## Recognition architecture
 
-## Implementation
-
-- Reuse Auto-AVSR and face processing from `lipflow/`; put new work in `hackathon/`. Adapt rather than rewrite the engine.
-- One camera, two processing paths. Keep only the latest frame (`maxsize=1`); load models once and decode lips after release.
-- Start with 4–6 gestures; reduce to 3 if needed. Emit stable events, not repeated events while a pose is held.
-- `SignRecognizer.process(frame_bgr, timestamp_ms) -> list[SignEvent]`; return `[]` without a result and provide `close()`. Use one monotonic clock in milliseconds.
-- Use local fusion rules: select a matching candidate on agreement, show alternatives on conflict. Never invent a sentence from UNKNOWN.
-- Display text first; speak with local TTS only when the user presses Speak. Do not automatically speak uncertain output.
-- The core path works offline. Add optional API suggestions last, asynchronously; never block output or overwrite confirmed text.
+- Reuse Auto-AVSR and face processing from `lipflow/`; keep product work in `hackathon/`.
+- One camera feeds independent latest-frame workers. Record actual input fps, raw frame count and gaps; resampling to 25 fps does not create missing motion.
+- Lip results retain ordered candidates, decoder scores and capture timing. Decoder scores are not calibrated probabilities.
+- Stock gestures remain automatic. Custom MotionModel gestures use an explicit start/release window and emit at most one accepted event per window. REST and rejected motions stay silent.
+- Combined recording uses a generation ID. Lips wait for the current motion result before fusion. Cancel invalidates late results from either worker.
+- Fusion preserves lip ranking, reranks on gesture agreement, reports partial agreement, and composes only supported gesture phrases in time order. Unknown input contributes no text.
+- An explicit recording window retains gestures from the whole window; ambient stock events still expire.
 
 ## Development and checks
 
 ```sh
 uv run lipflow doctor
 uv run pytest
+node --check hackathon/ui/app.js
 ```
 
-Use lightweight tests in the cloud; test real camera input, models and speech on the demo Mac. Run checks relevant to the change. Synthetic input is not evidence of live recognition.
+Run focused checks while developing and the full suite before handoff. Synthetic events, fake backends and rehearsal validate contracts, not camera accuracy. Test real camera input, real models and audible speech separately.
 
-Pace: agree interfaces in 20 minutes; get independent results by 1.5 hours; integrate by 3 hours; stop adding core features after 4 hours; rehearse a 60–90 second demo.
-
-Done means all three modes work, conflicts ask for confirmation, text and speech work offline, three consecutive demos succeed, and actual latency is visible. Cut scope if it is unreliable.
+Measure new-session WER, exact intent, key-name/negation/number errors, gesture positive recall, REST/unknown false emissions, correction count and release-to-text latency. Compare lips-only, gestures-only and fusion on the same paired inputs. Do not tune on the final-test session.
 
 ## Keep intact
 
 - Project: QuietBridge, https://github.com/pinguarmy/quietbridge.
-- Keep the local directory, Python package/CLI `lipflow`, installed app and personal data paths unchanged for now.
-- Do not commit keys, models, private settings or recordings. Obtain participants' consent before sharing demo samples.
+- Keep the Python package/CLI `lipflow` and legacy app data paths unchanged. QuietBridge profiles live under `~/.local/share/quietbridge/profiles/`.
+- Do not commit keys, models, private settings or recordings. Obtain consent before sharing samples.
 - Preserve LICENSE, NOTICE and upstream attribution. LRS3 model weights have non-commercial research-use restrictions.

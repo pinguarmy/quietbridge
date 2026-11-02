@@ -389,3 +389,93 @@ def test_only_npz_files_on_disk_no_images(conn, server, tmp_path):
     _json(conn, server, "POST", "/api/stop", body=b"{}")
     files = [p for p in tmp_path.rglob("*") if p.is_file()]
     assert files and all(p.suffix == ".npz" for p in files)
+
+
+def test_validation_split_saved_and_prevents_leakage_with_train_and_test(conn, server, tmp_path):
+    # Record trial in validation
+    response, data = _start(conn, server, label="HELLO", split="validation", session="val_sess")
+    assert response.status == 200
+    _post_frame(conn, server)
+    response, stop_data = _json(conn, server, "POST", "/api/stop", body=b"{}")
+    assert response.status == 200
+    saved = Path(stop_data["saved"])
+    assert saved.parent == tmp_path / "seq" / "validation"
+    with np.load(saved, allow_pickle=False) as archive:
+        assert str(archive["split"]) == "validation"
+        assert str(archive["session_id"]) == "val_sess"
+
+    # Attempting same session in train must fail
+    res, err = _start(conn, server, label="HELLO", split="train", session="val_sess")
+    assert res.status == 400
+    assert "split leakage" in err["error"]
+
+    # Attempting same session in test must fail
+    res, err = _start(conn, server, label="HELLO", split="test", session="val_sess")
+    assert res.status == 400
+    assert "split leakage" in err["error"]
+
+
+def test_profile_endpoints_crud_and_isolation(conn, server, tmp_path):
+    # GET /api/profiles
+    res, profs = _json(conn, server, "GET", "/api/profiles", token=False)
+    assert res.status == 200
+    assert "active_profile" in profs
+    assert any(p["id"] == "default" for p in profs["profiles"])
+
+    # POST /api/profile/create
+    custom_gestures = [
+        {"label": "CUSTOM_SIGN", "display_name": "Custom Sign", "concept": "Custom Idea", "description": "Move right"},
+        {"label": "REST", "display_name": "Rest", "concept": "Rest", "description": "Relax"},
+    ]
+    custom_prompts = ["Custom lip phrase 1", "Custom lip phrase 2"]
+    res, created = _json(conn, server, "POST", "/api/profile/create",
+                         body=json.dumps({
+                             "id": "alice",
+                             "name": "Alice Profile",
+                             "gestures": custom_gestures,
+                             "lip_prompts": custom_prompts,
+                         }))
+    assert res.status == 200
+    assert created["id"] == "alice"
+    assert created["name"] == "Alice Profile"
+    assert len(created["gestures"]) == 2
+    assert created["lip_prompts"] == custom_prompts
+
+    # Record gesture in alice profile
+    _start(conn, server, label="CUSTOM_SIGN", split="train", session="alice_s1")
+    _post_frame(conn, server)
+    res, stop_data = _json(conn, server, "POST", "/api/stop", body=b"{}")
+    assert res.status == 200
+    alice_saved = Path(stop_data["saved"])
+    assert "alice" in str(alice_saved)
+
+    # GET /api/profile
+    res, current = _json(conn, server, "GET", "/api/profile", token=False)
+    assert res.status == 200
+    assert current["id"] == "alice"
+    assert current["stats"]["sequences"]["train"] == 1
+
+    # POST /api/profile/update
+    res, updated = _json(conn, server, "POST", "/api/profile/update",
+                         body=json.dumps({
+                             "id": "alice",
+                             "name": "Alice Renamed",
+                         }))
+    assert res.status == 200
+    assert updated["name"] == "Alice Renamed"
+
+    # POST /api/profile/select
+    res, selected = _json(conn, server, "POST", "/api/profile/select",
+                          body=json.dumps({"id": "default"}))
+    assert res.status == 200
+    assert selected["id"] == "default"
+
+
+def test_state_includes_profile_metadata(conn, server):
+    res, state = _json(conn, server, "GET", "/api/state", token=False)
+    assert res.status == 200
+    assert "active_profile" in state
+    assert "profile" in state
+    assert state["profile"]["id"] == state["active_profile"]
+    assert "gestures" in state["profile"]
+    assert "lip_prompts" in state["profile"]

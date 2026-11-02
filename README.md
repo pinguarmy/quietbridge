@@ -1,66 +1,110 @@
 # QuietBridge
 
-**Lips and gestures, turned into a voice.** A local-first communication prototype.
+**Lips and custom gestures, turned into a voice.** A local-first communication tool under active development.
 
-One webcam supports silent lip movements, a small gesture vocabulary, or both together. Read the text, then press **Speak** for on-device speech. Our six-hour goal is a reliable short demo, not a general sign-language translator.
+One webcam supports silent lip movements, stock gestures or a personal dynamic-gesture model. The person reviews the proposed text and presses **Speak** for on-device speech. QuietBridge is not a general sign-language translator.
 
-## Quick start
+## Product workflow
 
-```sh
-git clone https://github.com/pinguarmy/quietbridge.git
-cd quietbridge
-python -m hackathon.server --rehearsal  # Python 3.11/3.12; synthetic input, no models
-```
-
-Open <http://127.0.0.1:8765>. For live camera input, model setup and Peter's gesture integration, see the [local demo guide](hackathon/README.md).
-Rehearsal does not validate real recognition. Windows base-app setup is in the [original Lipflow guide](docs/lipflow-legacy.md). Existing development machines do not need to rerun setup.
-
-**Integration baseline:** the runtime, lip adapter, simple communication screen, separate Settings page, explicit confirmation and local speech are implemented. Peter's four-gesture recognizer is integrated; its four matching phrase mappings are enabled for confirmation-based use, with live verification still pending. Synthetic checks and browser rehearsal do not establish recognition accuracy. The published runtime is single-host; the proposed venue-camera/home-desktop split is not implemented yet. See the [progress audit](docs/progress-audit.md) and shared types in [`hackathon/contracts.py`](hackathon/contracts.py).
-
-## Work in parallel
-
-| Who | Branch | Scope |
-| --- | --- | --- |
-| A · Sam | `feat/lips-ui-fusion` | Lip adapter, camera, fusion, UI, local speech and shared configuration |
-| B · Peter | `feat/sign-recognizer` | `hackathon/signs/` only: recognition, vocabulary, sample tools and tests |
-
-Create branches from `main`, open separate PRs, and let Sam merge. Use separate branches for Codex Cloud tasks too. Keep shared-file edits coordinated. See [AGENTS.md](AGENTS.md) for the short development rules.
-
-```sh
-git switch main
-git pull --ff-only
-git switch -c feat/lips-ui-fusion  # Peter uses feat/sign-recognizer
-uv run pytest
-```
-
-## Repository layout
+Each profile has isolated configuration and data under `~/.local/share/quietbridge/profiles/<id>/`:
 
 ```text
-hackathon/             New demo: runtime, lip adapter, fusion and UI
-  contracts.py         Shared event types
-  signs/               Peter's gesture recognition work
-lipflow/               Reusable lip-reading engine and original native app
-espnet/                Existing model dependencies; leave intact
-tests/                 Base-app tests
-scripts/               Existing development tools
-docs/                  Demo plan and reference material
+profile.json                 Custom concepts, instructions and lip prompts
+sequences/{train,validation,test}/   Hand landmarks
+mouths/{train,validation,test}/      Labelled mouth crops
+models/                      Explicitly selected model candidates
 ```
 
-## Keep the demo focused
+Open the recording lab to create a profile, customize gestures and prompts, and record independent sessions:
 
-- Share one camera between lips and gestures; keep the core path offline.
-- Start with 4–6 distinct gestures; keep 3 reliable ones if time is tight.
-- Show agreement; offer a choice on conflict rather than inventing the user's intent.
-- Speak only on a click, display actual latency, and complete three consecutive runs.
-- Add optional cloud suggestions last, without blocking local output.
+```sh
+uv run python -m hackathon.signs.lab
+```
 
-See the [six-hour plan](docs/hackathon.md). Run lightweight tests in the cloud and real recognition and speech on the demo Mac.
+Open <http://127.0.0.1:8766>. The four stages are profile setup, training, independent validation and final test. The browser targets 25 fps and displays the actual received rate; it does not claim that resampling recovers lost frames.
+
+## Run the main app
+
+```sh
+uv sync --frozen
+uv run python -m hackathon.assets --download
+uv run python -m hackathon.signs.assets --download
+uv run python -m hackathon.server --browser-camera
+```
+
+Open <http://127.0.0.1:8765>. Stock models and gestures remain the default. Select a profile explicitly:
+
+```sh
+uv run python -m hackathon.server --browser-camera --profile alice
+```
+
+If `alice` has a promoted `models/motion.npz`, the app uses its custom vocabulary and dynamic recognizer. Otherwise it keeps compatible stock gestures and shows a setup warning. Custom motion input uses an explicit Record/release window; REST, rejected and cancelled windows emit nothing.
+
+An explicit personal lip candidate and language model can be selected without replacing the legacy Lipflow defaults:
+
+```sh
+uv run python -m hackathon.server --browser-camera --profile alice \
+  --lip-model /absolute/path/to/lip-candidate.pth \
+  --lip-language-model /absolute/path/to/language-candidate.pth
+```
+
+Settings shows the active profile, model identity, actual frame rate, frame gaps and latency. The main recording limit defaults to 30 seconds and can be changed with `--max-utterance-seconds`.
+
+## Train and evaluate candidates
+
+The recording lab collects data; it does not silently deploy a model. Train a motion candidate from custom profile sessions:
+
+```sh
+uv run python -m hackathon.signs.train_motion \
+  --data "$HOME/.local/share/quietbridge/profiles/alice/sequences" \
+  --session-prefix "" \
+  --output "$HOME/.local/share/quietbridge/profiles/alice/models/motion.candidate.npz"
+```
+
+The report separates positive recall, REST silence and wrong labels, and includes per-trial rejection diagnostics. Review independent validation and final test before promoting a candidate to `models/motion.npz`. The old `--allow-legacy-no-validation` exists only to reproduce historical data.
+
+Train a lip candidate using the same beam width as the main app:
+
+```sh
+uv run python -m hackathon.signs.train_lips \
+  --data "$HOME/.local/share/quietbridge/profiles/alice/mouths" \
+  --output "$HOME/.local/share/quietbridge/profiles/alice/models/lip.candidate.pth" \
+  --beam 4
+```
+
+Training requires an independent `validation/` session. Selection rejects overall WER regression, target-prompt regression and increased contrast false welcomes. Existing candidates are not automatically promoted.
+
+Train a personal language-model candidate from the same profile's independent text sessions:
+
+```sh
+uv run python -m hackathon.signs.train_language \
+  --data "$HOME/.local/share/quietbridge/profiles/alice/mouths" \
+  --output "$HOME/.local/share/quietbridge/profiles/alice/models/lm.candidate.pth"
+```
+
+The language report records held-out and general-English perplexity. A candidate is saved only when validation improves without excessive general regression. Review the report before selecting it with `--lip-language-model`; no candidate is deployed automatically.
+
+## Fusion and safety
+
+- Lip candidates retain decoder scores and capture timing; scores are not calibrated probabilities.
+- Gesture agreement can rerank candidates. Partial agreement remains reviewable.
+- Supported gesture-only sequences compose in time order. Unknown input never contributes text.
+- Combined decoding waits for the current dynamic-gesture result. Cancellation invalidates late work from either worker.
+- Text and local speech work offline. Optional API suggestions must remain asynchronous and revision-bound.
+
+## Verification
+
+```sh
+uv run pytest
+node --check hackathon/ui/app.js
+```
+
+Synthetic checks and fake backends establish integration behavior, not live recognition accuracy. Real use still requires new-session camera trials, paired lips/gesture evaluation, REST/unknown false-trigger measurements and audible speech checks. Do not tune on the final-test session.
 
 ## References and licensing
 
-- The [original Lipflow guide](docs/lipflow-legacy.md) preserves installation, architecture and historical benchmarks; those figures are not new QuietBridge measurements.
-- [Earlier personalisation notes](docs/personalization.md) concern the base app, not required demo work.
+- The [original Lipflow guide](docs/lipflow-legacy.md) preserves the base application and historical benchmarks.
 - Based on [amywork777/lipflow](https://github.com/amywork777/lipflow), retained as the `upstream` remote.
-- See [LICENSE](LICENSE) for code licensing and [NOTICE](NOTICE) for attribution and model restrictions. Treat LRS3 weights as non-commercial research use.
+- See [LICENSE](LICENSE) and [NOTICE](NOTICE) for attribution and model restrictions. Treat LRS3 weights as non-commercial research use.
 
-This repository is private. [Invite collaborators](https://github.com/pinguarmy/quietbridge/settings/access). Do not commit keys, models or private recordings. The existing Python package, CLI and data directory remain named Lipflow to avoid disrupting installed apps.
+This repository is private. Do not commit keys, models, profile settings or personal recordings.

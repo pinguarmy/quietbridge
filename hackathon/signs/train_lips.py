@@ -28,12 +28,12 @@ def _scalar(z, name: str) -> str:
 
 
 def load_dataset(root: str | os.PathLike) -> dict[str, list[dict]]:
-    """Load train/test NPZs safely and reject cross-split recording leakage."""
+    """Load train/validation/test NPZs and reject every cross-split ID leak."""
     root = Path(root).expanduser()
     data: dict[str, list[dict]] = {}
     trial_splits: dict[str, str] = {}
     session_splits: dict[str, str] = {}
-    for split in ("train", "test"):
+    for split in ("train", "validation", "test"):
         items = []
         for path in sorted((root / split).glob("*.npz")):
             with np.load(path, allow_pickle=False) as z:
@@ -49,6 +49,14 @@ def load_dataset(root: str | os.PathLike) -> dict[str, list[dict]]:
                     "session_id": _scalar(z, "session_id"), "trial_id": _scalar(z, "trial_id"),
                     "split": split,
                 }
+                if "timestamps_ms" in z.files:
+                    timestamps = np.asarray(z["timestamps_ms"], dtype=np.int64)
+                    duration = float(timestamps[-1] - timestamps[0]) if len(timestamps) > 1 else 0.0
+                    item.update(
+                        raw_frames=len(timestamps),
+                        capture_fps=round((len(timestamps) - 1) * 1000 / duration, 3) if duration > 0 else None,
+                        max_frame_gap_ms=int(np.diff(timestamps).max()) if len(timestamps) > 1 else 0,
+                    )
                 if "split" in z.files and _scalar(z, "split") != split:
                     raise ValueError(f"{path}: split metadata does not match its directory")
             if not item["text"] or not item["session_id"] or not item["trial_id"]:
@@ -56,7 +64,7 @@ def load_dataset(root: str | os.PathLike) -> dict[str, list[dict]]:
             for key, seen in (("trial_id", trial_splits), ("session_id", session_splits)):
                 value = item[key]
                 if value in seen and seen[value] != split:
-                    raise ValueError(f"{key} {value!r} appears in both train and test")
+                    raise ValueError(f"{key} {value!r} appears in both {seen[value]} and {split}")
                 seen[value] = split
             items.append(item)
         data[split] = items
@@ -66,7 +74,10 @@ def load_dataset(root: str | os.PathLike) -> dict[str, list[dict]]:
 
 
 def partition_train(items: list[dict]) -> tuple[list[dict], list[dict]]:
-    """Hold out the last path-sorted trial for each exact prompt."""
+    """Legacy same-session split, retained only to reproduce old experiments.
+
+    New training uses the independent validation directory instead.
+    """
     groups: dict[str, list[dict]] = {}
     for item in items:
         groups.setdefault(item["text"], []).append(item)
@@ -78,6 +89,15 @@ def partition_train(items: list[dict]) -> tuple[list[dict], list[dict]]:
         fit.extend(group[:-1])
         val.append(group[-1])
     return fit, val
+
+
+def independent_partition(data: dict[str, list[dict]]) -> tuple[list[dict], list[dict]]:
+    if not data.get("validation"):
+        raise ValueError(
+            "Independent validation recordings are required under validation/. "
+            "Record a new session instead of splitting validation from training."
+        )
+    return data["train"], data["validation"]
 
 
 def normalise(text: str) -> str:
@@ -92,7 +112,7 @@ def target_prompt(items: list[dict]) -> str:
 def metrics(results: list[dict], target: str) -> dict:
     from lipflow.bench import wer
     target_norm = normalise(target)
-    errors = words = 0
+    errors = words = target_errors = target_words = 0
     target_hits = target_n = contrast_false = contrast_n = 0
     for row in results:
         e, n = wer(row["hypothesis"], row["text"])
@@ -100,6 +120,8 @@ def metrics(results: list[dict], target: str) -> dict:
         words += n
         if normalise(row["text"]) == target_norm:
             target_n += 1
+            target_errors += e
+            target_words += n
             target_hits += normalise(row["hypothesis"]) == target_norm
         else:
             contrast_n += 1
@@ -109,18 +131,26 @@ def metrics(results: list[dict], target: str) -> dict:
         "wer": errors / max(words, 1),
         "fullphrase_exact": target_hits / max(target_n, 1),
         "fullphrase_exact_counts": [target_hits, target_n],
+        "target_wer": target_errors / target_words if target_words else None,
         "contrast_false_welcome": contrast_false / max(contrast_n, 1),
         "contrast_false_welcome_counts": [contrast_false, contrast_n],
+        "mean_capture_fps": round(float(np.mean([row["capture_fps"] for row in results
+                                if row.get("capture_fps") is not None])), 3)
+                            if any(row.get("capture_fps") is not None for row in results) else None,
+        "max_frame_gap_ms": max((row.get("max_frame_gap_ms", 0) for row in results), default=0),
     }
 
 
 def select_candidate(stock: dict, candidate: dict) -> tuple[bool, str]:
-    """Selection is frozen before final test: lower WER, no new false welcomes."""
+    """Selection is frozen before final test and protects the hardest target prompt."""
     if candidate["contrast_false_welcome"] > stock["contrast_false_welcome"]:
         return False, "rejected: contrast false-welcome rate increased"
+    if candidate.get("target_wer") is not None and stock.get("target_wer") is not None \
+            and candidate["target_wer"] > stock["target_wer"] + 1e-12:
+        return False, "rejected: target-prompt WER regressed"
     if candidate["wer"] >= stock["wer"]:
         return False, "rejected: validation WER did not improve"
-    return True, "selected: validation WER improved without more false welcomes"
+    return True, "selected: validation WER improved without target or contrast regression"
 
 
 def evaluate(reader, items: list[dict], cache: dict[str, dict] | None = None) -> list[dict]:
@@ -133,6 +163,8 @@ def evaluate(reader, items: list[dict], cache: dict[str, dict] | None = None) ->
         row = {
             "path": item["path"], "trial_id": item["trial_id"], "text": item["text"],
             "hypothesis": hypothesis, "decode_seconds": float(seconds),
+            "capture_fps": item.get("capture_fps"), "raw_frames": item.get("raw_frames"),
+            "max_frame_gap_ms": item.get("max_frame_gap_ms"),
         }
         if cache is not None:
             cache[item["path"]] = row
@@ -174,14 +206,14 @@ def run(args: argparse.Namespace) -> dict:
 
     started = time.perf_counter()
     data = load_dataset(args.data)
-    fit, val = partition_train(data["train"])
+    fit, val = independent_partition(data)
     target = target_prompt(data["train"])
     report = {
         "data": str(Path(args.data).expanduser().resolve()), "output": str(output),
         "config": {"epochs": args.epochs, "beam": args.beam, "lr": args.lr,
                    "scope": args.scope, "device": args.device},
         "counts": {"train": len(data["train"]), "fit": len(fit),
-                   "val": len(val), "test": len(data["test"])},
+                   "validation": len(val), "val": len(val), "test": len(data["test"])},
         "target_prompt": target, "candidate_attempted": False,
         "selection": {"selected": "stock", "deployment": False, "reason": "candidate not completed"},
         "failures": [],
@@ -230,10 +262,10 @@ def run(args: argparse.Namespace) -> dict:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data", required=True, help="mouth dataset root containing train/ and test/")
+    parser.add_argument("--data", required=True, help="mouth dataset root with train/, validation/ and test/")
     parser.add_argument("--output", required=True, help="new external .pth candidate path (never overwritten)")
     parser.add_argument("--epochs", type=int, default=3)
-    parser.add_argument("--beam", type=int, default=2)
+    parser.add_argument("--beam", type=int, default=4)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--scope", default="frontend",
                         choices=("frontend", "frontend+embed", "frontend+encoder1"))

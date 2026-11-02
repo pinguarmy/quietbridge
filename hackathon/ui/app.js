@@ -2,7 +2,7 @@ const $ = id => document.getElementById(id);
 const text = (id, value) => { const el = $(id), next = String(value ?? ''); if (el && el.textContent !== next) el.textContent = next; };
 const hide = (id, value) => { if ($(id)) $(id).hidden = value; };
 let state = null, token = '', actionChain = Promise.resolve(), pointerHeld = false, keyHeld = false;
-let speaking = false, pendingActions = 0, renderedRevision = null, initialized = false, chosenText = null, connectionLost = false;
+let speaking = false, pendingActions = 0, renderedRevision = null, renderedAlternatives = '', initialized = false, chosenText = null, connectionLost = false;
 let browserCameraStream = null, browserCameraStarting = false, browserFrameTimer = null, browserFrameCanvas = document.createElement('canvas');
 browserFrameCanvas.width = 960; browserFrameCanvas.height = 720;
 async function uploadBrowserFrames() {
@@ -25,7 +25,7 @@ async function uploadBrowserFrames() {
       }
     }
   } catch (_) { /* Keep the camera active; the status endpoint reports server-side errors. */ }
-  if (browserCameraStream) browserFrameTimer = setTimeout(uploadBrowserFrames, 66);
+  if (browserCameraStream) browserFrameTimer = setTimeout(uploadBrowserFrames, 40);
 }
 async function startBrowserCamera() {
   if (browserCameraStarting || browserCameraStream) return;
@@ -33,7 +33,7 @@ async function startBrowserCamera() {
   const button = $('browser-camera-button');
   if (button) { button.disabled = true; button.textContent = 'Starting camera…'; }
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({audio:false, video:{width:{ideal:960}, height:{ideal:720}}});
+    const stream = await navigator.mediaDevices.getUserMedia({audio:false, video:{width:{ideal:960}, height:{ideal:720}, frameRate:{ideal:30}}});
     if (!state?.browser_camera || state.rehearsal) { stream.getTracks().forEach(track => track.stop()); return; }
     browserCameraStream = stream;
     $('browser-camera').srcObject = stream;
@@ -76,7 +76,11 @@ function render(s) {
   hide('rehearsal-banner', !s.rehearsal); hide('preview', !s.rehearsal);
   text('camera-status', s.camera); text('lip-status', s.lips); text('hand-status', s.signs);
   text('last-sign', s.last_sign ? s.last_sign.label + ' · ' + s.last_sign.score.toFixed(2) : '—');
-  text('component-errors', [s.camera_error, s.lip_error, s.sign_error].filter(Boolean).join('\n'));
+  text('sign-input', s.sign_input || '—');
+  text('profile-name', s.profile_name || 'Stock configuration');
+  const lipModel = s.lip_model || {};
+  text('lip-model', (lipModel.mode || 'stock') + (lipModel.vsr_sha256 ? ' · ' + lipModel.vsr_sha256.slice(0,12) : ''));
+  text('component-errors', [s.profile_warning, s.camera_error, s.lip_error, s.sign_error].filter(Boolean).join('\n'));
   const modeName = {combined:'Lips and gestures', lips:'Lips only', signs:'Gestures only'}[s.mode];
   text('mode-caption', modeName);
   if ($('test-text')) $('test-text').disabled = s.mode === 'signs';
@@ -98,44 +102,63 @@ function render(s) {
   text('preview-status', s.rehearsal ? 'Preview · camera off' : ready || browserCameraStream ? 'Camera on' : browserCameraAvailable ? 'Waiting for browser camera' : s.camera === 'unavailable' ? 'Camera unavailable' : 'Getting ready…');
   text('camera-message', s.rehearsal ? 'Your camera is off in preview.' : browserCameraAvailable && !browserCameraStream ? 'Select Start camera to share this browser camera.' : s.camera === 'unavailable' ? 'Check camera access in Settings.' : 'Getting your camera ready…');
   const record = $('record');
+  const motionInput = s.sign_input === 'motion';
+  const needsLips = s.mode === 'lips' || s.mode === 'combined';
   if (record) {
-    hide('record', s.mode === 'signs');
-    record.disabled = s.rehearsal || s.lips !== 'ready' || !ready || !['idle','recording'].includes(s.phase);
+    hide('record', s.mode === 'signs' && !motionInput);
+    record.disabled = s.rehearsal || !ready || !['idle','recording'].includes(s.phase)
+      || (needsLips && s.lips !== 'ready') || (s.mode === 'signs' && s.signs !== 'ready');
     record.classList.toggle('listening', s.phase === 'recording');
-    text('record-label', ({recording:'Mouth your words… release to finish', tail:'Finishing…', decoding:'Reading your lips…'})[s.phase] || 'Hold to mouth words');
+    const idleLabel = s.mode === 'signs' ? 'Hold to record a custom gesture' : 'Hold to mouth words';
+    text('record-label', ({recording:s.mode === 'signs' ? 'Make one gesture… release to finish' : 'Mouth your words… release to finish', tail:'Finishing…', decoding:'Reading your lips…'})[s.phase] || idleLabel);
   }
   hide('cancel', s.phase === 'idle');
-  text('record-hint', s.rehearsal ? 'Try an example from Settings.' : s.mode === 'signs' ? 'Show a supported gesture to the camera.' : s.lips === 'warming' ? 'Getting the lip reader ready…' : s.lips === 'unavailable' ? 'Lip reading needs attention in Settings.' : s.mode === 'combined' ? 'Hold Space or the button before mouthing and gesturing.' : 'Or hold Space, then release when you finish.');
-  text('entry-hint', s.mode === 'signs' ? 'Show a supported gesture, then speak your message.' : s.mode === 'lips' ? 'Hold the button, mouth a short sentence, then release.' : 'Show a supported gesture, or hold the button to mouth a sentence.');
+  text('record-hint', s.rehearsal ? 'Try an example from Settings.' : s.mode === 'signs' && !motionInput ? 'Show a supported gesture to the camera.' : s.lips === 'warming' && needsLips ? 'Getting the lip reader ready…' : s.lips === 'unavailable' && needsLips ? 'Lip reading needs attention in Settings.' : s.mode === 'combined' ? 'Hold Space or the button before mouthing and gesturing.' : 'Or hold Space, then release when you finish.');
+  text('entry-hint', s.mode === 'signs' ? motionInput ? 'Hold the button, make one custom gesture, then release.' : 'Show a supported gesture, then speak your message.' : s.mode === 'lips' ? 'Hold the button, mouth a sentence, then release.' : 'Show a supported gesture, or hold the button to combine input.');
   const gesturesReady = s.signs === 'ready' && Object.values(s.vocabulary).some(v => v.enabled ?? v.verified);
   if (!s.rehearsal && !gesturesReady && s.mode !== 'lips') {
     text('entry-hint', s.mode === 'signs' ? 'Gestures need setup. Choose another input in Settings.' : 'Hold the button to mouth a short sentence.');
     text('record-hint', s.mode === 'signs' ? 'Open Settings to check gesture input.' : 'Gesture input is being set up. You can still use your lips once ready.');
   }
   const d = s.decision, review = d.status === 'confirmation_needed';
-  if (renderedRevision !== s.revision) {
+  const revisionChanged = renderedRevision !== s.revision;
+  const alternativesKey = JSON.stringify([s.alternatives, s.cleanup?.status, s.cleanup?.suggestion, d.status, s.phase]);
+  if (revisionChanged) {
     chosenText = review && d.reason === 'conflict' ? null : (d.text || null);
     renderedRevision = s.revision;
+  }
+  if (revisionChanged || renderedAlternatives !== alternativesKey) {
+    renderedAlternatives = alternativesKey;
     if ($('alternatives')) {
       $('alternatives').replaceChildren();
       const seen = new Set();
       const alternatives = s.alternatives.filter(candidate => {
-        const key = candidate.trim().replace(/[.!?]+$/, '').toLowerCase();
+        const key = candidate === s.cleanup?.suggestion && s.cleanup?.status === 'ready' ? candidate : candidate.trim().replace(/[.!?]+$/, '').toLowerCase();
         if (seen.has(key)) return false;
         seen.add(key); return true;
       });
-      if (review && (d.reason === 'conflict' || alternatives.length > 1)) alternatives.forEach(candidate => {
-        const button = document.createElement('button'); button.className = 'alternative'; button.textContent = candidate;
+      if ((review && (d.reason === 'conflict' || alternatives.length > 1)) || (s.cleanup?.status === 'ready' && alternatives.includes(s.cleanup.suggestion))) alternatives.forEach(candidate => {
+        const button = document.createElement('button'); button.className = 'alternative';
+        button.textContent = candidate === s.cleanup?.suggestion && s.cleanup?.status === 'ready' ? `AI suggestion: ${candidate}` : candidate;
         button.onclick = () => { if (!speaking) {chosenText = candidate; updateMessage();} };
         button.dataset.candidate = candidate; $('alternatives').append(button);
       });
     }
   }
-  if (!review) { chosenText = d.text || null; if ($('alternatives')) $('alternatives').replaceChildren(); }
+  if (!review && s.cleanup?.status !== 'ready' && revisionChanged) chosenText = d.text || null;
+  if ($('alternatives') && !$('cleanup-status')) {
+    const status = document.createElement('p'); status.id = 'cleanup-status'; status.className = 'hint';
+    status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+    $('alternatives').before(status);
+  }
+  text('cleanup-status', s.cleanup?.status === 'pending' ? 'Preparing an optional AI suggestion…' : s.cleanup?.status === 'error' ? 'AI suggestion unavailable. Your original message is still available.' : s.cleanup?.status === 'ready' ? 'Review the AI suggestion before choosing it.' : '');
   updateMessage();
   text('last-spoken', s.last_spoken ? 'Last spoken: ' + s.last_spoken : '');
   text('result-timing', !s.rehearsal && s.metrics?.release_to_text_ms !== undefined ? 'Release → text · ' + (s.metrics.release_to_text_ms / 1000).toFixed(1) + ' s' : '');
   [['metric-release','release_to_text_ms'],['metric-decode','decode_ms'],['metric-fusion','fusion_ms']].forEach(([id,key]) => text(id, s.metrics[key] === undefined ? '—' : s.metrics[key] + ' ms'));
+  [['metric-camera-fps','camera_input_fps'],['metric-lip-fps','lip_capture_fps']].forEach(([id,key]) => text(id, s.metrics[key] == null ? '—' : s.metrics[key] + ' fps'));
+  text('metric-frames', s.metrics.lip_raw_frames == null ? '—' : s.metrics.lip_raw_frames);
+  text('metric-gap', s.metrics.lip_max_frame_gap_ms == null ? '—' : s.metrics.lip_max_frame_gap_ms + ' ms');
   if (!initialized && $('labels')) {
     const entries = Object.entries(s.vocabulary), enabled = entries.filter(([,v]) => v.enabled ?? v.verified);
     text('vocabulary-summary', enabled.length ? enabled.length + ' gesture mappings are enabled. Review the message before speaking. Live accuracy is still being checked.' : 'No gesture mappings are enabled yet.');
@@ -166,15 +189,15 @@ function updateMessage() {
   if (processing && $('alternatives')) $('alternatives').replaceChildren();
   text('decision-status', review ? 'Check your message' : d.status === 'accepted' ? 'Ready to speak' : state.phase === 'tail' ? 'Finishing' : state.phase === 'decoding' ? 'Reading lips…' : state.phase === 'recording' ? 'Listening' : state.lips === 'warming' ? 'Warming up' : 'Waiting');
   $('decision-status').classList.toggle('review', review);
-  text('reason', !state.speech_available ? 'Speech is unavailable on this device. Check Settings.' : review && d.reason === 'conflict' ? 'The inputs differ. Choose the message you intended.' : review ? 'If these are your words, confirm and speak.' : d.status === 'accepted' ? 'Speak whenever you are ready.' : 'Nothing is spoken until you choose.');
+  text('reason', !state.speech_available ? 'Speech is unavailable on this device. Check Settings.' : review && d.reason === 'conflict' ? 'The inputs differ. Choose the message you intended.' : review && d.reason === 'partial_agreement' ? 'Only part of the gesture sequence matches. Review the words and alternatives.' : review ? 'If these are your words, confirm and speak.' : d.status === 'accepted' ? 'Speak whenever you are ready.' : 'Nothing is spoken until you choose.');
   document.querySelectorAll('.alternative').forEach(b => {const selected = b.dataset.candidate === chosenText; b.classList.toggle('selected', selected); b.setAttribute('aria-pressed', String(selected)); b.disabled = speaking;});
-  text('speak-label', review ? 'Confirm & speak' : 'Speak message');
+  text('speak-label', review || (chosenText && chosenText !== d.text) ? 'Confirm & speak' : 'Speak message');
   $('speak').disabled = processing || !chosenText || !state.speech_available || speaking || !['accepted','confirmation_needed'].includes(d.status);
 }
 
 async function speakMessage() {
   if (!state || speaking || !chosenText) return;
-  const revision = state.revision, message = chosenText, needsConfirmation = state.decision.status === 'confirmation_needed';
+  const revision = state.revision, message = chosenText, needsConfirmation = state.decision.status === 'confirmation_needed' || message !== state.decision.text;
   speaking = true; updateMessage();
   try {
     if (needsConfirmation && !await requestAction('confirm', {text:message, revision})) return;

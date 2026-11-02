@@ -6,10 +6,24 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import secrets
+import time
 
 from .runtime import Runtime
 
 UI = Path(__file__).with_name("ui")
+
+
+def profile_configuration(profile, vocabulary_path=None):
+    """Resolve compatible recognizer/vocabulary pairs and an explicit warning."""
+    from .fusion import load_vocabulary
+    from .profiles import profile_motion_model, profile_vocabulary
+    motion_model = profile_motion_model(profile)
+    has_motion = motion_model.is_file()
+    vocabulary = (load_vocabulary(vocabulary_path) if vocabulary_path else
+                  profile_vocabulary(profile) if has_motion else None)
+    warning = (f"Profile {profile.name!r} has no trained motion model; using stock gestures"
+               if not has_motion and not vocabulary_path else "")
+    return vocabulary, motion_model if has_motion else None, warning
 
 
 def make_server(runtime, port=8765):
@@ -46,6 +60,8 @@ def make_server(runtime, port=8765):
             try:
                 if path == "/api/state":
                     self._json(200, {**runtime.snapshot(), "token": token})
+                elif path == "/api/cleanup/config":
+                    self._json(200, runtime.cleanup.public_config())
                 elif path == "/api/tracking":
                     self._json(200, runtime.tracking_snapshot())
                 elif path == "/api/frame":
@@ -61,9 +77,9 @@ def make_server(runtime, port=8765):
                     self.send_header("Cache-Control", "no-store")
                     self.send_header("Content-Length", "0")
                     self.end_headers()
-                elif path in {"/", "/index.html", "/settings", "/settings.html", "/app.js", "/style.css"}:
+                elif path in {"/", "/index.html", "/settings", "/settings.html", "/app.js", "/cleanup-settings.js", "/style.css"}:
                     filename = {"/": "index.html", "/settings": "settings.html"}.get(path, path[1:])
-                    mime = {"index.html": "text/html", "settings.html": "text/html", "app.js": "text/javascript", "style.css": "text/css"}[filename]
+                    mime = {"index.html": "text/html", "settings.html": "text/html", "app.js": "text/javascript", "cleanup-settings.js": "text/javascript", "style.css": "text/css"}[filename]
                     self._send(200, (UI / filename).read_bytes(), mime + "; charset=utf-8")
                 else:
                     self._json(404, {"error": "Not found"})
@@ -81,7 +97,7 @@ def make_server(runtime, port=8765):
             if self.path == "/api/frame":
                 self._handle_frame()
                 return
-            if not self.path.startswith("/api/action/"):
+            if not (self.path.startswith("/api/action/") or self.path in {"/api/cleanup/config", "/api/cleanup/test"}):
                 self._json(404, {"error": "Not found"})
                 return
             try:
@@ -91,8 +107,15 @@ def make_server(runtime, port=8765):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError("Expected a JSON object")
-                runtime.action(self.path.removeprefix("/api/action/"), data)
-                self._json(200, runtime.snapshot())
+                if self.path == "/api/cleanup/config":
+                    self._json(200, runtime.cleanup.configure(data))
+                elif self.path == "/api/cleanup/test":
+                    started = time.perf_counter()
+                    result = runtime.cleanup.test()
+                    self._json(200, {**result, "latency_ms": round((time.perf_counter() - started) * 1000, 2)})
+                else:
+                    runtime.action(self.path.removeprefix("/api/action/"), data)
+                    self._json(200, runtime.snapshot())
             except (ValueError, TypeError, RuntimeError, OSError) as exc:
                 self._json(400, {"error": str(exc)})
             except (BrokenPipeError, ConnectionResetError):
@@ -143,11 +166,24 @@ def main():
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--vocabulary", type=Path, help="JSON label-to-phrase mapping, default hackathon/vocabulary.json")
+    parser.add_argument("--profile", help="Profile id; also selects its trained custom motion model when present")
+    parser.add_argument("--lip-model", type=Path, help="Explicit personal VSR delta; stock remains the default")
+    parser.add_argument("--lip-language-model", type=Path, help="Explicit personal language-model weights")
+    parser.add_argument("--max-utterance-seconds", type=float, default=30.0)
     args = parser.parse_args()
-    from .fusion import load_vocabulary
+    from .profiles import ProfileManager
+    profiles = ProfileManager()
+    profile = profiles.get_profile(args.profile) if args.profile else profiles.get_active_profile()
+    vocabulary, motion_model, profile_warning = profile_configuration(profile, args.vocabulary)
+    use_profile = args.profile is not None or motion_model is not None
     runtime = Runtime(rehearsal=args.rehearsal, browser_camera=args.browser_camera,
                       camera=args.camera, enable_lips=not args.sign_only,
-                      vocabulary=load_vocabulary(args.vocabulary) if args.vocabulary else None)
+                      vocabulary=vocabulary, lip_model=args.lip_model,
+                      lip_language_model=args.lip_language_model,
+                      motion_model=motion_model,
+                      profile_name=profile.name if use_profile else None,
+                      configuration_warning=profile_warning,
+                      max_utterance_seconds=args.max_utterance_seconds)
     server = make_server(runtime, args.port)
     runtime.start()
     print(f"QuietBridge: http://127.0.0.1:{server.server_port}", flush=True)
