@@ -705,3 +705,4 @@ def test_lab_html_contains_paired_ui(conn, server):
     assert 'id="pairedGestureSelect"' in raw_html
     assert 'id="pairedPromptSelect"' in raw_html
     assert "Paired data collection only" in raw_html or "no recognition" in raw_html.lower()
+    assert "[hidden]{display:none!important}" in raw_html

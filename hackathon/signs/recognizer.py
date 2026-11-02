@@ -74,6 +74,13 @@ class SignRecognizer:
         Optional motion NPZ path; alternatively set ``QUIETBRIDGE_MOTION_MODEL``.
         Explicit ``start``/``finish`` windows replace framewise classification;
         personal static models and the stabilizer are not used in motion mode.
+    motion_auto:
+        Opt into continuous segmentation (also enabled by
+        ``QUIETBRIDGE_MOTION_AUTO=1``); requires a motion model. In this mode
+        ``process`` returns completed events and explicit ``start`` is disabled.
+    motion_auto_config:
+        Optional ``MotionAutoConfig``. Its default thresholds are engineering
+        starting points, not calibrated probabilities or camera validation.
     stabilizer:
         Optional ``EventStabilizer`` instance (or compatible object whose
         ``update`` returns an iterable of ``SignEvent``). Defaults to
@@ -81,7 +88,7 @@ class SignRecognizer:
         ``hackathon.signs.stabilizer``.
     """
 
-    def __init__(self, model_path=None, *, stabilizer=None, personal_model_path=None, motion_model_path=None):
+    def __init__(self, model_path=None, *, stabilizer=None, personal_model_path=None, motion_model_path=None, motion_auto=False, motion_auto_config=None):
         motion_model_path = motion_model_path or os.environ.get("QUIETBRIDGE_MOTION_MODEL")
         self._motion = None
         self._motion_frames = None
@@ -91,6 +98,14 @@ class SignRecognizer:
             from .motion import MotionModel
 
             self._motion = MotionModel.load(Path(motion_model_path).expanduser())
+        self.motion_auto = bool(motion_auto or os.environ.get("QUIETBRIDGE_MOTION_AUTO") == "1")
+        if self.motion_auto and self._motion is None:
+            raise ValueError("motion_auto requires a motion model")
+        self._motion_auto = None
+        self._auto_last_event = None
+        if self.motion_auto:
+            from .motion_auto import MotionAutoSegmenter
+            self._motion_auto = MotionAutoSegmenter(motion_auto_config)
         # Personal classification is opt-in: an old local model must not silently
         # change a teammate's stock demo. No fallback to stock after rejection.
         personal_model_path = personal_model_path or os.environ.get("QUIETBRIDGE_PERSONAL_GESTURES")
@@ -176,6 +191,17 @@ class SignRecognizer:
             })
 
         if self._motion is not None:
+            if self._motion_auto is not None:
+                frames = self._motion_auto.update(timestamp_ms, self.last_tracking)
+                if not frames:
+                    return []
+                events = self._classify_motion(frames, frames[0][0], frames[-1][0])
+                if events:
+                    previous = self._auto_last_event
+                    if previous and previous.label == events[0].label and timestamp_ms - previous.end_ms < self._motion_auto.config.duplicate_ms:
+                        return []
+                    self._auto_last_event = events[0]
+                return events
             if self._motion_frames is not None:
                 self._motion_frames.append((timestamp_ms, self.last_tracking))
             return []
@@ -192,6 +218,8 @@ class SignRecognizer:
             raise RuntimeError("SignRecognizer is closed")
         if self._motion is None:
             raise RuntimeError("motion model is not configured")
+        if self.motion_auto:
+            raise RuntimeError("explicit windows are unavailable in motion auto mode")
         timestamp_ms = int(time.perf_counter() * 1000) if timestamp_ms is None else timestamp_ms
         if self._last_timestamp_ms is not None and timestamp_ms < self._last_timestamp_ms:
             raise ValueError("start timestamp precedes the last frame")
@@ -207,6 +235,9 @@ class SignRecognizer:
         The last observed frame or start remains the monotonic boundary.
         With no active window, including in stock mode, this is a no-op.
         """
+        if self._motion_auto is not None:
+            self._motion_auto.reset()
+            self._auto_last_event = None
         if self._motion_frames is None:
             return
         if self._motion_frames:
@@ -231,6 +262,9 @@ class SignRecognizer:
         start_ms = self._motion_start_ms
         self._motion_frames = None
         self._motion_start_ms = None
+        return self._classify_motion(frames, start_ms, timestamp_ms)
+
+    def _classify_motion(self, frames, start_ms, timestamp_ms):
         if len(frames) < 2:
             return []
         import numpy as np
@@ -256,7 +290,7 @@ class SignRecognizer:
             label, score = self._motion.predict(trial)
         except MotionModelError:
             return []
-        if label is None:
+        if label is None or label == "REST":
             return []
         return [SignEvent(label=label, score=score, start_ms=start_ms,
                           end_ms=timestamp_ms, is_final=True)]
@@ -306,6 +340,9 @@ class SignRecognizer:
         backend = self._backend
         self._backend = None
         self._motion_frames = None
+        if self._motion_auto is not None:
+            self._motion_auto.reset()
+        self._auto_last_event = None
         if backend is not None:
             backend.close()
 

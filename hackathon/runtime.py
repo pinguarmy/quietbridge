@@ -193,7 +193,7 @@ class Runtime:
                 mode = self.state["mode"]
                 motion = self.state["sign_input"] == "motion"
                 if mode == "signs" and not motion:
-                    raise ValueError("Stock gestures are automatic; custom motions use an explicit recording window")
+                    raise ValueError("This gesture mode is automatic; only custom window mode uses Record")
                 if self.state["phase"] != "idle":
                     raise ValueError("A recording or decode is already in progress")
                 if self.state["camera"] != "ready":
@@ -352,8 +352,10 @@ class Runtime:
             else:
                 recognizer = module.SignRecognizer()
             motion = getattr(recognizer, "_motion", None) is not None
+            motion_auto = motion and getattr(recognizer, "motion_auto", False)
             with self.lock:
-                self.state.update(signs="ready", sign_input="motion" if motion else "stock")
+                self.state.update(signs="ready",
+                                  sign_input="motion_auto" if motion_auto else "motion" if motion else "stock")
             last = 0
             active_start = None
             active_generation = None

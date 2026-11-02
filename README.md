@@ -40,6 +40,8 @@ uv run python -m hackathon.server --browser-camera --profile alice
 
 If `alice` has a promoted `models/motion.npz`, the app uses its custom vocabulary and dynamic recognizer. Otherwise it keeps compatible stock gestures and shows a setup warning. Custom motion input uses an explicit Record/release window; REST, rejected and cancelled windows emit nothing.
 
+Automatic motion segmentation is available as an opt-in experiment with `QUIETBRIDGE_MOTION_AUTO=1`. It detects movement/rest windows without the Record button. Its thresholds are engineering defaults, not calibrated user-specific probabilities; validate false triggers and missed motions before choosing it for regular use.
+
 An explicit personal lip candidate and language model can be selected without replacing the legacy Lipflow defaults:
 
 ```sh

@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from hackathon.contracts import LipResult, SignEvent
-from hackathon.runtime import Runtime
+from hackathon.runtime import Runtime, clock_ms
 
 
 def wait_for(condition, timeout=3):
@@ -278,6 +278,42 @@ def test_frame_queued_during_finish_cannot_cross_completed_boundary(monkeypatch)
         time.sleep(0.1)
         assert runtime.state["signs"] == "ready"
         assert recognizer.processed == []
+    finally:
+        runtime.close()
+        thread.join(1)
+
+
+def test_auto_motion_emits_ambient_event_without_explicit_start(monkeypatch):
+    class AutoRecognizer(MotionRecognizer):
+        def __init__(self):
+            super().__init__()
+            self.motion_auto = True
+            self.sent = False
+
+        def start(self, timestamp_ms):
+            raise AssertionError("auto motion must not receive explicit start")
+
+        def process(self, frame, timestamp_ms):
+            if self.sent:
+                return []
+            self.sent = True
+            return [SignEvent("HELLO", 0.4, timestamp_ms - 300, timestamp_ms, True)]
+
+    recognizer = AutoRecognizer()
+    monkeypatch.setattr("hackathon.runtime.importlib.import_module",
+                        lambda name: SimpleNamespace(SignRecognizer=lambda: recognizer))
+    runtime = Runtime(enable_lips=False, vocabulary={"HELLO": {
+        "phrase": "Hello.", "matches": ["hello"], "enabled": True, "verified": False}})
+    thread = threading.Thread(target=runtime._hands, daemon=True)
+    runtime.threads.append(thread)
+    thread.start()
+    try:
+        wait_for(lambda: runtime.state["sign_input"] == "motion_auto")
+        runtime.hand_frames.put((np.zeros((2, 2, 3), dtype=np.uint8), clock_ms()))
+        wait_for(lambda: runtime.state["decision"]["text"] == "Hello.")
+        assert recognizer.sent
+        with pytest.raises(ValueError, match="automatic"):
+            runtime.action("start", {})
     finally:
         runtime.close()
         thread.join(1)
