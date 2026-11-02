@@ -38,16 +38,20 @@ def test_session_does_not_start_before_first_ready_camera_frame(runtime):
     open_clip(runtime)
 
 
-def test_missing_face_waits_but_visible_closed_mouth_starts_session_capture(runtime):
+def test_missing_face_and_still_mouth_do_not_start_capture_until_activity(runtime):
     activate(runtime)
     runtime._auto_frame(None, 1000)
     assert runtime.state["phase"] == "idle"
     runtime._auto_frame(0, 1100)
+    assert runtime.state["phase"] == "idle"
+    runtime._auto_frame(0.01, 1200)
+    assert runtime.state["phase"] == "idle"
+    runtime._auto_frame(0.08, 1300)
     assert runtime.state["phase"] == "recording"
     assert runtime.state["auto_recognition"] is True
 
 
-def test_quiet_does_not_end_computation_chunk_or_session(runtime):
+def test_quiet_ends_chunk_and_triggers_decode_while_session_stays_active(runtime):
     activate(runtime)
     open_clip(runtime)
     with patch("hackathon.runtime.clock_ms", return_value=2500):
@@ -55,8 +59,9 @@ def test_quiet_does_not_end_computation_chunk_or_session(runtime):
         runtime._auto_frame(.01, 2400)  # minimum clip duration not reached
         assert runtime.state["phase"] == "recording"
         runtime._auto_frame(.01, 2500)
-    assert runtime.state["phase"] == "recording"
-    assert runtime.finish_at is None
+    assert runtime.state["phase"] == "tail"
+    assert runtime.finish_at is not None
+    assert runtime.state["session_active"] is True
     assert runtime.state["auto_recognition"] is True
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from collections import deque
 from pathlib import Path
 import time
 
@@ -99,16 +100,47 @@ class LipsAdapter:
         self.tracker = FaceTracker()
         self.recording = None
         self.last_tracking = None
+        self.last_mouth_open = None
         self.record_start_ms = None
+        self.pre_roll_ms = 300
+        self._preroll = deque(maxlen=20)
+        self._last_window_end_ms = None
 
     def start(self, timestamp_ms=None):
-        from lipflow.camera import Recording
+        from lipflow.camera import Recording, face_crop
+        import cv2
+
         self.recording = Recording(started=time.perf_counter())
         self.record_start_ms = timestamp_ms
+
+        preroll = getattr(self, "_preroll", None)
+        if preroll:
+            pre_ms = getattr(self, "pre_roll_ms", 300)
+            cutoff = (timestamp_ms - pre_ms) if timestamp_ms is not None else None
+            last_end = getattr(self, "_last_window_end_ms", None)
+            rec = self.recording
+            for f_bgr, t_ms, obs in list(preroll):
+                if cutoff is not None and t_ms < cutoff:
+                    continue
+                if timestamp_ms is not None and t_ms > timestamp_ms:
+                    continue
+                if last_end is not None and t_ms <= last_end:
+                    continue
+                try:
+                    gray = cv2.cvtColor(f_bgr, cv2.COLOR_BGR2GRAY)
+                    crop = face_crop(gray, obs, rec)
+                except Exception:
+                    crop = None
+                rec.ts.append(t_ms / 1000)
+                rec.grays.append(crop)
+                rec.anchors.append(obs.anchors if obs else None)
+                rec.mouth_open.append(getattr(obs, "mouth_open", 0.0) if obs else 0.0)
+            preroll.clear()
 
     def process(self, frame_bgr, timestamp_ms: int):
         obs = self.tracker.detect(frame_bgr, timestamp_ms)
         self.last_tracking = None
+        self.last_mouth_open = None
         if obs is not None:
             height, width = frame_bgr.shape[:2]
             x0, y0 = obs.outer_lips.min(0)
@@ -119,22 +151,51 @@ class LipsAdapter:
                 "outer_lips": [[float(x / width), float(y / height)] for x, y in obs.outer_lips],
                 "inner_lips": [[float(x / width), float(y / height)] for x, y in obs.inner_lips],
             }
+            self.last_mouth_open = getattr(obs, "mouth_open", None)
+
         if self.recording is None:
+            if not hasattr(self, "_preroll") or self._preroll is None:
+                self._preroll = deque(maxlen=20)
+            self._preroll.append((frame_bgr, timestamp_ms, obs))
+            pre_ms = getattr(self, "pre_roll_ms", 300)
+            last_end = getattr(self, "_last_window_end_ms", None)
+            while self._preroll and (
+                timestamp_ms - self._preroll[0][1] > pre_ms + 100
+                or (last_end is not None and self._preroll[0][1] <= last_end)
+            ):
+                self._preroll.popleft()
             return
+
         import cv2
         from lipflow.camera import face_crop
         rec = self.recording
         rec.ts.append(timestamp_ms / 1000)
         rec.grays.append(face_crop(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY), obs, rec))
         rec.anchors.append(obs.anchors if obs else None)
-        rec.mouth_open.append(obs.mouth_open if obs else 0)
+        rec.mouth_open.append(getattr(obs, "mouth_open", 0.0) if obs else 0.0)
+
+    def cancel(self, timestamp_ms=None):
+        self.recording = None
+        if getattr(self, "_preroll", None) is not None:
+            self._preroll.clear()
+        if timestamp_ms is not None:
+            self._last_window_end_ms = timestamp_ms
+
+    def reset(self):
+        self.cancel()
+        self._last_window_end_ms = None
 
     def finish(self) -> LipResult:
         from lipflow.dictation import clip_problem, rois_for
         rec, self.recording = self.recording, None
         self.last_metrics = {}
+        if getattr(self, "_preroll", None) is not None:
+            self._preroll.clear()
         if rec is None:
             return LipResult([], 0)
+        ts = getattr(rec, "ts", None) or []
+        if ts:
+            self._last_window_end_ms = round(ts[-1] * 1000)
         problem = clip_problem(rec)
         if problem:
             raise ValueError(": ".join(problem))

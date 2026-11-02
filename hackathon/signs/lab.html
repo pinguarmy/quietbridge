@@ -121,6 +121,7 @@ button:focus-visible{outline:3px solid #92b69d;outline-offset:2px}
   <button id="stepTrain" class="step-btn selected" data-stage="train" type="button">2. Training Capture</button>
   <button id="stepValidation" class="step-btn" data-stage="validation" type="button">3. Independent Validation</button>
   <button id="stepTest" class="step-btn" data-stage="test" type="button">4. Final Test</button>
+  <button id="stepModels" class="step-btn" data-stage="models" type="button">5. Models &amp; Review</button>
 </nav>
 
 <div class="stage-banner" id="stageBanner">
@@ -260,6 +261,29 @@ button:focus-visible{outline:3px solid #92b69d;outline-offset:2px}
   </div>
 </div>
 
+<section id="modelsLayout" class="setup-panel" aria-labelledby="modelsTitle" hidden>
+  <h2 id="modelsTitle">Models &amp; review</h2>
+  <p class="intro">Train a candidate for this profile, review its independent validation and final-test reports, then explicitly promote it. Training does not change the active model.</p>
+  <p class="privacy">Recording samples or completing training does not establish recognition accuracy. Keep training, validation and final-test sessions separate.</p>
+  <p class="privacy">The main app automatically loads the active motion, visual lip and language models from this profile. Explicit command-line paths remain available for evaluating a candidate without promoting it.</p>
+  <div class="form-field"><label for="modelKind">Model type</label><select id="modelKind"><option value="motion">Motion</option><option value="lips">Visual lip</option><option value="language">Language</option></select></div>
+  <div class="form-field"><label for="candidateSelect">Candidate</label><select id="candidateSelect"></select></div>
+  <div id="modelStatus" role="status" aria-live="polite">Loading model status…</div>
+  <p id="candidateSummary" aria-live="polite"></p>
+  <div class="btn-group" style="flex-wrap:wrap">
+    <button id="trainMotion" type="button">Train motion</button>
+    <button id="trainVisual" type="button">Train visual lip</button>
+    <button id="trainLanguage" type="button">Train language</button>
+    <button id="refreshModels" type="button">Refresh status</button>
+  </div>
+  <div class="btn-group" style="flex-wrap:wrap">
+    <button id="viewReport" type="button">View report</button>
+    <button id="promoteModel" type="button">Promote candidate</button>
+    <button id="rollbackModel" type="button">Rollback</button>
+  </div>
+  <pre id="modelReport" style="white-space:pre-wrap;overflow-wrap:anywhere" hidden></pre>
+</section>
+
 <div id="newProfileDialog" class="dialog-backdrop" hidden>
   <div class="dialog" role="dialog" aria-labelledby="dialogTitle">
     <h3 id="dialogTitle">Create New Profile</h3>
@@ -290,7 +314,8 @@ canvas.width=960;canvas.height=720;snapshot.width=960;snapshot.height=720;
 
 let token='',stream=null,loop=null,inflight=false,working=false,recording=false,mode='gestures';
 let mouthPreviewError='',frames=0,started=0,lastTracking=0,mouthCrop=null;
-let activeProfile=null,allProfiles=[],currentStage='train'; // 'setup' | 'train' | 'validation' | 'test'
+let activeProfile=null,allProfiles=[],currentStage='train'; // setup, capture splits, or models
+let modelData=null,modelBusy=false;
 
 const TARGET_FPS=25;
 const UPLOAD_INTERVAL_MS=40; // 1000 / 25 fps
@@ -391,6 +416,18 @@ function render(){
   $('stepTrain').classList.toggle('selected',currentStage==='train');
   $('stepValidation').classList.toggle('selected',currentStage==='validation');
   $('stepTest').classList.toggle('selected',currentStage==='test');
+  $('stepModels').classList.toggle('selected',currentStage==='models');
+  $('modelsLayout').hidden=currentStage!=='models';
+
+  if(currentStage==='models'){
+    $('recordingLayout').hidden=true;
+    $('setupLayout').hidden=true;
+    $('stageBanner').hidden=true;
+    $('title').textContent='Review models';
+    $('intro').textContent='Candidates belong to the selected profile.';
+    renderModels();
+    return;
+  }
 
   if(currentStage==='setup'){
     $('recordingLayout').hidden=true;
@@ -567,6 +604,8 @@ function controls(){
   $('pairedTab').disabled=recording||working;
   $('pairedGestureSelect').disabled=recording||working;
   $('pairedPromptSelect').disabled=recording||working;
+  for(const id of ['stepSetup','stepTrain','stepValidation','stepTest','stepModels','profileSelect','btnNewProfile','btnNewSession']) $(id).disabled=recording||working||modelBusy;
+  modelControls();
 }
 
 function clearMouth(message){
@@ -736,7 +775,13 @@ async function camera(){
 }
 
 function setStage(stage){
+  if(recording||working||modelBusy)return;
   currentStage=stage;
+  if(stage==='models'){
+    render();
+    refreshModelStatus();
+    return;
+  }
   const split=currentStage==='setup'?'setup':(currentStage==='validation'?'validation':(currentStage==='test'?'test':'train'));
   if(split!=='setup'){
     getActiveSession(activeProfile.id,mode,split);
@@ -748,6 +793,7 @@ $('stepSetup').onclick=()=>setStage('setup');
 $('stepTrain').onclick=()=>setStage('train');
 $('stepValidation').onclick=()=>setStage('validation');
 $('stepTest').onclick=()=>setStage('test');
+$('stepModels').onclick=()=>setStage('models');
 
 $('btnNewSession').onclick=()=>{
   if(recording||working)return;
@@ -923,6 +969,77 @@ $('discard').onclick=async()=>{
   }
 };
 
+// Model operations use the active profile on the server.
+function modelControls(){
+  const blocked=recording||working||modelBusy||!token;
+  const candidate=(modelData?.candidates||[]).find(c=>c.id===$('candidateSelect').value && c.kind===$('modelKind').value);
+  for(const id of ['trainMotion','trainVisual','trainLanguage','refreshModels','rollbackModel','modelKind','candidateSelect']) $(id).disabled=blocked;
+  $('viewReport').disabled=blocked||!candidate||!candidate.report;
+  $('promoteModel').disabled=blocked||!candidate||!candidate.promotable;
+}
+function renderModels(){
+  const kind=$('modelKind').value, select=$('candidateSelect'), previous=select.value;
+  select.replaceChildren();
+  const candidates=(modelData?.candidates||[]).filter(c=>c.kind===kind);
+  if(!candidates.length){
+    const option=document.createElement('option'); option.value=''; option.textContent='No candidates'; select.appendChild(option);
+  }
+  candidates.forEach(c=>{
+    const option=document.createElement('option'); option.value=c.id;
+    const filename=c.model_path?.split(/[\\/]/).pop()||'no model file';
+    const selection=c.selected===true?'selected by trainer':c.selected===false?'not selected by trainer':'selection unavailable';
+    option.textContent=`${c.id} · ${filename} · ${c.status} · ${selection}`; select.appendChild(option);
+  });
+  if(candidates.some(c=>c.id===previous))select.value=previous;
+  const active=modelData?.active?.[kind];
+  $('modelStatus').textContent=modelData?`Profile: ${activeProfile.id} | Active ${kind} model: ${active||'none'} | Jobs: ${JSON.stringify(modelData.jobs||[])}`:'Model status not loaded.';
+  $('modelReport').hidden=true;
+  renderCandidateSummary();
+  modelControls();
+}
+function renderCandidateSummary(){
+  const c=(modelData?.candidates||[]).find(item=>item.id===$('candidateSelect').value && item.kind===$('modelKind').value);
+  if(!c){$('candidateSummary').textContent='No candidate selected.'; return}
+  const selection=c.selected===true?'Selected by trainer':c.selected===false?'Not selected by trainer':'Trainer selection unavailable';
+  const failures=c.report?.failures;
+  const details=[`Status: ${c.status}`,selection,`Model file: ${c.model_path||'unavailable'}`,`Report: ${c.report_path||'unavailable'}`,c.error?`Error: ${c.error}`:'',failures?.length?`Report failures: ${typeof failures==='string'?failures:JSON.stringify(failures)}`:'',c.promotable?'Eligible for promotion':'Not eligible for promotion'];
+  $('candidateSummary').textContent=details.filter(Boolean).join(' | ');
+}
+async function refreshModelStatus(){
+  if(recording||working||modelBusy)return;
+  modelBusy=true; controls();
+  try{modelData=await request('/api/models'); renderModels()}
+  catch(e){modelData=null; $('modelStatus').textContent=`Model status unavailable: ${e.message}`}
+  finally{modelBusy=false; controls()}
+}
+async function modelAction(path,data){
+  if(recording||working||modelBusy)return;
+  modelBusy=true; controls();
+  try{modelData=await action('models/'+path,data); renderModels()}
+  catch(e){$('modelStatus').textContent=e.message}
+  finally{modelBusy=false; controls()}
+}
+for(const [id,kind] of [['trainMotion','motion'],['trainVisual','lips'],['trainLanguage','language']]){
+  $(id).onclick=()=>{ $('modelKind').value=kind; modelAction('train',{kind}) };
+}
+$('refreshModels').onclick=refreshModelStatus;
+$('modelKind').onchange=renderModels;
+$('candidateSelect').onchange=()=>{ $('modelReport').hidden=true; renderCandidateSummary(); modelControls() };
+$('viewReport').onclick=()=>{
+  const candidate=(modelData?.candidates||[]).find(c=>c.id===$('candidateSelect').value && c.kind===$('modelKind').value);
+  if(!candidate?.report)return;
+  $('modelReport').textContent=typeof candidate.report==='string'?candidate.report:JSON.stringify(candidate.report,null,2);
+  $('modelReport').hidden=false;
+};
+$('promoteModel').onclick=()=>{
+  const kind=$('modelKind').value,candidate_id=$('candidateSelect').value;
+  if(confirm(`Promote candidate ${candidate_id} for this profile?`))modelAction('promote',{kind,candidate_id});
+};
+$('rollbackModel').onclick=()=>{
+  const kind=$('modelKind').value;
+  if(confirm(`Roll back the active ${kind} model for this profile?`))modelAction('rollback',{kind});
+};
+
 // Setup Panel & Customization Logic
 function renderSetupView(){
   $('profileDisplayName').value=activeProfile.name||'';
@@ -1056,7 +1173,9 @@ $('profileSelect').onchange=async()=>{
     const updated=await action('profile/select',{id:targetId});
     activeProfile=updated;
     note(`Switched to profile: ${activeProfile.name} (${activeProfile.id})`);
+    modelData=null;
     render();
+    if(currentStage==='models')await refreshModelStatus();
   }catch(e){
     alert('Failed to switch profile: '+e.message);
   }

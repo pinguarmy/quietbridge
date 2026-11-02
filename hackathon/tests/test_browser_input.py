@@ -75,6 +75,28 @@ def test_receive_frame_feeds_both_workers_and_mirrors_preview():
         runtime.close()
 
 
+def test_active_capture_preserves_chronology_and_reports_bounded_overflow():
+    runtime = Runtime(browser_camera=True, vocabulary={})
+    try:
+        frame, _ = jpeg_frame()
+        runtime.receive_frame(frame, 1)
+        runtime.receive_frame(frame, 2)
+        assert runtime.hand_frames.get_nowait()[1] == 2
+        assert runtime.lip_frames.get_nowait()[1] == 2
+
+        runtime.state["phase"] = "recording"
+        for timestamp in range(10, 100):
+            runtime.receive_frame(frame, timestamp)
+        buffered = list(runtime.lip_frames.queue)
+        assert len(buffered) == 90 and buffered[0][1] == 10 and buffered[-1][1] == 99
+        runtime.receive_frame(frame, 100)
+        assert runtime.state["metrics"]["capture_dropped_frames"] == 1
+        buffered = list(runtime.lip_frames.queue)
+        assert buffered[0][1] == 11 and buffered[-1][1] == 100
+    finally:
+        runtime.close()
+
+
 def test_rehearsal_and_browser_camera_are_mutually_exclusive():
     with pytest.raises(ValueError):
         Runtime(rehearsal=True, browser_camera=True, vocabulary={})

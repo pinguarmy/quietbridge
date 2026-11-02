@@ -24,6 +24,16 @@
       <p id="reason" class="reason">Check your message before speaking.</p>
       <div id="alternatives" class="alternatives" role="group" aria-label="Choose the message you intended"></div>
       <button id="speak" class="speak" disabled><span id="speak-label">Speak message</span></button>
+      <details id="correction-panel" class="settings-section">
+        <summary>Correct the message</summary>
+        <div class="preview-form">
+          <label>Intended text<textarea id="corrected-text" maxlength="2000" rows="3"></textarea></label>
+          <label><input id="learn-correction" type="checkbox"> Allow this correction to improve future personal training</label>
+          <button id="save-correction" type="button">Apply correction</button>
+          <p class="hint">Corrections never speak automatically. Learning requires your explicit choice and an active profile.</p>
+        </div>
+      </details>
+      <p id="correction-status" class="hint" role="status"></p>
       <p id="error" class="error" role="alert"></p>
       <p id="result-timing" class="hint"></p>
       <p id="last-spoken" class="last-spoken"></p>

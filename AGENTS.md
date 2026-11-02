@@ -18,7 +18,7 @@ The product lead coordinates architecture and shared files. Delegated work must 
 ## Recognition architecture
 
 - Reuse Auto-AVSR and face processing from `lipflow/`; keep product work in `hackathon/`.
-- One camera feeds independent latest-frame workers. Record actual input fps, raw frame count and gaps; resampling to 25 fps does not create missing motion.
+- One camera feeds independent workers. Idle preview keeps only the latest frame; active capture uses a bounded 90-frame chronological buffer and reports overflow drops. Record actual input fps, raw frame count and gaps; resampling to 25 fps does not create missing motion.
 - Lip results retain ordered candidates, decoder scores and capture timing. Decoder scores are not calibrated probabilities.
 - Stock gestures remain automatic. Custom MotionModel gestures default to an explicit start/release window and emit at most one accepted event per window. Optional `motion_auto` movement/rest segmentation is experimental and disabled by default. REST and rejected motions stay silent.
 - Combined recording uses a generation ID. Lips wait for the current motion result before fusion. Cancel invalidates late results from either worker.

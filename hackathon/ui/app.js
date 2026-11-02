@@ -166,6 +166,7 @@ function render(s) {
   if (revisionChanged) {
     chosenText = review && d.reason === 'conflict' ? null : (d.text || null);
     renderedRevision = s.revision;
+    if ($('corrected-text')) $('corrected-text').value = d.text || '';
   }
   if (revisionChanged || renderedAlternatives !== alternativesKey) {
     renderedAlternatives = alternativesKey;
@@ -195,6 +196,7 @@ function render(s) {
   updateMessage();
   window.renderCleanup?.(s);
   text('last-spoken', s.last_spoken ? 'Last spoken: ' + s.last_spoken : '');
+  text('correction-status', s.last_correction || '');
   text('result-timing', !s.rehearsal && s.metrics?.release_to_text_ms !== undefined ? 'Release → text · ' + (s.metrics.release_to_text_ms / 1000).toFixed(1) + ' s' : '');
   [['metric-release','release_to_text_ms'],['metric-decode','decode_ms'],['metric-fusion','fusion_ms']].forEach(([id,key]) => text(id, s.metrics[key] === undefined ? '—' : s.metrics[key] + ' ms'));
   [['metric-camera-fps','camera_input_fps'],['metric-lip-fps','lip_capture_fps']].forEach(([id,key]) => text(id, s.metrics[key] == null ? '—' : s.metrics[key] + ' fps'));
@@ -247,6 +249,7 @@ function updateMessage() {
   document.querySelectorAll('.alternative').forEach(b => {const selected = b.dataset.candidate === chosenText; b.classList.toggle('selected', selected); b.setAttribute('aria-pressed', String(selected)); b.disabled = speaking;});
   text('speak-label', review || (chosenText && chosenText !== d.text) ? 'Confirm & speak' : 'Speak message');
   $('speak').disabled = sessionBusy || processing || !chosenText || !state.speech_available || speaking || !['accepted','confirmation_needed'].includes(d.status);
+  if ($('save-correction')) $('save-correction').disabled = sessionBusy || processing;
 }
 
 async function speakMessage() {
@@ -348,6 +351,11 @@ document.addEventListener('keyup', e => {if (e.code === 'Space' && keyHeld) {e.p
 window.addEventListener('blur', () => {if (keyHeld || pointerHeld) {keyHeld = pointerHeld = false; requestAction('stop');}});
 if ($('cancel')) $('cancel').onclick = () => {keyHeld = pointerHeld = false; requestAction('cancel');};
 if ($('speak')) $('speak').onclick = speakMessage;
+if ($('save-correction')) $('save-correction').onclick = () => {
+  if (!state) return;
+  requestAction('correct', {revision:state.revision, text:$('corrected-text').value,
+                            learn:$('learn-correction').checked});
+};
 if ($('test-submit')) $('test-submit').onclick = async () => {
   const exampleText = state.mode === 'signs' ? '' : $('test-text').value;
   const label = state.mode === 'lips' ? '' : $('test-label').value;

@@ -13,6 +13,7 @@ import time
 from .cleanup import CleanupClient
 from .contracts import Decision, LipResult, SignEvent
 from .fusion import fuse, load_vocabulary, usable_signs
+from .lip_activity import LipActivityConfig, LipActivityDetector, ActivityState, ActivityAction
 from .speech import Speaker
 from .session_transcript import SessionTranscript
 
@@ -22,9 +23,11 @@ def clock_ms():
 
 
 def put_latest(q, value):
+    dropped = False
     try:
         q.put_nowait(value)
     except queue.Full:
+        dropped = True
         try:
             q.get_nowait()
         except queue.Empty:
@@ -33,6 +36,7 @@ def put_latest(q, value):
             q.put_nowait(value)
         except queue.Full:
             pass
+    return dropped
 
 
 MOTION_PHRASES = {"HELLO": "Hi", "WELCOME": "Welcome", "OPENAI": "OpenAI",
@@ -92,12 +96,14 @@ class _MotionWindow:
 class Runtime:
     def __init__(self, *, rehearsal=False, browser_camera=False, camera=0, enable_lips=True, vocabulary=None,
                  lip_model=None, lip_language_model=None, motion_model=None, profile_name=None,
-                 configuration_warning="", max_utterance_seconds=30.0):
+                 profile=None, configuration_warning="", max_utterance_seconds=30.0,
+                 lip_activity_config=None):
         if rehearsal and browser_camera:
             raise ValueError("Browser camera and rehearsal modes are mutually exclusive")
         self.rehearsal = rehearsal
         self.browser_camera = browser_camera
         self.camera_source = camera
+        self.profile = profile
         self.enable_lips = enable_lips
         self.lip_model_path = lip_model
         self.lip_language_model_path = lip_language_model
@@ -105,6 +111,8 @@ class Runtime:
         self.max_utterance_ms = round(float(max_utterance_seconds) * 1000)
         if self.max_utterance_ms < 1000:
             raise ValueError("Maximum utterance length must be at least one second")
+        self.lip_activity_config = lip_activity_config or LipActivityConfig()
+        self._lip_activity = LipActivityDetector(self.lip_activity_config)
         self.vocabulary = load_vocabulary() if vocabulary is None else vocabulary
         if self.motion_model_path and not rehearsal and vocabulary is None:
             # Stock pose meanings must never leak into the custom motion session.
@@ -115,8 +123,11 @@ class Runtime:
                                    if rehearsal else self.vocabulary)
         self.lock = threading.RLock()
         self.stop = threading.Event()
-        self.hand_frames = queue.Queue(maxsize=1)
-        self.lip_frames = queue.Queue(maxsize=1)
+        # Idle preview keeps only the latest frame. Active capture uses a bounded
+        # chronological buffer (90 decoded frames) and reports every overflow.
+        self.hand_frames = queue.Queue(maxsize=90)
+        self.lip_frames = queue.Queue(maxsize=90)
+        self.capture_dropped_frames = 0
         self.hand_control = queue.Queue()
         self.frame_times = deque()
         self.events = deque(maxlen=100)
@@ -157,7 +168,7 @@ class Runtime:
             "camera_error": "", "lip_error": "", "sign_error": "", "error": "",
             "decision": asdict(Decision("", "unavailable", "sign_only", "local")),
             "candidates": [], "candidate_scores": [], "alternatives": [], "last_sign": None,
-            "metrics": {}, "last_spoken": "", "recording": False,
+            "metrics": {}, "last_spoken": "", "last_correction": "", "recording": False,
             "auto_recognition": False,
             "session_active": False, "session_finalizing": False,
             "session_text": "", "session_chunks": [], "session_gestures": [],
@@ -378,6 +389,37 @@ class Runtime:
                 self._window_motion_done = False
                 self.state.update(phase="idle", recording=False)
                 self._publish(None, [], clock_ms())
+            elif name == "correct":
+                self._check_revision(data)
+                if self.state["session_active"] or self.state["session_finalizing"] or self.state["phase"] != "idle":
+                    raise ValueError("Finish the current input before correcting text")
+                corrected = data.get("text", "")
+                if not isinstance(corrected, str) or not corrected.strip() or len(corrected) > 2000:
+                    raise ValueError("Corrected text must contain 1–2000 characters")
+                corrected = corrected.strip()
+                original = self.state["decision"]["text"]
+                if corrected == original:
+                    raise ValueError("The correction does not change the text")
+                learn = data.get("learn", False)
+                if not isinstance(learn, bool):
+                    raise ValueError("learn must be a boolean")
+                if learn:
+                    if self.profile is None:
+                        raise ValueError("Create and select a profile before learning from corrections")
+                    from .corrections import CorrectionStore
+                    CorrectionStore(self.profile).record(
+                        original=original, corrected=corrected,
+                        candidates=list(self.state["alternatives"]), learn=True)
+                if corrected not in self.state["alternatives"]:
+                    self.state["alternatives"].append(corrected)
+                self.state["decision"].update(text=corrected, status="accepted", reason="corrected",
+                                              matched_signs=[])
+                self.revision += 1
+                self.confirmed_revision = self.revision
+                self.state["last_correction"] = "Correction saved for future training" if learn else "Correction applied locally"
+                self._cleanup_generation += 1
+                self.state["cleanup"].update(status="idle" if self.cleanup.public_config()["enabled"] else "disabled",
+                                             suggestion="", error="")
             elif name == "confirm":
                 self._check_revision(data)
                 text = data.get("text", "")
@@ -420,6 +462,8 @@ class Runtime:
     def _auto_reset(self):
         self._auto_open_since = self._auto_quiet_since = None
         self._auto_open_frames = 0
+        if hasattr(self, "_lip_activity"):
+            self._lip_activity.reset()
 
     @staticmethod
     def _mouth_open(tracking, aspect=4 / 3):
@@ -455,19 +499,26 @@ class Runtime:
             self.state["session_finalizing"] = False
 
     def _auto_frame(self, opening, timestamp_ms):
-        """Six-second computation chunks never infer sentence completion."""
+        """Lip activity endpoint state machine for continuous camera sessions."""
         with self.lock:
             if (not self.state["auto_recognition"] or self._camera_session_active is not True
                     or self.state["mode"] == "signs" or self.state["lips"] != "ready"
                     or self.state["camera"] != "ready"):
                 return
-            if self.state["phase"] == "idle" and opening is not None:
+            phase = self.state["phase"]
+            if phase == "idle" and self._lip_activity.state != ActivityState.IDLE:
+                self._lip_activity.reset()
+            elif phase == "recording" and self._lip_activity.state != ActivityState.RECORDING:
+                self._lip_activity.sync_recording(self.record_start or timestamp_ms)
+
+            action = self._lip_activity.update(opening, timestamp_ms)
+            if action == ActivityAction.START and self.state["phase"] == "idle":
                 self._starting_auto_chunk = True
                 try:
                     self.action("start", {})
                 finally:
                     self._starting_auto_chunk = False
-            elif self.state["phase"] == "recording" and timestamp_ms - self.record_start >= 6000:
+            elif action == ActivityAction.STOP and self.state["phase"] == "recording":
                 self.action("stop", {})
 
     def _check_revision(self, data):
@@ -484,6 +535,22 @@ class Runtime:
                 self.state["metrics"]["camera_input_fps"] = round(
                     (len(self.frame_times) - 1) * 1000 / elapsed, 2)
 
+    def _queue_camera_frame(self, frame_bgr, now):
+        preserve = self.state["phase"] in {"recording", "tail"}
+        if not preserve:
+            for frames in (self.hand_frames, self.lip_frames):
+                try:
+                    while True:
+                        frames.get_nowait()
+                except queue.Empty:
+                    pass
+        dropped = [put_latest(frames, (frame_bgr, now))
+                   for frames in (self.hand_frames, self.lip_frames)]
+        if preserve and any(dropped):
+            self.capture_dropped_frames += 1
+        if self.capture_dropped_frames:
+            self.state["metrics"]["capture_dropped_frames"] = self.capture_dropped_frames
+
     def receive_frame(self, frame_bgr, timestamp_ms=None):
         """Ingest one browser frame; return False for a repeated timestamp."""
         import cv2
@@ -497,8 +564,7 @@ class Runtime:
             self._last_frame_timestamp_ms = now
             self._note_frame_time(now)
             # Frames are read-only for consumers; preview processing uses a new array.
-            put_latest(self.hand_frames, (frame_bgr, now))
-            put_latest(self.lip_frames, (frame_bgr, now))
+            self._queue_camera_frame(frame_bgr, now)
             ok, encoded = cv2.imencode(".jpg", cv2.flip(frame_bgr, 1),
                                        [cv2.IMWRITE_JPEG_QUALITY, 75])
             if ok:
@@ -531,9 +597,8 @@ class Runtime:
                     continue
                 last_frame = time.perf_counter()
                 # Frames are read-only for consumers; preview processing uses a new array.
-                put_latest(self.hand_frames, (frame, now))
-                put_latest(self.lip_frames, (frame, now))
                 with self.lock:
+                    self._queue_camera_frame(frame, now)
                     self.state["camera"] = "ready"
                     self._note_frame_time(now)
                 if now - last_preview >= 100:
@@ -702,11 +767,17 @@ class Runtime:
                         active_start = active_generation = None
                         continue
                 if mode != "signs" and phase in {"recording", "tail"} and start != active_start:
-                    adapter.start()
+                    try:
+                        adapter.start(start)
+                    except TypeError:
+                        adapter.start()
                     active_start = start
                     active_generation = generation
                 if phase == "idle":
-                    adapter.recording = None
+                    if hasattr(adapter, "cancel") and adapter.recording is not None:
+                        adapter.cancel()
+                    else:
+                        adapter.recording = None
                     active_start = active_generation = None
                 if packet and packet[1] != last_processed_ts:
                     in_capture = (active_start is not None and packet[1] >= active_start

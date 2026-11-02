@@ -11,6 +11,8 @@ from hackathon.profiles import (
     check_session_split,
     get_default_root,
     is_safe_profile_id,
+    profile_language_model,
+    profile_lip_model,
     profile_motion_model,
     profile_vocabulary,
     validate_gestures,
@@ -180,4 +182,6 @@ def test_profile_vocabulary_and_candidate_paths_stay_custom_and_unverified(tmp_p
         "matches": ["water", "Water sign"], "enabled": True, "verified": False,
     }}
     assert profile_motion_model(profile) == profile.profile_dir / "models" / "motion.npz"
+    assert profile_lip_model(profile) == profile.profile_dir / "models" / "lip.pth"
+    assert profile_language_model(profile) == profile.profile_dir / "models" / "lm.pth"
     assert not profile_motion_model(profile).exists()

@@ -161,8 +161,11 @@ class _LabServer(ThreadingHTTPServer):
         from .mouth_capture import MouthCapture
         from hackathon.profiles import ProfileManager, get_default_root
 
+        from hackathon.model_lifecycle import ModelLifecycle
+
         self.lips = LipLab()
         self.mouth = MouthCapture()
+        self.models = ModelLifecycle()
         self.token = secrets.token_urlsafe(24)
         self.max_frames = max_frames
         self.max_seconds = max_seconds
@@ -401,6 +404,12 @@ class _Handler(BaseHTTPRequestHandler):
                 payload = active_p.to_dict(include_stats=True)
             self._send_json(200, payload)
             return
+        if self.path == "/api/models":
+            with self.server.lock:
+                profile = self.server.profile_manager.get_active_profile()
+                payload = self.server.models.status(profile)
+            self._send_json(200, payload)
+            return
         if self.path == "/api/state":
             with self.server.lock:
                 rec = self.server.recording
@@ -434,7 +443,9 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._check_post():
             return
-        if self.path == "/api/frame":
+        if self.path.startswith("/api/models/"):
+            self._handle_models()
+        elif self.path == "/api/frame":
             self._handle_frame()
         elif self.path == "/api/start":
             self._handle_start()
@@ -456,6 +467,37 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_profile_update()
         else:
             self._error(404, "not found")
+
+    def _handle_models(self):
+        body = self._read_body(MAX_JSON_BYTES)
+        if body is None:
+            return
+        try:
+            data = json.loads(body)
+            if not isinstance(data, dict):
+                raise ValueError("Expected a JSON object")
+            action = self.path.removeprefix("/api/models/")
+            with self.server.lock:
+                if (self.server.paired_recording is not None or self.server.recording is not None
+                        or self.server.mouth.snapshot()["recording"]):
+                    self._error(409, "Stop or discard the recording first")
+                    return
+                profile = self.server.profile_manager.get_active_profile()
+                kind = data.get("kind")
+                if action == "train":
+                    self.server.models.start_training(profile, kind)
+                elif action == "promote":
+                    self.server.models.promote(profile, kind, data.get("candidate_id"))
+                elif action == "rollback":
+                    self.server.models.rollback(profile, kind)
+                else:
+                    self._error(404, "unknown model action")
+                    return
+                payload = self.server.models.status(profile)
+        except (ValueError, RuntimeError, OSError, KeyError) as error:
+            self._error(400, str(error))
+            return
+        self._send_json(200, payload)
 
     def _handle_frame(self):
         if self.headers.get("Content-Type", "").split(";")[0].strip() != "image/jpeg":

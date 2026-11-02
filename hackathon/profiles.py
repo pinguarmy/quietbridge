@@ -405,3 +405,11 @@ def profile_vocabulary(profile: Profile) -> dict[str, dict[str, Any]]:
 
 def profile_motion_model(profile: Profile) -> Path:
     return profile.profile_dir / "models" / "motion.npz"
+
+
+def profile_lip_model(profile: Profile) -> Path:
+    return profile.profile_dir / "models" / "lip.pth"
+
+
+def profile_language_model(profile: Profile) -> Path:
+    return profile.profile_dir / "models" / "lm.pth"

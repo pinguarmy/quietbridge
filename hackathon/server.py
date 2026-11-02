@@ -183,17 +183,23 @@ def main():
     parser.add_argument("--lip-language-model", type=Path, help="Explicit personal language-model weights")
     parser.add_argument("--max-utterance-seconds", type=float, default=30.0)
     args = parser.parse_args()
-    from .profiles import ProfileManager
+    from .profiles import (ProfileManager, profile_language_model,
+                           profile_lip_model)
     profiles = ProfileManager()
     profile = profiles.get_profile(args.profile) if args.profile else profiles.get_active_profile()
     vocabulary, motion_model, profile_warning = profile_configuration(profile, args.vocabulary)
-    use_profile = args.profile is not None or motion_model is not None
+    promoted_lip = profile_lip_model(profile)
+    promoted_language = profile_language_model(profile)
+    lip_model = args.lip_model or (promoted_lip if promoted_lip.is_file() else None)
+    language_model = args.lip_language_model or (promoted_language if promoted_language.is_file() else None)
+    use_profile = args.profile is not None or motion_model is not None or lip_model is not None or language_model is not None
     runtime = Runtime(rehearsal=args.rehearsal, browser_camera=args.browser_camera,
                       camera=args.camera, enable_lips=not args.sign_only,
-                      vocabulary=vocabulary, lip_model=args.lip_model,
-                      lip_language_model=args.lip_language_model,
+                      vocabulary=vocabulary, lip_model=lip_model,
+                      lip_language_model=language_model,
                       motion_model=motion_model,
                       profile_name=profile.name if use_profile else None,
+                      profile=profile if use_profile else None,
                       configuration_warning=profile_warning,
                       max_utterance_seconds=args.max_utterance_seconds)
     server = make_server(runtime, args.port)

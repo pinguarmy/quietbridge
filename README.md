@@ -21,7 +21,7 @@ Open the recording lab to create a profile, customize gestures and prompts, and 
 uv run python -m hackathon.signs.lab
 ```
 
-Open <http://127.0.0.1:8766>. The four stages are profile setup, training, independent validation and final test. The browser targets 25 fps and displays the actual received rate; it does not claim that resampling recovers lost frames.
+Open <http://127.0.0.1:8766>. The stages cover profile setup, training, independent validation, final test and model review. The browser targets 25 fps and displays the actual received rate; it does not claim that resampling recovers lost frames. **Models & review** can train motion, visual-lip and language candidates, inspect reports, explicitly promote them and roll back while preserving history.
 
 ## Run the main app
 
@@ -42,6 +42,8 @@ If `alice` has a promoted `models/motion.npz`, the app uses its custom vocabular
 
 Automatic motion segmentation is available as an opt-in experiment with `QUIETBRIDGE_MOTION_AUTO=1`. It detects movement/rest windows without the Record button. Its thresholds are engineering defaults, not calibrated user-specific probabilities; validate false triggers and missed motions before choosing it for regular use.
 
+During a camera session, lip activity starts a chunk, about 700 ms of low activity ends it, and a bounded in-memory pre-roll retains the preceding 300 ms. Chunks accumulate into a session until you stop the camera. These geometric thresholds are segmentation hints, not speech confidence, and still need real-user validation.
+
 An explicit personal lip candidate and language model can be selected without replacing the legacy Lipflow defaults:
 
 ```sh
@@ -50,7 +52,9 @@ uv run python -m hackathon.server --browser-camera --profile alice \
   --lip-language-model /absolute/path/to/language-candidate.pth
 ```
 
-Settings shows the active profile, model identity, actual frame rate, frame gaps and latency. The main recording limit defaults to 30 seconds and can be changed with `--max-utterance-seconds`.
+The main app automatically loads promoted `models/motion.npz`, `models/lip.pth` and `models/lm.pth` from the selected profile. Explicit command-line paths take precedence for candidate evaluation. Settings shows the active profile, separate visual/language model identities, actual frame rate, frame gaps and latency. The main recording limit defaults to 30 seconds and can be changed with `--max-utterance-seconds`.
+
+You can edit an incorrect message before speaking. Applying a correction never speaks automatically. Only an explicit learning choice stores it in that profile's local `corrections.jsonl`; otherwise it remains an in-memory correction.
 
 ## Train and evaluate candidates
 
