@@ -119,6 +119,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
     train_phrases = [item["text"] for item in data["train"]]
     val_phrases = [item["text"] for item in data["validation"]]
+    from hackathon.corrections import learning_texts
+    correction_phrases = learning_texts(data_root.parent)
+    train_phrases.extend(text for text in correction_phrases if text not in train_phrases)
 
     started = time.perf_counter()
     report: dict[str, Any] = {
@@ -128,6 +131,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "counts": {
             "train": len(data["train"]),
             "validation": len(data["validation"]),
+            "corrections": len(correction_phrases),
         },
         "config": {
             "epochs": args.epochs,

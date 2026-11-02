@@ -54,7 +54,7 @@ uv run python -m hackathon.server --browser-camera --profile alice \
 
 The main app automatically loads promoted `models/motion.npz`, `models/lip.pth` and `models/lm.pth` from the selected profile. Explicit command-line paths take precedence for candidate evaluation. Settings shows the active profile, separate visual/language model identities, actual frame rate, frame gaps and latency. The main recording limit defaults to 30 seconds and can be changed with `--max-utterance-seconds`.
 
-You can edit an incorrect message before speaking. Applying a correction never speaks automatically. Only an explicit learning choice stores it in that profile's local `corrections.jsonl`; otherwise it remains an in-memory correction.
+You can edit an incorrect message before speaking. Applying a correction never speaks automatically. Only an explicit learning choice stores it in that profile's local `corrections.jsonl`; otherwise it remains an in-memory correction. Future language-model candidates include those approved corrected texts in training and report their count; final-test data remains separate.
 
 ## Train and evaluate candidates
 

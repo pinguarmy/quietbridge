@@ -69,3 +69,22 @@ class CorrectionStore:
                 if line.strip():
                     entries.append(json.loads(line))
         return entries
+
+
+def learning_texts(profile_dir) -> list[str]:
+    """Return unique corrected texts explicitly marked for learning."""
+    path = Path(profile_dir) / "corrections.jsonl"
+    if not path.is_file():
+        return []
+    texts = []
+    with path.open(encoding="utf-8") as stream:
+        for line in stream:
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            if (entry.get("learn") is True and entry.get("profile_id") == path.parent.name
+                    and isinstance(entry.get("corrected"), str) and entry["corrected"].strip()):
+                text = entry["corrected"].strip()
+                if text not in texts:
+                    texts.append(text)
+    return texts

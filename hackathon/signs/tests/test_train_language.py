@@ -196,6 +196,32 @@ def test_successful_candidate_training_creates_pth_and_report(tmp_path, monkeypa
     assert loaded_report["selection"]["deployment"] is False
 
 
+def test_explicit_corrections_join_language_training_only(tmp_path, monkeypatch):
+    from hackathon.corrections import CorrectionStore
+    from hackathon.profiles import Profile
+    profile = Profile("alice", "Alice", tmp_path)
+    profile.ensure_dirs()
+    make_npz(profile.mouths_dir / "train", "t1", "HELLO", "sess-train", "trial-1", split="train")
+    make_npz(profile.mouths_dir / "validation", "v1", "WAIT", "sess-val", "trial-2", split="validation")
+    CorrectionStore(profile).record(original="HELLO", corrected="HELLO THERE", learn=True)
+    output = profile.profile_dir / "models" / "lm.pth"
+    captured = {}
+
+    def mock_train(**kwargs):
+        captured.update(kwargs)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"weights")
+        return {"train": 2, "val": 1, "before": {}, "after": {}, "saved": True}
+
+    monkeypatch.setattr("lipflow.train_lm.train", mock_train)
+    args = argparse.Namespace(data=str(profile.mouths_dir), output=str(output), epochs=1,
+                              lr=3e-5, bs=32, seed=0, max_general_loss=1.15, device=None)
+    report = train_language.run(args)
+    assert captured["phrases"] == ["HELLO", "HELLO THERE"]
+    assert captured["validation_phrases"] == ["WAIT"]
+    assert report["counts"]["corrections"] == 1
+
+
 def test_rejected_candidate_does_not_create_pth_and_records_rejection(tmp_path, monkeypatch):
     train_dir = tmp_path / "mouths" / "train"
     val_dir = tmp_path / "mouths" / "validation"
