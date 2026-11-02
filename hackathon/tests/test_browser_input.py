@@ -117,6 +117,17 @@ def test_browser_frame_http_contract_and_native_rejection():
         assert response.status == 415
         response, _ = request(port, "POST", "/api/frame", b"not a jpeg", headers)
         assert response.status == 400
+        # Header-only and full-body oversized requests both receive a stable 413.
+        oversized = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        oversized.putrequest("POST", "/api/frame")
+        for key, value in headers.items():
+            oversized.putheader(key, value)
+        oversized.putheader("Content-Length", str(512 * 1024 + 1))
+        oversized.endheaders()
+        response = oversized.getresponse()
+        assert response.status == 413
+        response.read()
+        oversized.close()
         response, _ = request(port, "POST", "/api/frame", b"x" * (512 * 1024 + 1), headers)
         assert response.status == 413
     finally:

@@ -6,7 +6,6 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import secrets
-import time
 
 from .runtime import Runtime
 
@@ -61,7 +60,7 @@ def make_server(runtime, port=8765):
                 if path == "/api/state":
                     self._json(200, {**runtime.snapshot(), "token": token})
                 elif path == "/api/cleanup/config":
-                    self._json(200, runtime.cleanup.public_config())
+                    self._json(200, runtime.cleanup_config())
                 elif path == "/api/tracking":
                     self._json(200, runtime.tracking_snapshot())
                 elif path == "/api/frame":
@@ -77,9 +76,9 @@ def make_server(runtime, port=8765):
                     self.send_header("Cache-Control", "no-store")
                     self.send_header("Content-Length", "0")
                     self.end_headers()
-                elif path in {"/", "/index.html", "/settings", "/settings.html", "/app.js", "/cleanup-settings.js", "/style.css"}:
+                elif path in {"/", "/index.html", "/settings", "/settings.html", "/app.js", "/cleanup-settings.js", "/cleanup-display.js", "/style.css"}:
                     filename = {"/": "index.html", "/settings": "settings.html"}.get(path, path[1:])
-                    mime = {"index.html": "text/html", "settings.html": "text/html", "app.js": "text/javascript", "cleanup-settings.js": "text/javascript", "style.css": "text/css"}[filename]
+                    mime = {"index.html": "text/html", "settings.html": "text/html", "app.js": "text/javascript", "cleanup-settings.js": "text/javascript", "cleanup-display.js": "text/javascript", "style.css": "text/css"}[filename]
                     self._send(200, (UI / filename).read_bytes(), mime + "; charset=utf-8")
                 else:
                     self._json(404, {"error": "Not found"})
@@ -97,7 +96,8 @@ def make_server(runtime, port=8765):
             if self.path == "/api/frame":
                 self._handle_frame()
                 return
-            if not (self.path.startswith("/api/action/") or self.path in {"/api/cleanup/config", "/api/cleanup/test"}):
+            cleanup_path = self.path in {"/api/cleanup/config", "/api/cleanup/test"}
+            if not cleanup_path and not self.path.startswith("/api/action/"):
                 self._json(404, {"error": "Not found"})
                 return
             try:
@@ -108,11 +108,9 @@ def make_server(runtime, port=8765):
                 if not isinstance(data, dict):
                     raise ValueError("Expected a JSON object")
                 if self.path == "/api/cleanup/config":
-                    self._json(200, runtime.cleanup.configure(data))
+                    self._json(200, runtime.configure_cleanup(data))
                 elif self.path == "/api/cleanup/test":
-                    started = time.perf_counter()
-                    result = runtime.cleanup.test()
-                    self._json(200, {**result, "latency_ms": round((time.perf_counter() - started) * 1000, 2)})
+                    self._json(200, runtime.test_cleanup())
                 else:
                     runtime.action(self.path.removeprefix("/api/action/"), data)
                     self._json(200, runtime.snapshot())
@@ -139,11 +137,17 @@ def make_server(runtime, port=8765):
                 # the body is read races the client's send and can surface as a
                 # BrokenPipe instead of the intended 413 response.
                 remaining = length
-                while remaining:
-                    chunk = self.rfile.read(min(64 * 1024, remaining))
-                    if not chunk:
-                        break
-                    remaining -= len(chunk)
+                self.connection.settimeout(0.25)
+                try:
+                    while remaining:
+                        chunk = self.rfile.read(min(64 * 1024, remaining))
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                except (TimeoutError, OSError):
+                    # Header-only rejection and full-body clients use the same 413.
+                    pass
+                self.close_connection = True
                 self._json(413, {"error": "Frame exceeds 512 KiB"})
                 return
             if length <= 0:

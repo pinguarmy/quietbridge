@@ -1,58 +1,56 @@
-# Immediate demo integration handoff
+# Current demo handoff — 1 November 2026
 
-## Implemented vs not yet accepted
+## Source and running state
 
-- The stock recognizer emits `THUMB_UP`, `THUMB_DOWN`, `OPEN_PALM`, `POINTING_UP`. Replace the old HELP/STOP/YES/NO/WATER mapping before enabling live fusion. Only mark a phrase verified after live testing and user agreement.
-- Personal static-template data collection, training and opt-in inference exist locally. No new user data or live accuracy improvement has been established. Reports distinguish label-only correctness from the actual 0.75 runtime gate.
-- DDE is now a requested two-hand temporal expression. The browser Gesture Lab captures its labelled sequences but **does not recognize DDE yet**. Do not map any stock pose to DDE or describe sequence recording as training success.
-- The requested line is “Hi, welcome to OpenAI DDE Community Hackathon.” The broader demo now permits clearly labelled personal symbols; genuine BSL fingerspelling remains a separately checked capability. Never force the fixed line onto unrelated input.
+The user explicitly authorized direct integration to `main`; commit `f25f571` was pushed. Do not keep waiting for a PR or describe the browser camera, tracking and training tools as local-only. Coordinate shared-file changes with Sam, but the user's direct-main instruction overrides the earlier PR-only plan. No Git action is part of this documentation update.
 
-## Proposed custom concept vocabulary
+Latest code is on main through `3e8c193`. Automatic camera sessions, persistent raw transcripts, strict hinted welcome cleanup and Fast settings are deployed. Actual running state was checked:
 
-The latest user proposal is complementary inputs, not word-for-word BSL translation:
+- <http://127.0.0.1:8765>: main browser-camera demo, `personal (welcome pilot)` lip model and `personal motion-v2 (experimental)` gesture model, Combined mode. Only Hi / Welcome / OpenAI / DEE / Hackathon are output concepts; internal legacy `DDE` maps to displayed DEE. REST remains silent. Live gesture replay emitted no events, so model readiness is not evidence of useful live recognition.
+- Final user instruction explicitly constrains Luna to two hint-assisted suggestions: `Welcome to OpenAI DEE Hackathon` or `Hi, Welcome to OpenAI DEE Hackathon`. A backend allowlist rejects other provider text. This is a prepared-phrase reconstruction mode, not unconstrained recognition. Raw output stays accessible separately. Stop camera finalizes and then requests cleanup. The key must be re-entered after backend restart (memory only).
+- <http://127.0.0.1:8766>: tracking and explicit dataset recording lab.
 
-| Concept label | User's proposed expression | Fixed spelling |
-| --- | --- | --- |
-| `HELLO` | One open hand: curl fingers in and open once | Hi |
-| `WELCOME` | Both hands close in front of chest, draw back toward chest | Welcome |
-| `OPENAI` | Both thumbs extended, mirrored inward half-circle arcs, finish one thumb above the other | OpenAI |
-| `DDE` | Index extended, move forward and back once | DDE |
-| `HACKATHON` | Both open palms move inward from sides and stop without clapping | Hackathon |
-| `REST` | Relaxed half-fist or hands lowered; no command | No output |
+Use the browser camera and its real permission flow. Do not bypass native camera permissions or switch to another capture path to hide a permission failure. The rendered UI was checked in the actual browser: large hand camera on the left, zoomed lips on the right, 20-point outer and 20-point inner lip rings, and text below. The browser fixes use the same-origin JPEG endpoint instead of blocked blob URLs and remove double mirroring. Tracking is not a transcript or evidence of recognition accuracy.
 
-These are **custom dynamic collection labels**, not live-supported concept outputs or standard BSL. This motion-v2 definition replaces the guided static poses (thumb up, index up, open palm); preserve those earlier train/test files as a separate baseline, never mix them with dynamic-v2 trials as if they were the same action. REST is the user's relaxed half-fist/lowered hands and must emit nothing. No dynamic sequence classifier has been trained yet. Save each whole motion including timing, using the new `peter-motion-v2-*` sessions. Keep independent REST/incomplete/contrasting sequences and fresh test sessions.
+## Custom dynamic vocabulary and dataset
 
-Lips supply the sentence; gestures provide contextual evidence for names. Use the fixed concept-to-spelling map before any AI suggestion. Do not infer a whole welcome line from one concept or treat OAI/HCKTH custom shorthand as standard BSL. The current general fusion handles one label and treats multiple distinct labels as conflict; composing several aligned concepts will need Sam's explicit integration change and tests, not just a vocabulary edit.
+| Label | User-agreed custom motion |
+| --- | --- |
+| HELLO | One open hand: curl fingers inward and reopen once |
+| WELCOME | Both hands close in front of the chest, draw back toward the chest |
+| OPENAI | Both thumbs extended; mirrored inward half-circle arcs, ending one thumb above the other |
+| DDE | Index extended; move forward and back once |
+| HACKATHON | Both open palms move inward from the sides and stop without clapping |
+| REST | Relaxed half-fist or lowered hands; no output |
 
-## Mouth-data capture
+These are personal communication gestures, **not standard BSL or fingerspelling**. The requested sentence is “Hi, welcome to OpenAI DDE Community Hackathon.” Lips supply sentence candidates; gestures may provide evidence for concepts and names. Never infer that entire sentence from one gesture or force it onto unrelated lip input.
 
-The same simplified lab now has Gestures / Lips tabs. MouthCapture saves labelled aligned `(T,96,96)` grayscale mouth crops and text, plus capture timestamps/session/split metadata, outside Git under `~/.local/share/quietbridge/mouths/{train,test}`. It reuses the FaceTracker/ROI pipeline without loading the VSR network or opening another camera. Raw full frames and audio are not saved. These mouth crops remain sensitive personal visual data. Explicit Start/Finish is required; a genuine mouth box appears only while actively tracked. Failed quality checks must not advance the lesson count. This is training-data collection, not a claim of successful decoding or a trained personal model.
+Motion-v2 has **30 training sequences and 20 test sequences**; the final extra WELCOME recording brings WELCOME's test count to four. Preserve earlier static-pose and DDE attempts separately. Do not combine different actions merely because they share a label.
 
-Routes: `/api/mouth/start` takes `{text,split,session}`, `/api/mouth/stop` saves, `/api/mouth/discard` drops an incomplete buffer; `state.mouth` / `frame.mouth` expose status. Do not start both a hand-dataset trial and mouth-dataset trial together. Test data uses separate sessions. Runtime service must be restarted at an idle point to load added routes; do not interrupt a user recording.
+The evaluated sequence classifier returned the correct result on **11/20 trials (55%)**, rejected nine, and produced no wrong labels in that small evaluation. With the **0.75 score gate**, correctness was **8/20 (40%)**. REST was silent on **3/3** test trials. These are small held-out results, not a broad zero-error or false-trigger guarantee. This classifier is **not wired as continuous gesture recognition** in the main demo; do not present classifier evaluation as continuous live acceptance.
 
-## Personal lip model
+## Lip data and selected adaptation
 
-`hackathon/lips_adapter.py` currently passes `personal=False`. Please agree and add an explicit opt-in personal lip-model selection, display whether it loaded, and preserve stock mode. The old Lipflow app already supports face adaptation, but its existing personal file is not proof that the new welcome phrase works. Use separate training, validation and final-test recordings; retain the old model.
+There are **18 labelled training clips**, split into **12 fitting clips and six validation clips**, plus **13 test clips**. The 31 private files were transferred to the home Pro and SHA-verified. Raw training media, recordings, personal weights and credentials must stay out of GitHub.
 
-## Optional Luna Fast suggestions
+Three epochs of frontend adaptation took **57.11 seconds** on the Pro. Validation WER changed from **55.17% to 48.28%**; test WER changed from **60.00% to 55.38%**. Lower is better. Full target-sentence exact recognition remained **0/3**; the target welcome sentence was not spuriously produced on the **10 contrasting test clips (0/10)**. Do not turn that small negative sample into a general no-hallucination guarantee.
 
-The user asked for a quick text-optimization layer. Old Lipflow's current cleanup configuration is CPA Gemini/polish, not fully local inference. The new hackathon runtime does not call that cleanup path. Luna Fast via CPA is likewise an API, not an on-device model.
+The candidate was selected but **not deployed**. Returning the selected weights to the Air is still in progress. The running main demo remains in stock mode; do not claim the new personal model is loaded.
 
-Shared runtime/UI changes belong to Sam. Suggested minimal hook:
+## Speed evidence
 
-1. Start one asynchronous request only after local candidates exist and the user opts in.
-2. Send bounded candidate text and stable gesture labels, no frames or raw video.
-3. Bind the request and result to the source revision; discard stale responses.
-4. Display the suggestion separately. Preserve raw candidates and the local decision.
-5. Never auto-confirm, overwrite confirmed text or change already-spoken content.
-6. Require explicit selection/confirmation before Speak.
-7. API missing, timeout or failure must not affect the local flow.
-8. Measure complete request latency on the event network before making speed claims. Provider name “Fast” is not a timing measurement.
+On the Air, beam-4 encoding plus search took approximately **0.696 seconds for a 2.41-second clip**, and **1.282 seconds for a 6.14-second clip**. On the Pro, two beam-4 reads of the same short clip were approximately **0.29 seconds each**. These are measured local model operations, not upload-plus-inference latency; the environments were not identical. They do not prove the home-Pro remote path is faster end to end. Beam 2 degraded the short-clip transcription, so do not select it solely for speed.
 
-## Machines and current runnable surfaces
+## Direct OpenAI text suggestions
 
-- Air: camera, live gesture processing, UI, confirmation and audible output.
-- Home Pro: independent `~/code/quietbridge-demo`, Python 3.11 environment, stock vision assets, PyTorch MPS verified. The lip adapter actually loaded and warmed up (about 4.69 seconds in one measurement). No new personal training has run.
-- Current UI server: `python -m hackathon.server --rehearsal --port 8765`; explicitly synthetic, no camera.
-- Browser gesture lab: `python -m hackathon.signs.lab --port 8766`; browser camera input stays on the Air/local loopback. No raw frame persistence or microphone input. User explicitly starts and saves each sequence.
-- Current server cannot use an Air camera by merely viewing a web page served on the Pro. Remote VSR needs a separate authenticated/encrypted mouth-clip path and measured end-to-end performance. Do not remove loopback/Host/Origin checks or expose it publicly as a shortcut.
+The user supplies their own key and has explicitly accepted the stated **2× default-price fast tier**. The verified official model is `gpt-6-luna`, with `service_tier: "fast"`. The intended route is **Air → OpenAI directly**, not through the Pro. Settings/key stay in runtime memory only; never persist the key to files, logs, source or the Vault.
+
+The backend field/activation and automatic-camera work remain pending deployment. Do not say fast mode is active merely because the setting or code exists. Text suggestions must remain optional and separate from raw candidates, carry the source revision, discard stale responses, preserve negation and names, and never auto-confirm or replace already confirmed/spoken text. Send bounded text and stable concept labels, not training video or camera frames. Measure actual latency after activation; “fast” is not a timing result.
+
+## Immediate acceptance still required
+
+1. Finish and deploy the automatic-camera/fast changes only after checks; verify the running process loaded them.
+2. Complete the private selected-weight transfer and explicitly verify stock versus adapted model selection on the Air.
+3. Decide whether the small sequence classifier is useful enough for the demo; continuous gesture integration is not yet done.
+4. Test complete browser-camera → candidates → user confirmation → audible speech, including unrelated input, REST, missing hands/face, timeout and disconnect behavior.
+5. Rehearse three consecutive complete demos. Prepared messages must be clearly labelled fallbacks, never live transcripts.

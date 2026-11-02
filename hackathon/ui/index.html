@@ -8,12 +8,12 @@
 <main class="communication-page">
   <header><a class="wordmark" href="/">QuietBridge<span aria-hidden="true">◖◗</span></a><nav class="header-links"><a class="settings-link" href="/settings">Settings</a><a class="settings-link" href="/record">Recording lab</a></nav></header>
   <div id="rehearsal-banner" class="banner" hidden>Preview mode · Camera is off. <a href="/settings#preview">Try an example</a></div>
-  <section class="intro"><h1>What would you like to say?</h1><p id="entry-hint">Show a supported gesture, or hold the button to mouth a sentence.</p></section>
+  <section class="intro"><h1>What would you like to say?</h1><p id="entry-hint">Start camera to build your message. Stop camera to finish and polish.</p></section>
   <div class="workspace">
     <section class="camera-panel" aria-label="Camera and recording">
-      <div class="preview-pair"><div class="preview-card"><div class="preview-title">Hands · full view</div><div class="preview"><img id="camera" alt="Your live camera preview" hidden><video id="browser-camera" autoplay playsinline muted aria-hidden="true"></video><canvas id="hands-overlay" width="640" height="480"></canvas><div id="camera-placeholder"><span class="viewfinder" aria-hidden="true">⌜ &nbsp; ⌝<br>⌞ &nbsp; ⌟</span><p id="camera-message">Getting your camera ready…</p></div><span id="preview-status" class="preview-label">Getting ready</span><span id="hands-status" class="preview-label secondary">Waiting for tracking</span></div></div></div>
-      <div class="record-controls"><button id="browser-camera-button" class="text-button" hidden>Start camera</button><button id="record" class="record" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">Hold to mouth words</span></button><button id="cancel" class="text-button" hidden>Cancel</button></div>
-      <p id="record-hint" class="hint">Or hold Space, then release when you finish.</p>
+      <div class="preview-pair"><div class="preview-card"><div class="preview-title">Hands · full view</div><div class="preview"><img id="camera" alt="Your live camera preview" hidden><video id="browser-camera" autoplay playsinline muted aria-hidden="true"></video><canvas id="hands-overlay" width="640" height="480"></canvas><div id="camera-placeholder"><span class="viewfinder" aria-hidden="true">⌜ &nbsp; ⌝<br>⌞ &nbsp; ⌟</span><p id="camera-message">Select Start camera to begin recognition.</p></div><span id="preview-status" class="preview-label">Getting ready</span><span id="hands-status" class="preview-label secondary">Waiting for tracking</span></div></div></div>
+      <div class="record-controls"><button id="browser-camera-button" class="text-button">Start camera</button><button id="record" class="record" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">Hold to mouth words</span></button><button id="cancel" class="text-button" hidden>Cancel</button></div>
+      <p id="record-hint" class="hint">Words build up while the camera is on. Stop camera to finish and polish.</p>
       <p class="mode-caption"><span id="mode-caption">Lips and gestures</span> · <a href="/settings">Change</a></p>
     </section>
     <section class="message-panel" aria-label="Your message">
@@ -29,7 +29,8 @@
       <p id="last-spoken" class="last-spoken"></p>
     </section>
   </div>
-  <footer><span>Your camera stays on this Mac. You choose when to speak.</span><a href="/settings#gestures">Supported gestures</a></footer>
+  <footer><span>Video stays on this Mac. Optional AI sends text only. You choose when to speak.</span><a href="/settings#gestures">Supported gestures</a></footer>
 </main>
+<script src="/cleanup-display.js"></script>
 <script src="/app.js"></script>
 </body></html>
