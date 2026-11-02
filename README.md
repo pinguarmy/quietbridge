@@ -67,7 +67,7 @@ uv run python -m hackathon.signs.train_motion \
   --output "$HOME/.local/share/quietbridge/profiles/alice/models/motion.candidate.npz"
 ```
 
-The report separates positive recall, REST silence and wrong labels, and includes per-trial rejection diagnostics. Review independent validation and final test before promoting a candidate to `models/motion.npz`. The old `--allow-legacy-no-validation` exists only to reproduce historical data.
+The trainer fits on train, calibrates acceptance thresholds on independent validation, then evaluates final test once. Per-label thresholds fall back to train leave-one-out rules when validation coverage is insufficient. The report separates positive recall, REST silence and wrong labels and includes per-trial rejection diagnostics. Review validation and final test before promoting a candidate to `models/motion.npz`. The old `--allow-legacy-no-validation` exists only to reproduce historical data.
 
 Train a lip candidate using the same beam width as the main app:
 
@@ -90,6 +90,17 @@ uv run python -m hackathon.signs.train_language \
 
 The language report records held-out and general-English perplexity. A candidate is saved only when validation improves without excessive general regression. Review the report before selecting it with `--lip-language-model`; no candidate is deployed automatically.
 
+Perplexity alone does not establish recognition quality. Compare the same VSR and test ROIs with stock versus personal language models:
+
+```sh
+uv run python -m hackathon.evaluate_language \
+  --data "$HOME/.local/share/quietbridge/profiles/alice/mouths" \
+  --candidate "$HOME/.local/share/quietbridge/profiles/alice/models/lm.candidate.pth" \
+  --output "$HOME/.local/share/quietbridge/profiles/alice/models/lm-comparison.json"
+```
+
+The comparison is diagnostic, uses beam4 and never promotes a candidate.
+
 ## Paired fusion evaluation
 
 Use the recording lab's **Paired** mode to capture the same expression as aligned mouth crops and hand landmarks. Both files share a `pair_id`, profile, session and split, while retaining independent trial IDs. Ordinary single-modality recordings can remain in the same profile directories.
@@ -110,6 +121,7 @@ For capture-only checks, `uv run python -m hackathon.signs.capture_analysis <mou
 
 - Lip candidates retain decoder scores and capture timing; scores are not calibrated probabilities.
 - Gesture agreement can rerank candidates. Partial agreement remains reviewable.
+- An optional profile `intent_template`, such as `I want {gesture}`, fills a concept only when the lip candidate exactly matches the declared static context. Unknown words and conflicting gestures are not erased.
 - Supported gesture-only sequences compose in time order. Unknown input never contributes text.
 - Combined decoding waits for the current dynamic-gesture result. Cancellation invalidates late work from either worker.
 - Text and local speech work offline. Optional API suggestions must remain asynchronous and revision-bound.

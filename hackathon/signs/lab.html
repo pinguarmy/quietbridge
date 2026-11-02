@@ -209,7 +209,7 @@ button:focus-visible{outline:3px solid #92b69d;outline-offset:2px}
 
 <div id="setupLayout" class="setup-panel" hidden>
   <h2>Profile Customization &amp; Vocabulary</h2>
-  <p class="intro">Customize your gesture labels, motion instructions, concept phrases, and lip prompts. Changes are saved to this profile only.</p>
+  <p class="intro">Customize your gesture labels, motion instructions, concept phrases, and lip prompts. Changes are saved to this profile only. An optional intent template must contain exactly one <code>{gesture}</code> placeholder.</p>
 
   <div class="setup-section">
     <h3>Profile Information</h3>
@@ -231,6 +231,7 @@ button:focus-visible{outline:3px solid #92b69d;outline-offset:2px}
           <th style="width:140px;">Label</th>
           <th style="width:140px;">Display Name</th>
           <th style="width:160px;">Concept / Phrase</th>
+          <th style="width:160px;">Intent template (optional)</th>
           <th>Action Instruction</th>
           <th style="width:60px;">Action</th>
         </tr>
@@ -1052,9 +1053,11 @@ function renderSetupView(){
       <td><input type="text" value="${g.label||''}" style="font-family:monospace;" data-field="label" data-idx="${idx}"></td>
       <td><input type="text" value="${g.display_name||''}" data-field="display_name" data-idx="${idx}"></td>
       <td><input type="text" value="${g.concept||''}" data-field="concept" data-idx="${idx}"></td>
+      <td><input type="text" data-field="intent_template" data-idx="${idx}" aria-label="Intent template for gesture ${idx+1}" placeholder="e.g. I need {gesture}"></td>
       <td><textarea rows="2" data-field="description" data-idx="${idx}">${g.description||''}</textarea></td>
       <td><button type="button" class="btn-del-g" data-idx="${idx}" style="min-height:30px;padding:3px 8px;font-size:12px;background:#c94436;">Del</button></td>
     `;
+    tr.querySelector('[data-field="intent_template"]').value=g.intent_template||'';
     tbodyG.appendChild(tr);
   });
 
@@ -1123,7 +1126,11 @@ $('btnSaveProfile').onclick=async()=>{
       const display_name=row.querySelector('[data-field="display_name"]').value.trim()||label;
       const concept=row.querySelector('[data-field="concept"]').value.trim()||display_name;
       const description=row.querySelector('[data-field="description"]').value.trim();
-      newGestures.push({emoji,label,display_name,concept,description,hint:''});
+      const intent_template=row.querySelector('[data-field="intent_template"]').value.trim();
+      if(intent_template && intent_template.split('{gesture}').length!==2)throw Error('Intent template must contain exactly one {gesture} placeholder.');
+      const gesture={emoji,label,display_name,concept,description,hint:''};
+      if(intent_template)gesture.intent_template=intent_template;
+      newGestures.push(gesture);
     });
 
     const pRows=$('promptTbody').querySelectorAll('tr');

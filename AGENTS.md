@@ -12,17 +12,17 @@ The product lead coordinates architecture and shared files. Delegated work must 
 - Every profile has separate train, validation and test sessions. Never split validation from the same recording session as training.
 - Train candidates beside the profile, review validation and final-test reports, then explicitly promote them. Never overwrite the stock model or an existing candidate.
 - Display which model and profile are active. Missing explicit model paths fail visibly; do not silently load an old personal model.
-- Display text first and speak only after the user's action. Conflicts and uncertain inputs require confirmation. Never invent a sentence from UNKNOWN.
+- Display text first and speak only after the user's action. Conflicts and uncertain inputs require confirmation. Never invent a sentence from UNKNOWN. User-edited corrections create a new revision and never speak automatically; only an explicit learning choice writes them to the profile's correction store.
 - The core path works offline. Optional API suggestions remain asynchronous and revision-bound.
 
 ## Recognition architecture
 
 - Reuse Auto-AVSR and face processing from `lipflow/`; keep product work in `hackathon/`.
 - One camera feeds independent workers. Idle preview keeps only the latest frame; active capture uses a bounded 90-frame chronological buffer and reports overflow drops. Record actual input fps, raw frame count and gaps; resampling to 25 fps does not create missing motion.
-- Lip results retain ordered candidates, decoder scores and capture timing. Decoder scores are not calibrated probabilities.
+- Lip results retain ordered candidates, decoder scores and capture timing. Decoder scores are not calibrated probabilities. Camera sessions use mouth-activity endpoints with bounded pre-roll; geometric mouth opening is a segmentation hint, not speech confidence.
 - Stock gestures remain automatic. Custom MotionModel gestures default to an explicit start/release window and emit at most one accepted event per window. Optional `motion_auto` movement/rest segmentation is experimental and disabled by default. REST and rejected motions stay silent.
 - Combined recording uses a generation ID. Lips wait for the current motion result before fusion. Cancel invalidates late results from either worker.
-- Fusion preserves lip ranking, reranks on gesture agreement, reports partial agreement, and composes only supported gesture phrases in time order. Unknown input contributes no text.
+- Fusion preserves lip ranking, reranks on gesture agreement, reports partial agreement, and composes only supported gesture phrases in time order. Unknown input contributes no text. Intent templates fill a declared gesture slot only on exact static-context matches; never erase unrecognized words.
 - An explicit recording window retains gestures from the whole window; ambient stock events still expire.
 
 ## Development and checks

@@ -66,6 +66,44 @@ class FusionTests(unittest.TestCase):
                 d = fuse(LipResult([text], 10), [sign()], VOCAB, 2000)
                 self.assertEqual((d.reason, d.status), ("conflict", "confirmation_needed"))
 
+    def test_intent_template_requires_exact_static_context(self):
+        vocab = {"WATER": {"phrase": "water", "matches": ["water"], "verified": True,
+                           "intent_template": "I want {gesture}, please."}}
+        for candidate in ["i WANT, please.", " I   want,   please. "]:
+            with self.subTest(candidate=candidate):
+                d = fuse(LipResult([candidate], 0), [sign("WATER")], vocab, 2000)
+                self.assertEqual((d.text, d.status), ("I want water, please.", "confirmation_needed"))
+        for candidate in ["I want coffee, please.", "I want, please", "I want water, please.",
+                          "I do not want, please.", "I want 2, please."]:
+            with self.subTest(candidate=candidate):
+                d = fuse(LipResult([candidate], 0), [sign("WATER")], vocab, 2000)
+                self.assertEqual(d.text, candidate)
+                self.assertEqual(d.status, "confirmation_needed")
+
+    def test_template_conflicts_do_not_compose(self):
+        vocab = {"WATER": {"phrase": "water", "matches": ["water"], "verified": True,
+                           "intent_template": "I want {gesture}"},
+                 "HELP": {"phrase": "help", "matches": ["help"], "verified": True,
+                          "intent_template": "I want {gesture}"}}
+        d = fuse(LipResult(["I want"], 0), [sign("WATER"), sign("HELP")], vocab, 2000)
+        self.assertEqual((d.text, d.reason, d.status), ("I want", "conflict", "confirmation_needed"))
+        vocab["WATER"]["intent_template"] = ""
+        d = fuse(LipResult(["I want"], 0), [sign("WATER")], vocab, 2000)
+        self.assertEqual((d.text, d.reason), ("I want", "conflict"))
+
+    def test_runtime_keeps_original_template_candidate_as_alternative(self):
+        vocab = {"WATER": {"phrase": "water", "matches": ["water"], "verified": True,
+                           "intent_template": "I want {gesture}"}}
+        runtime = Runtime(rehearsal=True, vocabulary=vocab)
+        try:
+            runtime._publish(LipResult(["I want"], 0), [sign("WATER")], 2000)
+            state = runtime.snapshot()
+            self.assertEqual(state["decision"]["text"], "I want water")
+            self.assertEqual(state["alternatives"], ["I want water", "I want", "water"])
+            self.assertEqual(state["decision"]["status"], "confirmation_needed")
+        finally:
+            runtime.close()
+
     def test_no_is_not_found_inside_know(self):
         d = fuse(LipResult(["I know"], 0), [sign("NO")], VOCAB, 2000)
         self.assertEqual(d.reason, "conflict")

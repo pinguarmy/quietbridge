@@ -129,12 +129,43 @@ def main(argv=None):
         check_session_leakage(validation_trials, test_trials)
     check_session_leakage(train_trials, test_trials)
 
+    # 1. Fit on train split (train LOO sets baseline thresholds)
     model = MotionModel().fit(train_trials)
+
+    # 2. Evaluate validation BEFORE calibration
+    val_pre = evaluate(model, validation_trials) if validation_trials else None
+    val_pre_diag = [
+        {"trial_id": trial["trial_id"], "true": trial["label"], **model.diagnose(trial)}
+        for trial in validation_trials
+    ] if validation_trials else []
+
+    # 3. Calibrate thresholds on independent validation split (never sees test)
+    if validation_trials:
+        model.calibrate(validation_trials)
+    else:
+        model.calibrate([])
+
+    # 4. Evaluate validation AFTER calibration
+    val_post = evaluate(model, validation_trials) if validation_trials else None
+    val_post_diag = [
+        {"trial_id": trial["trial_id"], "true": trial["label"], **model.diagnose(trial)}
+        for trial in validation_trials
+    ] if validation_trials else []
+
+    # 5. Final test split evaluated ONCE (never used for tuning/calibration)
+    test_ungated = evaluate(model, test_trials)
+    test_score_gated = evaluate(model, test_trials, score_gate=SCORE_GATE)
+    test_diag = [
+        {"trial_id": trial["trial_id"], "true": trial["label"], **model.diagnose(trial)}
+        for trial in test_trials
+    ]
+
     model.save(output)
 
     report = {
         "model_path": str(output),
         "train_dir": str(data_dir / "train"),
+        "validation_dir": str(data_dir / "validation") if validation_trials else None,
         "test_dir": str(data_dir / "test"),
         "session_prefix": args.session_prefix,
         "train_trials": len(train_trials),
@@ -142,23 +173,24 @@ def main(argv=None):
         "test_trials": len(test_trials),
         "train_labels": {l: sum(1 for t in train_trials if t["label"] == l)
                          for l in sorted({t["label"] for t in train_trials})},
+        "validation_labels": {l: sum(1 for t in validation_trials if t["label"] == l)
+                              for l in sorted({t["label"] for t in validation_trials})} if validation_trials else {},
         "test_labels": {l: sum(1 for t in test_trials if t["label"] == l)
                         for l in sorted({t["label"] for t in test_trials})},
-        "thresholds_calibrated_on": "train leave-one-trial-out only",
+        "thresholds_calibrated_on": "validation split (with train LOO fallback)" if validation_trials else "train leave-one-trial-out only",
         "loo": model.loo_report_,
-        "validation_ungated": evaluate(model, validation_trials) if validation_trials else None,
-        "validation_diagnostics": [
-            {"trial_id": trial["trial_id"], "true": trial["label"], **model.diagnose(trial)}
-            for trial in validation_trials
-        ],
-        "test_ungated": evaluate(model, test_trials),
-        "test_score_gated_0.75": evaluate(model, test_trials, score_gate=SCORE_GATE),
-        "test_diagnostics": [
-            {"trial_id": trial["trial_id"], "true": trial["label"], **model.diagnose(trial)}
-            for trial in test_trials
-        ],
+        "calibration": model.calibration_report_,
+        "validation_pre_calibration": val_pre,
+        "validation_pre_calibration_diagnostics": val_pre_diag,
+        "validation_post_calibration": val_post,
+        "validation_post_calibration_diagnostics": val_post_diag,
+        "validation_ungated": val_post,
+        "validation_diagnostics": val_post_diag,
+        "test_ungated": test_ungated,
+        "test_score_gated_0.75": test_score_gated,
+        "test_diagnostics": test_diag,
         "notes": [
-            "Test split was never used for threshold tuning.",
+            "Test split was evaluated only once and never used for threshold tuning or calibration.",
             "score is a heuristic matching score, not a probability.",
             "The 0.75 score gate is diagnostic only; runtime uses model acceptance.",
             "Model classifies pre-segmented trials only; no continuous recognition.",
@@ -168,6 +200,8 @@ def main(argv=None):
     report_path.write_text(json.dumps(report, indent=2) + "\n")
 
     def print_metrics(name, metrics):
+        if not metrics:
+            return
         recall = metrics["positive_recall"]
         silent = metrics["rest_silent_rate"]
         recall_text = f"{recall:.2f}" if recall is not None else "n/a"
@@ -178,15 +212,22 @@ def main(argv=None):
               f"({recall_text}) rest_silent={metrics['rest_correctly_silent']}/"
               f"{metrics['rest_trials']} ({silent_text})")
 
-    if validation_trials:
-        print_metrics("validation", report["validation_ungated"])
-    g = report["test_ungated"]
     print(f"train: {report['train_trials']} trials {report['train_labels']}")
+    if validation_trials:
+        print(f"val:   {report['validation_trials']} trials {report['validation_labels']}")
     print(f"test:  {report['test_trials']} trials {report['test_labels']}")
     print(f"LOO:   acc={model.loo_report_['raw_accuracy']:.2f} "
-          f"reject={model.reject_threshold_:.4f} margin={model.margin_threshold_:.4f}")
-    print_metrics("test", g)
-    print_metrics("gated@0.75", report["test_score_gated_0.75"])
+          f"reject={model.loo_report_['reject_threshold']:.4f} margin={model.loo_report_['margin_threshold']:.4f}")
+    if validation_trials:
+        print_metrics("validation (pre-cal)", val_pre)
+        cal = model.calibration_report_ or {}
+        cov = cal.get("coverage_rate", 0.0)
+        cal_lbls = cal.get("calibrated_labels", [])
+        fb_lbls = cal.get("fallback_labels", [])
+        print(f"calibration: coverage={cov:.1%} calibrated={cal_lbls} fallback={fb_lbls}")
+        print_metrics("validation (post-cal)", val_post)
+    print_metrics("test", test_ungated)
+    print_metrics("gated@0.75", test_score_gated)
     print(f"wrote {output} and {report_path}")
     return 0
 

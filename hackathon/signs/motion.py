@@ -224,6 +224,8 @@ class MotionModel:
         self.reject_threshold_ = None
         self.margin_threshold_ = None
         self.loo_report_ = {}
+        self.label_thresholds_ = None
+        self.calibration_report_ = {}
 
     # -- training ---------------------------------------------------------
 
@@ -243,6 +245,15 @@ class MotionModel:
 
         stats = self._leave_one_out_stats()
         self._calibrate_thresholds(stats)
+        self.label_thresholds_ = None
+        self.calibration_report_ = {
+            "calibrated": False,
+            "status": "uncalibrated",
+            "coverage_rate": 0.0,
+            "calibrated_labels": [],
+            "fallback_labels": sorted(set(self.labels_.tolist())),
+            "reason": "fit only; call calibrate(validation_trials)",
+        }
         return self
 
     def _distances_to_templates(self, feat, mask, exclude=None):
@@ -315,6 +326,296 @@ class MotionModel:
             "margin_threshold": self.margin_threshold_,
         }
 
+    # -- validation calibration ---------------------------------------------
+
+    def get_reject_threshold(self, label: str | None = None) -> float:
+        """Return the reject distance threshold for a given label or global."""
+        if label is not None and self.label_thresholds_ and label in self.label_thresholds_:
+            return float(self.label_thresholds_[label]["reject_threshold"])
+        return float(self.reject_threshold_ if self.reject_threshold_ is not None else _EPS)
+
+    def get_margin_threshold(self, label: str | None = None) -> float:
+        """Return the runner-up margin threshold for a given label or global."""
+        if label is not None and self.label_thresholds_ and label in self.label_thresholds_:
+            return float(self.label_thresholds_[label]["margin_threshold"])
+        return float(self.margin_threshold_ if self.margin_threshold_ is not None else 0.0)
+
+    def get_thresholds(self, label: str | None = None) -> tuple[float, float]:
+        """Return (reject_threshold, margin_threshold) for a given label or global."""
+        return self.get_reject_threshold(label), self.get_margin_threshold(label)
+
+    def _search_threshold(self, matched_trials, target_label, default_r, default_m):
+        """Search candidate (r, m) on matched trials.
+
+        Prioritizes zero wrong accepts (mislabels and REST false alarms),
+        then maximizes positive recall. Tie-breaks by distance to target_r,
+        then larger margin.
+        """
+        correct_trials = []
+        intruder_trials = []
+        for s in matched_trials:
+            if target_label == "GLOBAL":
+                if s["true"] != REST_LABEL and s["matched"] == s["true"]:
+                    correct_trials.append(s)
+                elif (s["true"] == REST_LABEL and s["matched"] != REST_LABEL) or \
+                     (s["true"] != REST_LABEL and s["matched"] != s["true"] and s["matched"] != REST_LABEL):
+                    intruder_trials.append(s)
+            elif target_label == REST_LABEL:
+                if s["true"] == REST_LABEL:
+                    correct_trials.append(s)
+            else:
+                if s["true"] == target_label:
+                    correct_trials.append(s)
+                else:
+                    intruder_trials.append(s)
+
+        cand_r = {0.0, float(default_r)}
+        for s in matched_trials:
+            d = s["d1"]
+            if math.isfinite(d) and d >= 0.0:
+                cand_r.add(d)
+                cand_r.add(d * 1.05)
+                cand_r.add(d * 1.15)
+                cand_r.add(d * 1.25)
+        for s in intruder_trials:
+            cand_r.add(max(0.0, s["d1"] - _EPS))
+            for c in correct_trials:
+                if c["d1"] < s["d1"]:
+                    cand_r.add((c["d1"] + s["d1"]) / 2.0)
+
+        cand_m = {0.0, float(default_m)}
+        for s in matched_trials:
+            g = s["gap"]
+            if math.isfinite(g) and g >= 0.0:
+                cand_m.add(g)
+                cand_m.add(g * 0.9)
+        for s in intruder_trials:
+            cand_m.add(s["gap"] + _EPS)
+            for c in correct_trials:
+                if c["gap"] > s["gap"]:
+                    cand_m.add((c["gap"] + s["gap"]) / 2.0)
+
+        d_correct = [s["d1"] for s in correct_trials if math.isfinite(s["d1"])]
+        d_intruder = [s["d1"] for s in intruder_trials if math.isfinite(s["d1"])]
+        if d_intruder and d_correct:
+            min_bad = min(d_intruder)
+            max_good = max(d_correct)
+            if max_good < min_bad:
+                target_r = (max_good + min_bad) / 2.0
+            else:
+                target_r = max(0.0, min_bad - _EPS)
+        elif d_correct:
+            max_good = max(d_correct)
+            target_r = min(default_r, max_good * 1.25) if default_r >= max_good else max_good * 1.25
+        else:
+            target_r = default_r
+
+        best = None
+        for r in sorted(cand_r):
+            if not (math.isfinite(r) and r >= 0.0):
+                continue
+            for m in sorted(cand_m):
+                if not (math.isfinite(m) and m >= 0.0):
+                    continue
+                n_ok = 0
+                n_bad = 0
+                for s in matched_trials:
+                    accepted = (s["d1"] <= r + _EPS) and (s["gap"] >= m - _EPS)
+                    if not accepted:
+                        continue
+                    if target_label == "GLOBAL":
+                        if s["true"] != REST_LABEL and s["matched"] == s["true"]:
+                            n_ok += 1
+                        elif (s["true"] == REST_LABEL and s["matched"] != REST_LABEL) or \
+                             (s["true"] != REST_LABEL and s["matched"] != s["true"] and s["matched"] != REST_LABEL):
+                            n_bad += 1
+                    elif target_label == REST_LABEL:
+                        if s["true"] == REST_LABEL:
+                            n_ok += 1
+                    else:
+                        if s["true"] == target_label:
+                            n_ok += 1
+                        else:
+                            n_bad += 1
+                score = (-n_bad, n_ok, -abs(r - target_r), m)
+                if best is None or score > best[0]:
+                    best = (score, r, m, n_ok, n_bad)
+
+        if best is None:
+            return float(default_r), float(default_m), 0, 0
+        _, best_r, best_m, best_ok, best_bad = best
+        return float(max(best_r, _EPS)), float(max(best_m, 0.0)), best_ok, best_bad
+
+    def calibrate(self, validation_trials, min_samples=2, per_label=True):
+        """Calibrate acceptance thresholds on an independent validation split.
+
+        Never sees test trials. Prioritizes zero mislabels and zero REST false
+        alarms, then maximizes positive recall. If a label has fewer than
+        `min_samples` validation trials, it falls back to train LOO thresholds
+        and is recorded as a fallback in the calibration report.
+        """
+        if self.templates_ is None:
+            raise MotionModelError("model is not fitted")
+        if min_samples < 1:
+            raise MotionModelError("min_samples must be at least 1")
+
+        unique_labels = sorted(set(self.labels_.tolist()))
+        loo_r = float(self.loo_report_.get("reject_threshold", self.reject_threshold_ or _EPS))
+        loo_m = float(self.loo_report_.get("margin_threshold", self.margin_threshold_ or 0.0))
+
+        if not validation_trials:
+            self.label_thresholds_ = {
+                lbl: {
+                    "reject_threshold": loo_r,
+                    "margin_threshold": loo_m,
+                    "source": "train_loo",
+                    "status": "fallback_train_loo",
+                    "reason": "no_validation_trials",
+                    "validation_trials": 0,
+                    "matched_trials": 0,
+                    "positive_correct": 0,
+                    "wrong_accepts": 0,
+                }
+                for lbl in unique_labels
+            }
+            self.calibration_report_ = {
+                "calibrated": False,
+                "status": "no_validation_trials",
+                "coverage_rate": 0.0,
+                "n_labels_total": len(unique_labels),
+                "n_labels_calibrated": 0,
+                "calibrated_labels": [],
+                "fallback_labels": unique_labels,
+                "min_samples": int(min_samples),
+                "per_label": self.label_thresholds_,
+                "global_threshold": {
+                    "reject_threshold": loo_r,
+                    "margin_threshold": loo_m,
+                    "source": "train_loo",
+                },
+            }
+            return self
+
+        val_stats = []
+        for t in validation_trials:
+            _validate_trial(t, require_label=True)
+            true_label = str(t["label"])
+            feat, mask = preprocess_trial(t)
+            dists = self._distances_to_templates(feat, mask)
+            order = np.argsort(dists)
+            nearest_idx = int(order[0])
+            d1 = float(dists[nearest_idx])
+            if not math.isfinite(d1):
+                raw_label = None
+                gap = 0.0
+            else:
+                raw_label = str(self.labels_[nearest_idx])
+                d2 = next((float(dists[j]) for j in order if self.labels_[j] != raw_label), math.inf)
+                gap = float(d2 - d1)
+            val_stats.append({
+                "trial_id": str(t.get("trial_id", "")),
+                "true": true_label,
+                "matched": raw_label,
+                "d1": d1,
+                "gap": gap,
+                "finite": math.isfinite(d1),
+            })
+
+        label_thresholds = {}
+        for L in unique_labels:
+            n_val_true = sum(1 for s in val_stats if s["true"] == L)
+            matched_L = [s for s in val_stats if s["matched"] == L and s["finite"]]
+            correct_L = [s for s in matched_L if s["true"] == L]
+
+            if n_val_true < min_samples:
+                label_thresholds[L] = {
+                    "reject_threshold": loo_r,
+                    "margin_threshold": loo_m,
+                    "source": "train_loo",
+                    "status": "fallback_train_loo",
+                    "reason": "insufficient_samples" if n_val_true > 0 else "no_samples",
+                    "validation_trials": n_val_true,
+                    "matched_trials": len(matched_L),
+                    "positive_correct": sum(
+                        1 for s in matched_L
+                        if s["true"] == L and s["d1"] <= loo_r + _EPS and s["gap"] >= loo_m - _EPS
+                    ),
+                    "wrong_accepts": sum(
+                        1 for s in matched_L
+                        if s["true"] != L and L != REST_LABEL and s["d1"] <= loo_r + _EPS and s["gap"] >= loo_m - _EPS
+                    ),
+                }
+            elif len(correct_L) == 0:
+                label_thresholds[L] = {
+                    "reject_threshold": loo_r,
+                    "margin_threshold": loo_m,
+                    "source": "train_loo",
+                    "status": "fallback_train_loo",
+                    "reason": "no_correct_validation_matches",
+                    "validation_trials": n_val_true,
+                    "matched_trials": len(matched_L),
+                    "positive_correct": 0,
+                    "wrong_accepts": sum(
+                        1 for s in matched_L
+                        if s["true"] != L and L != REST_LABEL and s["d1"] <= loo_r + _EPS and s["gap"] >= loo_m - _EPS
+                    ),
+                }
+            else:
+                r_cal, m_cal, n_ok, n_bad = self._search_threshold(
+                    matched_L, L, loo_r, loo_m
+                )
+                label_thresholds[L] = {
+                    "reject_threshold": r_cal,
+                    "margin_threshold": m_cal,
+                    "source": "validation",
+                    "status": "calibrated",
+                    "reason": None,
+                    "validation_trials": n_val_true,
+                    "matched_trials": len(matched_L),
+                    "positive_correct": n_ok,
+                    "wrong_accepts": n_bad,
+                }
+
+        total_val_positive = sum(1 for s in val_stats if s["true"] != REST_LABEL)
+        if total_val_positive < min_samples:
+            global_r, global_m = loo_r, loo_m
+            global_source = "train_loo"
+        else:
+            global_r, global_m, g_ok, g_bad = self._search_threshold(
+                [s for s in val_stats if s["finite"]], "GLOBAL", loo_r, loo_m
+            )
+            global_source = "validation"
+
+        self.reject_threshold_ = global_r
+        self.margin_threshold_ = global_m
+
+        calibrated_labels = [l for l, d in label_thresholds.items() if d["status"] == "calibrated"]
+        fallback_labels = [l for l, d in label_thresholds.items() if d["status"] != "calibrated"]
+        coverage_rate = len(calibrated_labels) / len(unique_labels) if unique_labels else 0.0
+
+        if per_label:
+            self.label_thresholds_ = label_thresholds
+        else:
+            self.label_thresholds_ = None
+
+        self.calibration_report_ = {
+            "calibrated": len(calibrated_labels) > 0,
+            "status": "calibrated" if len(calibrated_labels) > 0 else "all_fallback",
+            "coverage_rate": coverage_rate,
+            "n_labels_total": len(unique_labels),
+            "n_labels_calibrated": len(calibrated_labels),
+            "calibrated_labels": calibrated_labels,
+            "fallback_labels": fallback_labels,
+            "min_samples": int(min_samples),
+            "per_label": label_thresholds,
+            "global_threshold": {
+                "reject_threshold": global_r,
+                "margin_threshold": global_m,
+                "source": global_source,
+            },
+        }
+        return self
+
     # -- inference ----------------------------------------------------------
 
     def _match(self, trial):
@@ -354,21 +655,26 @@ class MotionModel:
         label = str(self.labels_[index])
         d2 = next((float(dists[j]) for j in order if self.labels_[j] != label), math.inf)
         gap = d2 - d1
-        if d1 > self.reject_threshold_ + _EPS:
+        r = self.get_reject_threshold(label)
+        m = self.get_margin_threshold(label)
+        if d1 > r + _EPS:
             reason = "distance"
-        elif gap < self.margin_threshold_ - _EPS:
+        elif gap < m - _EPS:
             reason = "margin"
         else:
             reason = None
         return {"raw_label": label, "d1": d1, "gap": gap,
-                "score": self._score(d1), "accepted": reason is None,
+                "score": self._score(d1, label=label), "accepted": reason is None,
                 "reject_reason": reason,
                 "joint_coverage": joint_coverage(mask, self.masks_[index])}
 
-    def _score(self, d1):
+    def _score(self, d1, label=None):
         # Heuristic matching score (not a probability). 0.75 <=> the match
         # distance is half of the calibrated reject distance.
-        return float(np.clip(1.0 - d1 / (2.0 * self.reject_threshold_), 0.0, 1.0))
+        r = self.get_reject_threshold(label)
+        if r is None or r < _EPS:
+            r = self.reject_threshold_ or 1.0
+        return float(np.clip(1.0 - d1 / (2.0 * r), 0.0, 1.0))
 
     def classify(self, trial):
         """Full classification including REST: (label, score, accepted).
@@ -402,6 +708,8 @@ class MotionModel:
             "score_semantics": "score = clip(1 - d1/(2*reject_threshold), 0, 1); heuristic, not a probability",
             "continuous_recognition": False,
         })
+        cal_str = json.dumps(self.calibration_report_) if self.calibration_report_ else ""
+        lt_str = json.dumps(self.label_thresholds_) if self.label_thresholds_ is not None else ""
         np.savez(
             path,
             templates=self.templates_,
@@ -410,6 +718,8 @@ class MotionModel:
             reject_threshold=np.float64(self.reject_threshold_),
             margin_threshold=np.float64(self.margin_threshold_),
             loo_report=np.array(json.dumps(self.loo_report_)),
+            calibration_report=np.array(cal_str),
+            label_thresholds=np.array(lt_str),
             meta=np.array(meta),
         )
         return path
@@ -425,4 +735,14 @@ class MotionModel:
             model.reject_threshold_ = float(d["reject_threshold"])
             model.margin_threshold_ = float(d["margin_threshold"])
             model.loo_report_ = json.loads(str(d["loo_report"]))
+            if "label_thresholds" in d:
+                raw_lt = str(d["label_thresholds"])
+                model.label_thresholds_ = json.loads(raw_lt) if raw_lt else None
+            else:
+                model.label_thresholds_ = None
+            if "calibration_report" in d:
+                raw_cal = str(d["calibration_report"])
+                model.calibration_report_ = json.loads(raw_cal) if raw_cal else {}
+            else:
+                model.calibration_report_ = {}
         return model

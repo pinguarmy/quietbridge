@@ -80,6 +80,23 @@ def fuse(lips: LipResult | None, events: list[SignEvent], vocabulary: dict,
                 matched.append(label)
         return matched
 
+    # Templates fill exactly one user-declared slot, never free-form text.  The
+    # lip candidate must equal the entire static context: casefold and collapse
+    # whitespace and remove spaces before punctuation, but retain punctuation
+    # verbatim. No unknown words may vanish.
+    # More than one gesture is ambiguous, even if only one template matches.
+    if len(labels) == 1:
+        entry = vocabulary[labels[0]]
+        template = entry.get("intent_template", "")
+        if isinstance(template, str) and template.count("{gesture}") == 1:
+            prefix, suffix = template.split("{gesture}")
+            def normalize(value):
+                return re.sub(r"\s+([,.;:!?])", r"\1", " ".join(value.casefold().split()))
+            context = normalize(prefix + " " + suffix)
+            if context and any(normalize(candidate) == context for candidate in candidates):
+                text = template.replace("{gesture}", entry["phrase"].strip()).strip()
+                return Decision(text, "confirmation_needed", "agreement", "local", labels)
+
     ranked = [(candidate, matched_labels(candidate)) for candidate in candidates]
     best, matched = max(ranked, key=lambda item: len(item[1]))
     if matched:

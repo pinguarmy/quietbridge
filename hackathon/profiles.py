@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import string
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -127,14 +128,30 @@ def validate_gestures(gestures: list[dict[str, Any]]) -> list[dict[str, Any]]:
         description = str(g.get("description") or "").strip()
         hint = str(g.get("hint") or "").strip()
         emoji = str(g.get("emoji") or "✋").strip()
-        validated.append({
+        intent_template = g.get("intent_template")
+        if intent_template is not None:
+            if not isinstance(intent_template, str):
+                raise ValueError("intent_template must be a string")
+            intent_template = intent_template.strip()
+            if intent_template:
+                try:
+                    fields = [(name, spec, conversion) for _, name, spec, conversion
+                              in string.Formatter().parse(intent_template) if name is not None]
+                except ValueError as exc:
+                    raise ValueError("intent_template must contain exactly one literal {gesture}") from exc
+                if intent_template.count("{gesture}") != 1 or fields != [("gesture", "", None)]:
+                    raise ValueError("intent_template must contain exactly one literal {gesture}")
+        validated_gesture = {
             "label": label,
             "display_name": display_name,
             "concept": concept,
             "description": description,
             "hint": hint,
             "emoji": emoji,
-        })
+        }
+        if intent_template is not None:
+            validated_gesture["intent_template"] = intent_template
+        validated.append(validated_gesture)
     return validated
 
 
@@ -400,6 +417,8 @@ def profile_vocabulary(profile: Profile) -> dict[str, dict[str, Any]]:
             "enabled": True,
             "verified": False,
         }
+        if gesture.get("intent_template"):
+            vocabulary[gesture["label"]]["intent_template"] = gesture["intent_template"]
     return vocabulary
 
 

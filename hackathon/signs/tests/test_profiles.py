@@ -53,6 +53,32 @@ def test_validate_gestures():
         validate_gestures([])
 
 
+@pytest.mark.parametrize("template", ["no placeholder", "{gesture} {gesture}",
+                                      "{{gesture}}", "{gesture!r}", "{gesture} {other}",
+                                      "{gesture} {", 42])
+def test_invalid_intent_template(template):
+    with pytest.raises(ValueError, match="intent_template"):
+        validate_gestures([{"label": "WATER", "intent_template": template}])
+
+
+def test_optional_intent_template_round_trip(tmp_path):
+    pm = ProfileManager(root_dir=tmp_path)
+    profile = pm.create_profile("alice", "Alice", gestures=[
+        {"label": "WATER", "concept": "water", "intent_template": " Please bring {gesture} "},
+        {"label": "YES", "intent_template": ""},
+        {"label": "NO"},
+    ])
+    assert profile.gestures[0]["intent_template"] == "Please bring {gesture}"
+    assert profile.gestures[1]["intent_template"] == ""
+    assert "intent_template" not in profile.gestures[2]
+    assert pm.get_profile("alice").gestures == profile.gestures
+    assert profile_vocabulary(profile)["WATER"]["intent_template"] == "Please bring {gesture}"
+    assert "intent_template" not in profile_vocabulary(profile)["YES"]
+    with pytest.raises(ValueError, match="intent_template"):
+        pm.update_profile("alice", gestures=[{"label": "WATER", "intent_template": "{other}"}])
+    assert pm.get_profile("alice").gestures == profile.gestures
+
+
 def test_validate_lip_prompts():
     valid = ["Hello world", "Another prompt"]
     assert validate_lip_prompts(valid) == ["Hello world", "Another prompt"]
