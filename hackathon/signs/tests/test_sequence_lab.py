@@ -160,11 +160,12 @@ def test_frame_rejects_oversize_body(conn, server):
     assert response.status == 200
 
 
-def test_html_served_with_csp(conn, server, tmp_path, monkeypatch):
+@pytest.mark.parametrize("page_path", ["/", "/?return_to=http%3A%2F%2F127.0.0.1%3A8875%2F"])
+def test_html_served_with_csp(conn, server, tmp_path, monkeypatch, page_path):
     html = tmp_path / "lab.html"
     html.write_text("<html><body>lab</body></html>")
     monkeypatch.setattr(lab, "LAB_HTML", html)
-    response, data = _request(conn, server, "GET", "/", token=False)
+    response, data = _request(conn, server, "GET", page_path, token=False)
     assert response.status == 200
     assert b"lab" in data
     csp = response.getheader("Content-Security-Policy")

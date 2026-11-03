@@ -5,6 +5,7 @@ import argparse
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlencode
 import secrets
 
 from .runtime import Runtime, ProfileSwitchConflict
@@ -68,7 +69,8 @@ def make_server(runtime, port=8765):
                         self._json(503, {"error": "No camera frame yet"})
                 elif path == "/record":
                     self.send_response(302)
-                    self.send_header("Location", "http://127.0.0.1:8766")
+                    return_to = f"http://127.0.0.1:{self.server.server_port}/"
+                    self.send_header("Location", "http://127.0.0.1:8766/?" + urlencode({"return_to": return_to}))
                     self.send_header("Cache-Control", "no-store")
                     self.send_header("Content-Length", "0")
                     self.end_headers()

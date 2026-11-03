@@ -1,4 +1,23 @@
-# Lipflow 原生界面改造
+# QuietBridge web interface, 2026-11-03
+
+A quiet communication desk. The message is the focal point, with one clear capture action and explicit speech confirmation.
+
+- Product and surfaces: local-first personal communication; main message, settings and personalization pages. Not a general BSL/ASL translator.
+- Metaphor and signature: a message sheet beside a viewfinder, with a small capture/review/speak step rail.
+- Reference and stack: native accessibility utility clarity; existing HTML, local CSS and vanilla JavaScript. No new UI dependency or remote fonts.
+- Palette and type: cool off-white, navy ink, restrained teal actions; system sans-serif controls and generous message text.
+- Layout: camera beside message on desktop; capture then message on mobile. Mouth zoom and technical details use disclosures.
+- Storyboard: start camera, build a draft, stop, review or edit, then speak. Errors preserve the message. Personalization explains independent recording sessions in plain language.
+- Motion and copy: short state transitions, reduced-motion support, concrete instructions. No claims of measured accuracy.
+- Avoid: gradients, blur, decorative illustrations, button walls, fake confidence, training jargon on the daily page.
+- Accessibility: visible focus, labelled inputs, 44-pixel touch targets, sufficient contrast, non-color status, live feedback.
+- Success: a new user can identify start, finish, edit and speak without diagnostics. Training, validation, final test and explicit activation stay separate.
+- Out of scope: new recognition models, general sign-language translation, auto-speaking, remote services or camera permission bypass.
+
+Pass A changes hierarchy. Pass B checks rendered desktop/mobile spacing, keyboard access, disabled/loading states and state transitions. Existing element IDs and API contracts stay intact.
+
+## Earlier native Lipflow brief
+
 
 ## 产品与界面
 

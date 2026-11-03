@@ -93,12 +93,23 @@ def fuse(lips: LipResult | None, events: list[SignEvent], vocabulary: dict,
             def normalize(value):
                 return re.sub(r"\s+([,.;:!?])", r"\1", " ".join(value.casefold().split()))
             context = normalize(prefix + " " + suffix)
-            if context and any(normalize(candidate) == context for candidate in candidates):
+            if context and normalize(candidates[0]) == context:
                 text = template.replace("{gesture}", entry["phrase"].strip()).strip()
                 return Decision(text, "confirmation_needed", "agreement", "local", labels)
+            if context and any(normalize(candidate) == context for candidate in candidates[1:]):
+                # A lower-ranked context cannot erase the top candidate's meaning,
+                # including through the ordinary agreement reranker below.
+                return Decision(candidates[0], "confirmation_needed", "conflict", "local")
 
     ranked = [(candidate, matched_labels(candidate)) for candidate in candidates]
     best, matched = max(ranked, key=lambda item: len(item[1]))
+    def sensitive_words(candidate):
+        words = tokens(candidate)
+        return (words & RISK) | {word for word in words if word.isdigit()}
+    if best != candidates[0] and sensitive_words(best) != sensitive_words(candidates[0]):
+        # Agreement on an object is not evidence for dropping a negation, number,
+        # or safety-critical word from the leading lip hypothesis.
+        return Decision(candidates[0], "confirmation_needed", "conflict", "local")
     if matched:
         reason = "agreement" if len(matched) == len(labels) else "partial_agreement"
         return Decision(best, "confirmation_needed", reason, "local", matched)

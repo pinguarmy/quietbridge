@@ -379,7 +379,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._check_host():
             return
-        if self.path == "/":
+        if self.path.split("?", 1)[0] == "/":
             try:
                 body = LAB_HTML.read_bytes()
             except FileNotFoundError:

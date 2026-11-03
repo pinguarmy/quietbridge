@@ -80,6 +80,17 @@ class FusionTests(unittest.TestCase):
                 self.assertEqual(d.text, candidate)
                 self.assertEqual(d.status, "confirmation_needed")
 
+    def test_lower_ranked_template_context_preserves_top_candidate(self):
+        vocab = {"WATER": {"phrase": "water", "matches": ["water", "need"], "verified": True,
+                           "intent_template": "I need {gesture}"}}
+        for first in ["I do not need water", "I need tea"]:
+            with self.subTest(first=first):
+                decision = fuse(LipResult([first, "I need"], 0), [sign("WATER")], vocab, 2000)
+                self.assertEqual((decision.text, decision.reason, decision.status),
+                                 (first, "conflict", "confirmation_needed"))
+        decision = fuse(LipResult(["I need", "I need tea"], 0), [sign("WATER")], vocab, 2000)
+        self.assertEqual((decision.text, decision.reason), ("I need water", "agreement"))
+
     def test_template_conflicts_do_not_compose(self):
         vocab = {"WATER": {"phrase": "water", "matches": ["water"], "verified": True,
                            "intent_template": "I want {gesture}"},
@@ -103,6 +114,13 @@ class FusionTests(unittest.TestCase):
             self.assertEqual(state["decision"]["status"], "confirmation_needed")
         finally:
             runtime.close()
+
+    def test_reranking_cannot_remove_negation_or_numbers_from_top_candidate(self):
+        vocab = {"WATER": {"phrase": "water", "matches": ["water"], "verified": True}}
+        for top in ["I do not need water", "I need two waters", "I need 2 waters"]:
+            with self.subTest(top=top):
+                decision = fuse(LipResult([top, "I need water"], 0), [sign("WATER")], vocab, 2000)
+                self.assertEqual((decision.text, decision.reason), (top, "conflict"))
 
     def test_no_is_not_found_inside_know(self):
         d = fuse(LipResult(["I know"], 0), [sign("NO")], VOCAB, 2000)
@@ -290,6 +308,21 @@ class ServerTests(unittest.TestCase):
         with self.assertRaises(HTTPError) as err:
             urlopen(self.url + "/../pyproject.toml")
         self.assertEqual(err.exception.code, 404)
+
+    def test_personalization_link_retains_main_app_return_port(self):
+        import http.client
+        from urllib.parse import urlsplit, parse_qs
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_port)
+        try:
+            conn.request("GET", "/record")
+            response = conn.getresponse()
+            self.assertEqual(response.status, 302)
+            location = urlsplit(response.getheader("Location"))
+            self.assertEqual(location.netloc, "127.0.0.1:8766")
+            self.assertEqual(parse_qs(location.query)["return_to"], [self.url + "/"])
+            response.read()
+        finally:
+            conn.close()
 
     def test_communication_and_settings_pages_are_served(self):
         for path in ["/", "/settings"]:

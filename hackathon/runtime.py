@@ -184,6 +184,8 @@ class Runtime:
         self._starting_auto_chunk = False
         self.cleanup = CleanupClient()
         self.session = SessionTranscript()
+        self._session_alternatives = []
+        self._session_conflict = False
         self.session_signs = []  # Stable events validated when received in this session.
         self.state = {
             "mode": "combined" if enable_lips else "signs", "phase": "idle",
@@ -375,6 +377,8 @@ class Runtime:
                 if active:
                     # Only an explicit new camera session clears accumulated words.
                     self.session.reset()
+                    self._session_alternatives.clear()
+                    self._session_conflict = False
                     self.session_signs.clear()
                     self.state["session_gestures"] = []
                     self.action("cancel", {})
@@ -559,9 +563,23 @@ class Runtime:
         width = distance(outer[0], outer[10])
         return distance(inner[5], inner[15]) / width if width > 0 else None
 
-    def _publish_session(self, result):
-        """Append raw computed chunks; only Stop permits optional text cleanup."""
-        if result is not None and result.candidates:
+    def _publish_session(self, result, window_events=None):
+        """Append a completed chunk; fuse explicit motion at its own boundary."""
+        if window_events is not None:
+            now = self.finish_at if self.finish_at is not None else clock_ms()
+            decision = fuse(result, window_events, self._fusion_vocabulary, now, self.record_start)
+            self._session_conflict |= decision.reason in {"conflict", "partial_agreement"}
+            prefix = self.session.text
+            gesture_text = " ".join(self._fusion_vocabulary[event.label]["phrase"].strip() for event in
+                                    usable_signs(window_events, self._fusion_vocabulary, now, self.record_start))
+            candidates = [*(result.candidates if result else []), gesture_text]
+            for candidate in candidates:
+                alternative = " ".join(part for part in (prefix, candidate.strip()) if part)
+                if alternative and alternative not in self._session_alternatives:
+                    self._session_alternatives.append(alternative)
+            self.session.append(decision.text)
+            self.events.clear()  # Window evidence must not rerank a later session chunk.
+        elif result is not None and result.candidates:
             self.session.append(result.candidates[0])
         text = self.session.text
         self.state["session_text"] = text
@@ -574,8 +592,11 @@ class Runtime:
                                   capture_fps=result.capture_fps, raw_frames=result.raw_frames,
                                   max_frame_gap_ms=result.max_frame_gap_ms) if text and result else
                         LipResult([text], 0) if text else None)
-        self._publish(session_lips, list(self.events) if combined else [], clock_ms(),
+        self._publish(session_lips, list(self.events) if combined and window_events is None else [], clock_ms(),
                       self.record_start if self._window_motion else None, cleanup_labels=context)
+        self.state["alternatives"] = list(dict.fromkeys([*self.state["alternatives"], *self._session_alternatives]))
+        if self._session_conflict and text:
+            self.state["decision"].update(status="confirmation_needed", reason="conflict", matched_signs=[])
         if not self.state["session_active"]:
             self.state["session_finalizing"] = False
 
@@ -583,6 +604,7 @@ class Runtime:
         """Lip activity endpoint state machine for continuous camera sessions."""
         with self.lock:
             if (not self.state["auto_recognition"] or self._camera_session_active is not True
+                    or (self.state["mode"] != "lips" and self.state["sign_input"] == "motion")
                     or self.state["mode"] == "signs" or self.state["lips"] != "ready"
                     or self.state["camera"] != "ready"):
                 return
@@ -807,7 +829,10 @@ class Runtime:
                         self.receive_signs(events)
                         if self.state["mode"] == "signs":
                             self.state.update(phase="idle", recording=False)
-                            self._publish(None, events, pending_finish, active_start)
+                            if self.state["session_active"] or self.state["session_finalizing"]:
+                                self._publish_session(None, events)
+                            else:
+                                self._publish(None, events, pending_finish, active_start)
                             self.record_start = self.release_ms = self.finish_at = None
                             self.record_generation = None
                 active_start = active_generation = pending_finish = None
@@ -943,7 +968,7 @@ class Runtime:
                                 or self.state["phase"] != "decoding"):
                             continue  # cancelled/changed while inference ran
                         if self.state["session_active"] or self.state["session_finalizing"]:
-                            self._publish_session(result)
+                            self._publish_session(result, list(self.events) if self._window_motion else None)
                         else:
                             events = list(self.events) if self.state["mode"] == "combined" else []
                             self._publish(result, events, self.finish_at, active_start)
@@ -957,7 +982,7 @@ class Runtime:
                                 and self.record_generation == active_generation):
                             self.state["lip_error"] = str(exc)
                             if self.state["session_active"] or self.state["session_finalizing"]:
-                                self._publish_session(None)
+                                self._publish_session(None, list(self.events) if self._window_motion else None)
                             else:
                                 events = list(self.events) if self.state["mode"] == "combined" else []
                                 self._publish(None, events, self.finish_at, active_start)
@@ -1073,6 +1098,8 @@ class Runtime:
                 self.events.clear()
                 self.seen.clear()
                 self.session.reset()
+                self._session_alternatives.clear()
+                self._session_conflict = False
                 self.session_signs.clear()
                 self.tracking = {"hands": [], "mouth": None}
                 self.jpeg = None

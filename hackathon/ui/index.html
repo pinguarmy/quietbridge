@@ -6,41 +6,52 @@
 </head>
 <body>
 <main class="communication-page">
-  <header><a class="wordmark" href="/">QuietBridge<span aria-hidden="true">◖◗</span></a><nav class="header-links"><a class="settings-link" href="/settings">Settings</a><a class="settings-link" href="/record">Recording lab</a></nav></header>
-  <div id="rehearsal-banner" class="banner" hidden>Preview mode · Camera is off. <a href="/settings#preview">Try an example</a></div>
-  <section class="intro"><h1>What would you like to say?</h1><p id="entry-hint">Start camera to build your message. Stop camera to finish and polish.</p></section>
+  <header>
+    <a class="wordmark" href="/">QuietBridge<span class="bridge-mark" aria-hidden="true"></span></a>
+    <nav class="header-links" aria-label="Main navigation"><a href="/record">Personalize</a><a href="/settings">Settings</a></nav>
+  </header>
+  <div id="rehearsal-banner" class="banner" hidden>Preview only. No camera or recognition. <a href="/settings#preview">Try an example</a></div>
+  <section class="intro"><p class="eyebrow">Your words. Your pace.</p><h1>A little space to say it.</h1><p id="entry-hint">Start the camera, build your message, then review it before speaking.</p></section>
+  <ol class="flow-steps" aria-label="How to communicate"><li id="step-capture" aria-current="step"><span>1</span> Capture</li><li id="step-review"><span>2</span> Review</li><li id="step-speak"><span>3</span> Speak</li></ol>
   <div class="workspace">
-    <section class="camera-panel" aria-label="Camera and recording">
-      <div class="preview-pair"><div class="preview-card"><div class="preview-title">Hands · full view</div><div class="preview"><img id="camera" alt="Your live camera preview" hidden><video id="browser-camera" autoplay playsinline muted aria-hidden="true"></video><canvas id="hands-overlay" width="640" height="480"></canvas><div id="camera-placeholder"><span class="viewfinder" aria-hidden="true">⌜ &nbsp; ⌝<br>⌞ &nbsp; ⌟</span><p id="camera-message">Select Start camera to begin recognition.</p></div><span id="preview-status" class="preview-label">Getting ready</span><span id="hands-status" class="preview-label secondary">Waiting for tracking</span></div></div></div>
-      <div class="record-controls"><button id="browser-camera-button" class="text-button">Start camera</button><button id="record" class="record" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">Hold to mouth words</span></button><button id="cancel" class="text-button" hidden>Cancel</button></div>
-      <p id="record-hint" class="hint">Words build up while the camera is on. Stop camera to finish and polish.</p>
-      <p class="mode-caption"><span id="mode-caption">Lips and gestures</span> · <a href="/settings">Change</a></p>
+    <section class="camera-panel" aria-labelledby="capture-heading">
+      <div class="panel-heading"><h2 id="capture-heading">Your camera</h2><span class="local-note">No microphone</span></div>
+      <div class="preview">
+        <img id="camera" alt="Your live camera preview" hidden>
+        <video id="browser-camera" autoplay playsinline muted aria-hidden="true"></video>
+        <canvas id="hands-overlay" width="640" height="480" aria-hidden="true"></canvas>
+        <div id="camera-placeholder"><span class="viewfinder" aria-hidden="true"></span><p id="camera-message">Keep your face and hands in view.</p></div>
+        <span id="preview-status" class="preview-label">Camera off</span><span id="hands-status" class="preview-label secondary">Waiting for tracking</span>
+      </div>
+      <div class="record-controls"><button id="browser-camera-button" class="camera-action" type="button">Start camera</button><button id="record" class="record" type="button" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">Hold to record</span></button><button id="cancel" class="text-button" type="button" hidden>Cancel</button></div>
+      <p id="record-hint" class="hint">Nothing is spoken automatically.</p>
+      <div class="camera-options"><span id="mode-caption">Lips and gestures</span><a href="/settings">Change input</a></div>
+      <details class="tracking-detail"><summary>Check mouth framing</summary><div class="mouth-view"><canvas id="mouth-overlay" width="320" height="200" aria-hidden="true"></canvas><span id="mouth-status">Face not detected</span></div></details>
+      <p class="capability-note">Personal gestures, not full sign-language translation. <a href="/record">Set up your phrases</a></p>
     </section>
-    <section class="message-panel" aria-label="Your message">
-      <div class="message-heading"><h2>Your message</h2><span id="decision-status" class="status">Waiting</span></div>
-      <div class="preview-card message-mouth-card"><div class="preview-title">Lips · zoom</div><div class="mouth-view"><canvas id="mouth-overlay" width="320" height="200"></canvas><span id="mouth-status">Face not detected</span></div></div>
-       <p id="draft-label" class="draft-label" hidden>Live draft · not confirmed</p>
-       <p id="message" class="message empty" aria-live="polite">Your words will appear here.</p>
-      <p id="reason" class="reason">Check your message before speaking.</p>
+    <section class="message-panel" aria-labelledby="message-heading">
+      <div class="message-heading"><h2 id="message-heading">Your message</h2><span id="decision-status" class="status">Ready when you are</span></div>
+      <p id="draft-label" class="draft-label" hidden>Live draft. Review before speaking.</p>
+      <p id="message" class="message empty" aria-live="polite">Your words will appear here.</p>
+      <p id="reason" class="reason">Nothing is spoken until you choose.</p>
       <div id="alternatives" class="alternatives" role="group" aria-label="Choose the message you intended"></div>
-      <button id="speak" class="speak" disabled><span id="speak-label">Speak message</span></button>
-      <details id="correction-panel" class="settings-section">
-        <summary>Correct the message</summary>
+      <div class="message-actions"><button id="speak" class="speak" type="button" disabled><span id="speak-label">Speak message</span><span aria-hidden="true">↗</span></button></div>
+      <details id="correction-panel" class="correction-panel">
+        <summary>Edit or type a message</summary>
         <div class="preview-form">
-          <label>Intended text<textarea id="corrected-text" maxlength="2000" rows="3"></textarea></label>
-          <label><input id="learn-correction" type="checkbox"> Allow this correction to improve future personal training</label>
-          <button id="save-correction" type="button">Apply correction</button>
-          <p class="hint">Corrections never speak automatically. Learning requires your explicit choice and an active profile.</p>
+          <label for="corrected-text">What would you like to say?</label><textarea id="corrected-text" maxlength="2000" rows="3" placeholder="Type here, or edit the recognized words."></textarea>
+          <label class="check-label"><input id="learn-correction" type="checkbox"> Use this text in future personal training</label>
+          <button id="save-correction" type="button">Use this message</button>
+          <p class="hint">Typing works without the camera. Saving never speaks or trains a model automatically.</p>
         </div>
       </details>
       <p id="correction-status" class="hint" role="status"></p>
       <p id="error" class="error" role="alert"></p>
-      <p id="result-timing" class="hint"></p>
+      <p id="result-timing" class="timing-note"></p>
       <p id="last-spoken" class="last-spoken"></p>
     </section>
   </div>
-  <footer><span>Video stays on this Mac. Optional AI sends text only. You choose when to speak.</span><a href="/settings#gestures">Supported gestures</a></footer>
+  <footer><span>Video stays on this device. You choose when to speak.</span><a href="/settings#gestures">What can it recognize?</a></footer>
 </main>
-<script src="/cleanup-display.js"></script>
 <script src="/app.js"></script>
 </body></html>

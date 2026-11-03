@@ -220,7 +220,10 @@ def test_tracking_endpoint_deepcopy_and_record_redirect():
         connection.request("GET", "/record")
         response = connection.getresponse()
         assert response.status == 302
-        assert response.getheader("Location") == "http://127.0.0.1:8766"
+        from urllib.parse import urlsplit, parse_qs
+        location = urlsplit(response.getheader("Location"))
+        assert location.netloc == "127.0.0.1:8766"
+        assert parse_qs(location.query)["return_to"] == [f"http://127.0.0.1:{server.server_port}/"]
         response.read()
         connection.close()
     finally:

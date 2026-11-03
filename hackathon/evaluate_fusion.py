@@ -11,7 +11,9 @@ import numpy as np
 
 from .contracts import LipResult, SignEvent
 from .fusion import fuse
-from .profiles import ProfileManager, SPLITS, profile_motion_model, profile_vocabulary
+from .profiles import (ProfileManager, SPLITS, profile_language_model, profile_lip_model,
+                       profile_motion_model, profile_vocabulary)
+from .lips_adapter import _file_sha256
 from .signs.motion import MotionModel
 from lipflow.tune import compute_wer, normalize_for_wer
 
@@ -102,17 +104,40 @@ def evaluate(profile, split, reader, motion):
         start, end = min(st['start_ms'], mt['start_ms']), max(st['end_ms'], mt['end_ms'])
         decision = fuse(lips, events, vocabulary, end, start)
         reference = str(seq['expected_text'].item())
+        true_label = str(seq['label'].item())
+        predicted_label = diagnostic['raw_label'] if diagnostic['accepted'] else None
+        gesture_decision = fuse(None, events, vocabulary, end, start)
         rows.append({'pair_id': pair, 'session_id': str(seq['session_id'].item()), 'trial_id': str(seq['trial_id'].item()),
-                     'reference': reference, 'gesture_label': str(seq['label'].item()), 'raw_candidates': candidates,
+                     'reference': reference, 'gesture_label': true_label, 'true_label': true_label,
+                     'predicted_label': predicted_label, 'raw_candidates': candidates,
                      'gesture': diagnostic, 'sign_events': [asdict(e) for e in events], 'decision': asdict(decision),
                      'lips_only': _metric(candidates[0]['text'] if candidates else '', reference),
+                     'gestures_only': _metric(gesture_decision.text, reference),
                      'fusion': _metric(decision.text, reference), 'sequence_timing': st, 'mouth_timing': mt})
     def aggregate(name):
         edits = sum(r[name]['edits'] for r in rows)
         words = sum(r[name]['reference_words'] for r in rows)
         return {'wer': edits / words if words else None, 'edits': edits, 'reference_words': words,
                 'exact': sum(r[name]['exact'] for r in rows) / len(rows)}
-    summary = {'count': len(rows), 'lips_only': aggregate('lips_only'), 'fusion': aggregate('fusion'),
+    positive = [r for r in rows if r['true_label'] in vocabulary]
+    rest = [r for r in rows if r['true_label'] == 'REST']
+    unknown = [r for r in rows if r['true_label'] != 'REST' and r['true_label'] not in vocabulary]
+    correct = sum(r['predicted_label'] == r['true_label'] for r in positive)
+    rejected = sum(r['predicted_label'] is None or r['predicted_label'] == 'REST' for r in positive)
+    def false_emissions(group):
+        return sum(r['predicted_label'] is not None and r['predicted_label'] != 'REST' for r in group)
+    classification = {
+        'positive_count': len(positive), 'correct': correct, 'rejected': rejected,
+        'wrong': len(positive) - correct - rejected,
+        'recall': correct / len(positive) if positive else None,
+        'rest_count': len(rest), 'rest_false_emissions': false_emissions(rest),
+        'rest_false_emission_rate': false_emissions(rest) / len(rest) if rest else None,
+        'unknown_count': len(unknown), 'unknown_false_emissions': false_emissions(unknown),
+        'unknown_false_emission_rate': false_emissions(unknown) / len(unknown) if unknown else None,
+    }
+    summary = {'count': len(rows), 'lips_only': aggregate('lips_only'),
+               'gestures_only': aggregate('gestures_only'), 'gesture_classification': classification,
+               'fusion': aggregate('fusion'),
                'fusion_corrections': sum(not r['lips_only']['exact'] and r['fusion']['exact'] for r in rows),
                'fusion_regressions': sum(r['lips_only']['exact'] and not r['fusion']['exact'] for r in rows),
                'conflict': sum(r['decision']['reason'] == 'conflict' for r in rows),
@@ -128,6 +153,10 @@ def evaluate(profile, split, reader, motion):
             'fps': 1000 * sum(t['raw_frames'] - 1 for t in timings) / duration if duration else None,
             'max_gap_ms': max(gaps) if gaps else None}
     return _json_safe({'diagnostic': True, 'profile_id': profile.id, 'split': split,
+                       'limitations': ['Offline paired-sample diagnostics do not measure live camera accuracy, latency, or calibrated confidence.',
+                                       'Gestures-only text may contain only a slot and is compared with the full reference, so its WER and exact rate reflect that difference.',
+                                       'Model and correction exposure to the evaluation split is not checked; this report does not establish test independence.',
+                                       'Unknown inputs are labels outside the profile vocabulary other than REST; false emissions count accepted non-REST predictions.'],
                        'summary': summary, 'pairs': rows})
 
 
@@ -146,14 +175,26 @@ def main(argv=None):
         raise FileNotFoundError(f'Motion model not found: {motion_path}')
     if args.output.exists():
         raise FileExistsError(f'Report already exists: {args.output}')
+    lip_path = args.lip_model if args.lip_model is not None else profile_lip_model(profile)
+    lm_path = args.lip_language_model if args.lip_language_model is not None else profile_language_model(profile)
+    if args.lip_model is None and not lip_path.is_file():
+        lip_path = None
+    if args.lip_language_model is None and not lm_path.is_file():
+        lm_path = None
+    for path in (lip_path, lm_path):
+        if path is not None and not path.is_file():
+            raise FileNotFoundError(f'Lip model not found: {path}')
     from lipflow.vsr import LipReader
     reader = LipReader(beam_size=4, personal=False,
-                       personal_vsr_path=str(args.lip_model) if args.lip_model else None,
-                       personal_lm_path=str(args.lip_language_model) if args.lip_language_model else None)
+                       personal_vsr_path=str(lip_path) if lip_path else None,
+                       personal_lm_path=str(lm_path) if lm_path else None)
     report = evaluate(profile, args.split, reader, MotionModel.load(motion_path))
-    report['models'] = {'lip_model': str(args.lip_model) if args.lip_model else 'stock',
-                        'lip_language_model': str(args.lip_language_model) if args.lip_language_model else 'stock',
-                        'motion_model': str(motion_path), 'beam_size': 4}
+    report['models'] = {'lip_model': str(lip_path) if lip_path else 'stock',
+                        'lip_language_model': str(lm_path) if lm_path else 'stock',
+                        'motion_model': str(motion_path), 'beam_size': 4,
+                        'lip_model_sha256': _file_sha256(lip_path) if lip_path else None,
+                        'lip_language_model_sha256': _file_sha256(lm_path) if lm_path else None,
+                        'motion_model_sha256': _file_sha256(motion_path)}
     with args.output.open('x', encoding='utf-8') as out:
         json.dump(report, out, indent=2, allow_nan=False)
         out.write('\n')

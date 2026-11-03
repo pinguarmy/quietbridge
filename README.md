@@ -21,7 +21,9 @@ Open the recording lab to create a profile, customize gestures and prompts, and 
 uv run python -m hackathon.signs.lab
 ```
 
-Open <http://127.0.0.1:8766>. The stages cover profile setup, training, independent validation, final test and model review. The browser targets 25 fps and displays the actual received rate; it does not claim that resampling recovers lost frames. **Models & review** can train motion, visual-lip and language candidates, inspect reports, explicitly promote them and roll back while preserving history.
+Open <http://127.0.0.1:8766>, or choose **Personalize** in the main app. New profiles begin with **Choose phrases**, then **Practice**, **Check on another occasion**, **Final check** and **Activate**. These remain separate train, validation and test recording sessions. Gesture details expand individually; internal labels and sentence templates stay under Advanced. Capture statistics and session IDs are optional details. The model page shows one training action for the selected model type and preserves explicit activation and rollback.
+
+The browser targets 25 fps and displays the actual received rate; resampling does not recover lost frames. Both local server processes must be running to move between the main app and Personalize.
 
 ## Run the main app
 
@@ -38,7 +40,9 @@ Open <http://127.0.0.1:8765>. Stock models and gestures remain the default. Sele
 uv run python -m hackathon.server --browser-camera --profile alice
 ```
 
-If `alice` has a promoted `models/motion.npz`, the app uses its custom vocabulary and dynamic recognizer. Otherwise it keeps compatible stock gestures and shows a setup warning. Custom motion input uses an explicit Record/release window; REST, rejected and cancelled windows emit nothing.
+If `alice` has a promoted `models/motion.npz`, the app uses its custom vocabulary and dynamic recognizer. Otherwise it keeps compatible stock gestures and shows a setup warning. Start the camera, then hold **Record lips + gesture** or Space for one custom motion and its words. Release to decode the shared window. **Finish message** stops the camera for final review. REST, rejected and cancelled windows emit nothing. Pure lip input and stock gestures retain automatic capture.
+
+The communication page separates capture, review and speech. Mouth framing is an optional preview. You can type a message without a camera; applying it never speaks automatically. On narrow screens, a nonempty message moves above the camera so review and speech remain easy to find.
 
 Automatic motion segmentation is available as an opt-in experiment with `QUIETBRIDGE_MOTION_AUTO=1`. It detects movement/rest windows without the Record button. Its thresholds are engineering defaults, not calibrated user-specific probabilities; validate false triggers and missed motions before choosing it for regular use.
 
@@ -54,7 +58,7 @@ uv run python -m hackathon.server --browser-camera --profile alice \
 
 The main app automatically loads promoted `models/motion.npz`, `models/lip.pth` and `models/lm.pth` from the selected profile. Explicit command-line paths take precedence for candidate evaluation. Settings shows the active profile, separate visual/language model identities, actual frame rate, frame gaps and latency. The main recording limit defaults to 30 seconds and can be changed with `--max-utterance-seconds`.
 
-You can edit an incorrect message before speaking. Applying a correction never speaks automatically. Only an explicit learning choice stores it in that profile's local `corrections.jsonl`; otherwise it remains an in-memory correction. Future language-model candidates include those approved corrected texts in training and report their count; final-test data remains separate.
+You can edit an incorrect message before speaking. Applying a correction never speaks automatically. Only an explicit learning choice stores it in that profile's local `corrections.jsonl`; otherwise it remains an in-memory correction. Future language-model candidates include those approved corrected texts in training and report their count. Recording sessions are split-isolated, but correction provenance is not enforced yet. Do not approve held-out validation/test corrections for learning if you intend to use those sessions for an independent score.
 
 ## Train and evaluate candidates
 
@@ -113,7 +117,9 @@ uv run python -m hackathon.evaluate_fusion \
   --output "$HOME/.local/share/quietbridge/profiles/alice/models/fusion-diagnostic.json"
 ```
 
-The report compares lips-only and fusion WER and exact intent, counts corrections and regressions, and retains raw candidates plus gesture diagnostics. Optional model flags select explicit candidates without promoting them. The output is diagnostic and never changes the active model.
+The report compares lips-only, gestures-only and fusion WER and exact intent. It also reports gesture positive recall, wrong labels, and REST/unknown false emissions with their denominators. Missing negative samples produce null rates, not claims of zero false triggers. A gesture may supply only one slot, so its standalone text can be shorter than the full reference. Default models follow the profile's promoted paths, with SHA-256 identities; explicit flags override them. The output remains diagnostic. It neither proves that the model never saw test data nor measures live accuracy or response time.
+
+See the [recognition audit and cooperation plan](docs/recognition-audit.md) for supported sign input, fixed fusion defects and remaining evaluation limits.
 
 For capture-only checks, `uv run python -m hackathon.signs.capture_analysis <mouth.npz>` reports actual fps, frame gaps, face coverage and mouth-activity edges. Older recordings without activity metadata report those fields as null.
 
@@ -131,6 +137,7 @@ For capture-only checks, `uv run python -m hackathon.signs.capture_analysis <mou
 ```sh
 uv run pytest
 node --check hackathon/ui/app.js
+node --test hackathon/tests/test_ui_flow.cjs hackathon/signs/tests/test_lab_*.cjs
 ```
 
 Synthetic checks and fake backends establish integration behavior, not live recognition accuracy. Real use still requires new-session camera trials, paired lips/gesture evaluation, REST/unknown false-trigger measurements and audible speech checks. Do not tune on the final-test session.

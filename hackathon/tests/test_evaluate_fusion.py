@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sys
 from types import SimpleNamespace
@@ -55,6 +56,12 @@ def test_paired_comparison_and_rest(tmp_path):
     row = report['pairs'][0]
     assert report['diagnostic'] and row['lips_only']['text'] == 'hello'
     assert row['fusion']['text'] == 'water' and row['decision']['reason'] == 'agreement'
+    assert row['gestures_only']['text'] == 'water' and row['gestures_only']['wer'] == 0
+    assert report['summary']['gestures_only']['exact'] == 1
+    assert row['true_label'] == row['predicted_label'] == 'WATER'
+    assert report['summary']['gesture_classification']['recall'] == 1
+    assert report['summary']['gesture_classification']['rest_false_emission_rate'] is None
+    assert report['summary']['gesture_classification']['unknown_false_emission_rate'] is None
     assert row['sign_events'][0]['score'] == 0.4
     assert row['sign_events'][0]['start_ms'] == 100 and row['sign_events'][0]['end_ms'] == 200
     assert report['summary']['fusion_corrections'] == 1
@@ -65,6 +72,32 @@ def test_paired_comparison_and_rest(tmp_path):
     assert rest['pairs'][0]['fusion']['text'] == 'hello'
     rejected = evaluate(profile, 'test', Reader(), Motion(accepted=False))
     assert rejected['summary']['gesture_reject'] == 1 and not rejected['pairs'][0]['sign_events']
+
+
+def test_classification_groups_and_emissions(tmp_path):
+    profile, seq, mouth = samples(tmp_path)
+    cases = [('a', 'WATER', 'WATER', True), ('b', 'WATER', 'NO', True),
+             ('c', 'WATER', 'WATER', False), ('d', 'WATER', 'REST', True),
+             ('e', 'REST', 'WATER', True), ('f', 'REST', 'REST', True),
+             ('g', 'UNSEEN', 'NO', True), ('h', 'UNSEEN', 'NO', False)]
+    (profile.sequences_dir / 'test' / 'a.npz').unlink()
+    (profile.mouths_dir / 'test' / 'b.npz').unlink()
+    for pair, label, prediction, accepted in cases:
+        seq_copy = dict(seq, pair_id=pair, label=label, trial_id=prediction + str(accepted))
+        mouth_copy = dict(mouth, pair_id=pair, gesture_label=label)
+        np.savez(profile.sequences_dir / 'test' / f'{pair}.npz', **seq_copy)
+        np.savez(profile.mouths_dir / 'test' / f'{pair}.npz', **mouth_copy)
+    class CaseMotion:
+        def diagnose(self, trial):
+            key = str(trial['trial_id'].item())
+            return Motion(key.removesuffix('True').removesuffix('False'), key.endswith('True')).diagnose(trial)
+    report = evaluate(profile, 'test', Reader(), CaseMotion())
+    assert report['summary']['gesture_classification'] == {
+        'positive_count': 4, 'correct': 1, 'rejected': 2, 'wrong': 1, 'recall': .25,
+        'rest_count': 2, 'rest_false_emissions': 1, 'rest_false_emission_rate': .5,
+        'unknown_count': 2, 'unknown_false_emissions': 1, 'unknown_false_emission_rate': .5}
+    assert report['pairs'][6]['true_label'] == 'UNSEEN'
+    assert report['pairs'][7]['predicted_label'] is None
 
 
 def test_missing_and_duplicate_pairs(tmp_path):
@@ -102,3 +135,27 @@ def test_cli_report_and_no_overwrite(tmp_path, monkeypatch):
     with pytest.raises(FileExistsError):
         main(args)
     assert report.read_text() == before
+    assert content['models']['lip_model'] == 'stock'
+    assert content['models']['motion_model_sha256'] == hashlib.sha256(b'fake').hexdigest()
+
+    lip, lm = model.parent / 'lip.pth', model.parent / 'lm.pth'
+    lip.write_bytes(b'promoted lip')
+    lm.write_bytes(b'promoted lm')
+    report2 = tmp_path / 'promoted.json'
+    main(['--profile', 'alice', '--split', 'test', '--output', str(report2)])
+    content = json.loads(report2.read_text())
+    assert options['personal_vsr_path'] == str(lip) and options['personal_lm_path'] == str(lm)
+    assert content['models']['lip_model_sha256'] == hashlib.sha256(b'promoted lip').hexdigest()
+    assert content['models']['lip_language_model_sha256'] == hashlib.sha256(b'promoted lm').hexdigest()
+
+    explicit_lip, explicit_lm = tmp_path / 'candidate.pth', tmp_path / 'candidate-lm.pth'
+    explicit_lip.write_bytes(b'candidate')
+    explicit_lm.write_bytes(b'candidate lm')
+    report3 = tmp_path / 'explicit.json'
+    main(['--profile', 'alice', '--split', 'test', '--output', str(report3),
+          '--lip-model', str(explicit_lip), '--lip-language-model', str(explicit_lm)])
+    assert options['personal_vsr_path'] == str(explicit_lip) and options['personal_lm_path'] == str(explicit_lm)
+    assert json.loads(report3.read_text())['models']['lip_model_sha256'] == hashlib.sha256(b'candidate').hexdigest()
+    with pytest.raises(FileNotFoundError):
+        main(['--profile', 'alice', '--split', 'test', '--output', str(tmp_path / 'missing.json'),
+              '--lip-model', str(tmp_path / 'missing.pth')])
