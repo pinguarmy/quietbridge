@@ -6,6 +6,7 @@ reports remain immutable; promotion copies a candidate to the runtime path.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -18,6 +19,7 @@ import uuid
 from typing import Any
 
 from hackathon.profiles import Profile
+from hackathon.lips_adapter import _file_sha256
 
 _KINDS = {
     "motion": ("hackathon.signs.train_motion", "motion.npz", "sequences_dir"),
@@ -76,7 +78,25 @@ def _is_valid_comparison(data: Any) -> bool:
     cand_metrics = cand.get("metrics")
     if not isinstance(stock_metrics, dict) or not isinstance(cand_metrics, dict):
         return False
-    return "wer" in stock_metrics and "wer" in cand_metrics
+    for metrics in (stock_metrics, cand_metrics):
+        for field in ("wer", "target_wer"):
+            value = metrics.get(field)
+            if value is None and field == "target_wer":
+                continue
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                return False
+    return (stock_metrics.get("target_wer") is None) == (cand_metrics.get("target_wer") is None)
+
+
+def _comparison_matches_models(comparison: dict[str, Any], model_path: Path, visual_path: Path) -> bool:
+    """A score only applies to the exact candidate and visual weights evaluated."""
+    candidate_hash = _file_sha256(model_path)
+    if not candidate_hash or comparison.get("candidate_sha256") != candidate_hash:
+        return False
+    if visual_path.is_file():
+        visual_hash = _file_sha256(visual_path)
+        return bool(visual_hash) and comparison.get("visual_model_sha256") == visual_hash
+    return comparison.get("visual_model") == "stock" and comparison.get("visual_model_sha256") is None
 
 
 def _comparison_gate_passed(comparison: dict[str, Any] | None) -> bool:
@@ -97,8 +117,6 @@ def _comparison_gate_passed(comparison: dict[str, Any] | None) -> bool:
     if stock_target is not None and cand_target is not None:
         if cand_target > stock_target:
             return False
-    elif cand_target is not None and stock_target is None:
-        return False
     return True
 
 
@@ -239,7 +257,7 @@ class ModelLifecycle:
                 _atomic_json(self._candidate_dir(profile, record["id"]) / "candidate.json", record)
 
         comparison = None
-        comparison_path = self._candidate_dir(profile, record["id"]) / "comparison.json"
+        comparison_path = self._candidate_dir(profile, record["id"]) / record.get("comparison_file", "comparison.json")
         record["comparison_path"] = str(comparison_path)
         if comparison_path.is_file():
             try:
@@ -253,8 +271,15 @@ class ModelLifecycle:
         if comparison is not None and _is_valid_comparison(comparison):
             if record.get("eval_status") not in ("running", "failed"):
                 record["eval_status"] = "completed"
-        comparison_passed = _comparison_gate_passed(comparison)
+        comparison_current = (isinstance(comparison, dict) and _is_valid_comparison(comparison)
+                              and _comparison_matches_models(comparison, Path(record["model_path"]),
+                                                             self._root(profile) / "lip.pth"))
+        comparison_passed = (comparison_current and record.get("eval_status") == "completed"
+                             and _comparison_gate_passed(comparison))
+        record["comparison_current"] = comparison_current
         record["comparison_passed"] = comparison_passed
+        if comparison is not None and not comparison_current:
+            record["comparison_warning"] = "Recognition report is invalid or does not match the current weights. Evaluate recognition again; the saved report will be preserved."
 
         report = None
         try:
@@ -330,18 +355,21 @@ class ModelLifecycle:
             if not model_path.is_file():
                 raise ValueError("Candidate model file not found")
 
-            comparison_path = directory / "comparison.json"
+            comparison_path = directory / record.get("comparison_file", "comparison.json")
             if comparison_path.exists():
                 try:
                     existing = json.loads(comparison_path.read_text(encoding="utf-8"))
-                    if isinstance(existing, dict) and _is_valid_comparison(existing):
+                    if (isinstance(existing, dict) and _is_valid_comparison(existing)
+                            and _comparison_matches_models(existing, model_path, self._root(profile) / "lip.pth")):
                         record["eval_status"] = "completed"
                         record["eval_error"] = None
                         _atomic_json(meta, record)
                         return self._describe(profile, record)
                 except Exception:
                     pass
-                raise ValueError(f"Refusing to overwrite existing comparison: {comparison_path}")
+                # Keep every completed report. Changed weights need new evidence,
+                # not retraining or overwriting the previous comparison.
+                comparison_path = directory / f"comparison-{uuid.uuid4().hex}.json"
 
             lip_path = self._root(profile) / "lip.pth"
             args = [
@@ -358,7 +386,7 @@ class ModelLifecycle:
             if lip_path.is_file():
                 args.extend(["--visual-model", str(lip_path)])
 
-            record.update(eval_status="running", eval_error=None)
+            record.update(eval_status="running", eval_error=None, comparison_file=comparison_path.name)
             _atomic_json(meta, record)
             try:
                 process = subprocess.Popen(

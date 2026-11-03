@@ -18,6 +18,11 @@ def compare_language_models(data_root, candidate_path, visual_path=None):
     candidate_path = Path(candidate_path).expanduser()
     if not candidate_path.is_file():
         raise FileNotFoundError(f"Language candidate not found: {candidate_path}")
+    visual_path = Path(visual_path).expanduser() if visual_path else None
+    if visual_path is not None and not visual_path.is_file():
+        raise FileNotFoundError(f"Visual model not found: {visual_path}")
+    candidate_hash = _file_sha256(candidate_path)
+    visual_hash = _file_sha256(visual_path)
     target = target_prompt(data["train"])
     readers = {}
     for name, language_path in (("stock", None), ("candidate", candidate_path)):
@@ -28,11 +33,14 @@ def compare_language_models(data_root, candidate_path, visual_path=None):
         )
     report = {"diagnostic": True, "beam": 4, "data": str(Path(data_root).expanduser()),
               "candidate": str(candidate_path),
-              "candidate_sha256": _file_sha256(candidate_path),
-              "visual_model": str(visual_path) if visual_path else "stock", "variants": {}}
+              "candidate_sha256": candidate_hash,
+              "visual_model": str(visual_path) if visual_path else "stock",
+              "visual_model_sha256": visual_hash, "variants": {}}
     for name, reader in readers.items():
         rows = evaluate(reader, data["test"])
         report["variants"][name] = {"metrics": metrics(rows, target), "transcripts": rows}
+    if candidate_hash != _file_sha256(candidate_path) or visual_hash != _file_sha256(visual_path):
+        raise RuntimeError("Model weights changed during recognition evaluation; no report was saved")
     report["deployment"] = False
     return report
 

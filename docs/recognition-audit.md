@@ -22,6 +22,19 @@ Evidence: [stock pose map](../hackathon/signs/recognizer.py#L43-L58), [one-event
 
 The personal motion input contains two sets of 21 hand landmarks and presence masks. It does not encode body posture or facial grammar as sign-language features. The separate lip model is not a non-manual sign-language grammar model. Supporting full BSL would require a BSL-specific dataset, temporal language model, non-manual features, fingerspelling handling where needed, and validation with BSL users. ASL and other sign languages need their own validated language paths. This is a proposed future project, not a switch already present in Settings.
 
+## Follow-up audit, 2026-11-03 afternoon
+
+The follow-up reproduced four concrete failures and implemented bounded fixes:
+
+- Two-window alternatives could truncate the message. `hello/yellow` then `world/word` exposed `yellow` instead of `yellow world`. Both automatic and explicit windows now rebuild complete-message single-window alternatives. A separate regression ensures a displayed fused proposal is still allowed by confirmation.
+- The language promotion gate accepted NaN and negative error rates. It also accepted a stock-visual report after the visual model or language candidate contents changed. The gate now rejects invalid rates and requires matching weight hashes. Re-evaluation uses a new report filename while preserving the old evidence.
+- Promotion saved files but left the running recognizer unchanged. Personalize now distinguishes saved models from loaded models and links to the idle-only Reload current models action. Real browser checks in isolated rehearsal mode confirmed the displayed model hash changes on reload. No real checkpoint was loaded in that check.
+- Known held-out correction sources could enter language training. The correction writer and historical-record reader now exclude them and contradictory metadata. Unknown daily sources remain consent-based and explicitly unverified. Training surfaces source coverage and warnings, not an evaluation-independence guarantee.
+
+The fixes prevent these demonstrated errors. They do not establish improved camera recognition, independent model provenance for arbitrary checkpoints, or statistical significance. Reusing one final-test session to choose many candidates remains an evaluation limitation.
+
+Final follow-up verification: 525 Python tests passed, 11 skipped, 34 subtests passed; 13 Node UI checks passed. The browser reload check used isolated rehearsal data and observed a changed language-model hash without changing the profile. Regression readers/workers were fake; no new human accuracy dataset, camera capture or real checkpoint inference was used.
+
 ## Findings, in impact order
 
 ### 1. Default camera flow did not start personal gesture windows. Fixed.
@@ -48,17 +61,17 @@ These are offline diagnostics. A gesture can supply only a noun while the refere
 
 Evidence: [evaluator](../hackathon/evaluate_fusion.py), [paired-report tests](../hackathon/tests/test_evaluate_fusion.py).
 
-### 4. Correction learning does not establish held-out provenance. Open.
+### 4. Correction learning could consume held-out sources. Known-source path fixed in follow-up.
 
-The recording loaders reject shared recording session/trial IDs across splits. However, explicitly approved correction text is added to language training separately. Source references are optional, and the learning reader does not enforce their split. A user could copy a validation/test correction into learning and contaminate later evaluation. No evidence here establishes that existing private data is contaminated.
+The follow-up audit exercised a correction pointing to a validation/test NPZ. These known sources could reach language training. Recording now rejects them, and the reader excludes historical held-out records and contradictory metadata. The training report records source coverage, skips and known session/trial IDs. A repeated prompt across independent sessions is not itself the same recording; the checks use recording provenance, not just matching transcript strings.
 
-Before reporting personal-model gains, freeze a new held-out session after the candidate and correction set are fixed. Do not learn from that session. A later implementation should attach source session/split to corrections and exclude held-out sources. A repeated prompt across independent sessions is not itself the same recording; distinguish transcript overlap from actual test exposure.
+Corrections without sources remain available for explicitly consented daily learning and are marked unknown. This does not establish held-out independence. Freeze a new held-out session after the candidate and correction set are fixed; do not learn from it. No evidence here establishes that existing private data was contaminated.
 
-Evidence: [correction record and reader](../hackathon/corrections.py#L18-L42), [correction ingestion](../hackathon/signs/train_language.py#L117-L124), [recording isolation](../hackathon/signs/train_language.py#L49-L80).
+Evidence: [correction record and reader](../hackathon/corrections.py), [correction ingestion and coverage](../hackathon/signs/train_language.py), [recording isolation](../hackathon/signs/train_language.py#L49-L80).
 
 ### 5. Model promotion checks are safety filters, not proof of benefit. Open.
 
-The language gate rejects a reported aggregate WER regression and target regression when both target metrics are present. It accepts ties and does not provide uncertainty bounds. The paired report is diagnostic and does not enforce training provenance. Repeatedly selecting candidates against one final-test set also stops that set being a clean independent final test.
+The language gate rejects reported aggregate WER regression and mismatched/missing target coverage. Follow-up reproduced NaN and negative WER passing the old gate; finite nonnegative numbers are now required. A stock-visual report also remained promotable after visual weights or candidate content changed. The report is now bound to both content hashes. Stale or legacy unbound reports require a new evaluation, preserving old reports. These checks still accept ties and do not provide uncertainty bounds. The paired report is diagnostic and does not enforce training provenance. Repeatedly selecting candidates against one final-test set also stops that set being a clean independent final test.
 
 Keep validation for all tuning and selection. Use a fresh final test once for the frozen configuration, report the number of people, sessions, clips and errors, and do not call synthetic tests accuracy evidence.
 
@@ -75,13 +88,15 @@ Use one bounded expression with independent evidence, not two systems voting on 
 5. Optional AI wording stays separate from recognition. It may offer wording, but cannot certify intent or replace the selected message by default.
 6. Speak only the exact text the user chose, bound to its revision.
 
-The current window implementation retains original candidates, but does not rebuild every earlier alternative with every later chunk. For a long message, some alternatives represent an earlier prefix. Do not describe this as full word-level multi-window fusion. Short expressions and direct editing are the usable path today.
+The follow-up audit reproduced two windows `hello/yellow` and `world/word`: selecting `yellow` could drop the entire second window. Alternatives now replace one window while retaining all other selected windows, producing `yellow world` and `hello word`. Automatic lip windows retain their n-best alternatives too. The displayed fusion proposal remains confirmable. This is bounded window-level recombination, not a learned word-aligned model or every possible combination.
 
 ## Simplest user journey
 
 Daily use: Start camera → hold for one personal gesture and its words, or use automatic pure-lip input → Finish message → review/edit → Speak. Typing works without the camera. No training is required to try stock inputs or type.
 
 Personalization: choose a few useful phrases → record practice → record a separate check session on another occasion → final check → explicitly activate a candidate. Advanced labels, templates, session IDs, capture statistics and provider settings stay out of the daily page.
+
+Model saving was also misleading: promotion changed files while the running reader kept old weights. Personalize now says Save for main app, and Settings exposes Reload current models through the existing idle-only profile reload. The UI reports warmup and failure instead of claiming loading already succeeded. Explicit startup paths continue to override profile files. Reload clears the draft.
 
 Two limitations remain in setup: the app and recording lab are separate local server processes, and training still needs independent recording sessions. Hiding those requirements would make the UI simpler on paper but the product less reliable. A single launcher and validated recording guidance are the next UX tasks, ahead of adding more model controls.
 

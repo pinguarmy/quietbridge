@@ -552,9 +552,10 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
 
 <section id="modelsLayout" class="setup-panel" aria-labelledby="modelsTitle" hidden>
   <h2 id="modelsTitle">Activate personal models</h2>
-  <p class="intro">Create a personal model from your recordings. Review its checks before choosing Use this model. Training alone does not activate it.</p>
+  <p class="intro">Create a personal model from your recordings. Review its checks before saving it for the main app. Training alone does not activate it.</p>
   <p class="privacy">Recording samples or completing training does not establish recognition accuracy. Keep practice, validation and final-test sessions separate.</p>
-  <p class="privacy">The main app automatically loads the active motion, visual lip and language models from this profile. Explicit command-line paths remain available for evaluating a candidate without promoting it.</p>
+  <p class="privacy">Saving a model here changes this profile's files, not a running recognizer. In the main app, stop the camera and choose Settings → Reload current models. Explicit startup paths still take priority.</p>
+  <p id="modelSaveNotice" role="status" aria-live="polite"></p>
   <div class="form-field"><label for="modelKind">Model type</label><select id="modelKind"><option value="motion">Motion</option><option value="lips">Visual lip</option><option value="language">Language</option></select></div>
   <div class="form-field"><label for="candidateSelect">Candidate</label><select id="candidateSelect"></select></div>
   <div id="modelStatus" role="status" aria-live="polite">Loading model status…</div>
@@ -568,7 +569,7 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
   <div class="btn-group" style="flex-wrap:wrap">
     <button id="viewReport" type="button" class="btn-secondary">View report</button>
     <button id="evaluateRecognition" type="button">Evaluate recognition</button>
-    <button id="promoteModel" type="button">Use this model</button>
+    <button id="promoteModel" type="button">Save for main app</button>
     <button id="rollbackModel" type="button" class="btn-secondary">Restore previous model</button>
   </div>
   <div id="comparisonMetrics" style="margin-top:8px;" hidden></div>
@@ -1381,7 +1382,7 @@ function renderModels(){
   });
   if(candidates.some(c=>c.id===previous))select.value=previous;
   const active=modelData?.active?.[kind];
-  $('modelStatus').textContent=modelData?`Profile: ${activeProfile.id} | Active ${kind} model: ${active||'none'} | Jobs: ${JSON.stringify(modelData.jobs||[])}`:'Model status not loaded.';
+  $('modelStatus').textContent=modelData?`Profile: ${activeProfile.id} | Saved ${kind} model: ${active||'none'} | Jobs: ${JSON.stringify(modelData.jobs||[])}`:'Model status not loaded.';
   $('modelReport').hidden=true;
   renderCandidateSummary();
   modelControls();
@@ -1396,7 +1397,8 @@ function renderCandidateSummary(){
   }
   const selection=c.selected===true?'Selected by trainer':c.selected===false?'Not selected by trainer':'Trainer selection unavailable';
   const failures=c.report?.failures;
-  const details=[`Status: ${c.status}`,selection,`Model file: ${c.model_path||'unavailable'}`,`Report: ${c.report_path||'unavailable'}`,c.error?`Error: ${c.error}`:'',failures?.length?`Report failures: ${typeof failures==='string'?failures:JSON.stringify(failures)}`:''];
+  const correctionWarnings=c.report?.corrections?.warnings||[];
+  const details=[`Status: ${c.status}`,selection,`Model file: ${c.model_path||'unavailable'}`,`Report: ${c.report_path||'unavailable'}`,c.error?`Error: ${c.error}`:'',c.comparison_warning||'',correctionWarnings.length?`Correction data: ${correctionWarnings.join(' ')}`:'',failures?.length?`Report failures: ${typeof failures==='string'?failures:JSON.stringify(failures)}`:''];
 
   if(c.kind==='language'){
     if(c.eval_status==='running'){
@@ -1409,7 +1411,7 @@ function renderCandidateSummary(){
       const fmtWer=v=>v!=null?(v*100).toFixed(1)+'%':'N/A';
       const stockStr=`Stock WER: ${fmtWer(stock?.wer)} (target: ${fmtWer(stock?.target_wer)})`;
       const candStr=`Candidate WER: ${fmtWer(cand?.wer)} (target: ${fmtWer(cand?.target_wer)})`;
-      const gateStr=c.comparison_passed?'Passed':'Failed (WER or target degraded)';
+      const gateStr=c.comparison_passed?'Passed':'Not passed; check report identity and metrics';
       details.push(`Recognition: ${stockStr} vs ${candStr} [Gate: ${gateStr}]`);
     }else{
       details.push('Recognition: Not evaluated (required for promotion)');
@@ -1443,7 +1445,17 @@ async function refreshModelStatus(){
 async function modelAction(path,data){
   if(recording||working||modelBusy)return;
   modelBusy=true; controls();
-  try{modelData=await action('models/'+path,data); renderModels()}
+  try{
+    modelData=await action('models/'+path,data); renderModels();
+    if(path==='promote'||path==='rollback'){
+      const message=document.createElement('span');
+      message.textContent='Model files saved. The running app has not reloaded them. ';
+      const link=document.createElement('a');
+      link.href=new URL('settings',getSafeReturnUrl()).href;
+      link.textContent='Open Settings to reload current models.';
+      $('modelSaveNotice').replaceChildren(message,link);
+    }
+  }
   catch(e){$('modelStatus').textContent=e.message}
   finally{modelBusy=false; controls()}
 }
@@ -1470,7 +1482,7 @@ $('viewReport').onclick=()=>{
 };
 $('promoteModel').onclick=()=>{
   const kind=$('modelKind').value,candidate_id=$('candidateSelect').value;
-  if(confirm(`Promote candidate ${candidate_id} for this profile?`))modelAction('promote',{kind,candidate_id});
+  if(confirm(`Save candidate ${candidate_id} for this profile? Reload the main app's models in Settings afterward.`))modelAction('promote',{kind,candidate_id});
 };
 $('rollbackModel').onclick=()=>{
   const kind=$('modelKind').value;

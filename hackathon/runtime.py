@@ -184,7 +184,7 @@ class Runtime:
         self._starting_auto_chunk = False
         self.cleanup = CleanupClient()
         self.session = SessionTranscript()
-        self._session_alternatives = []
+        self._session_windows = []
         self._session_conflict = False
         self.session_signs = []  # Stable events validated when received in this session.
         self.state = {
@@ -300,6 +300,8 @@ class Runtime:
         choices = self.state["candidates"] + [self._fusion_vocabulary[e.label]["phrase"] for e in
                     usable_signs(events, self._fusion_vocabulary, now, since)]
         self.state["alternatives"] = list(dict.fromkeys(c for c in [decision.text, *choices] if c))
+        if self.state["session_active"] and self._session_windows:
+            self._set_session_alternatives()
         for metric in ("release_to_text_ms", "decode_ms", "lip_capture_fps",
                        "lip_raw_frames", "lip_max_frame_gap_ms"):
             self.state["metrics"].pop(metric, None)
@@ -377,7 +379,7 @@ class Runtime:
                 if active:
                     # Only an explicit new camera session clears accumulated words.
                     self.session.reset()
-                    self._session_alternatives.clear()
+                    self._session_windows.clear()
                     self._session_conflict = False
                     self.session_signs.clear()
                     self.state["session_gestures"] = []
@@ -563,24 +565,37 @@ class Runtime:
         width = distance(outer[0], outer[10])
         return distance(inner[5], inner[15]) / width if width > 0 else None
 
+    def _set_session_alternatives(self):
+        # Fusion may propose complete text different from the raw accumulated
+        # chunks. Its displayed decision must remain an allowed confirmation.
+        alternatives = [text for text in (self.state["decision"]["text"], self.session.text) if text]
+        for index, (_, candidates) in enumerate(self._session_windows):
+            for candidate in candidates:
+                candidate = candidate.strip()
+                if candidate:
+                    chunks = [candidate if i == index else selected
+                              for i, (selected, _) in enumerate(self._session_windows)]
+                    alternatives.append(" ".join(chunk for chunk in chunks if chunk))
+        self.state["alternatives"] = list(dict.fromkeys(alternatives))
+
     def _publish_session(self, result, window_events=None):
         """Append a completed chunk; fuse explicit motion at its own boundary."""
         if window_events is not None:
             now = self.finish_at if self.finish_at is not None else clock_ms()
             decision = fuse(result, window_events, self._fusion_vocabulary, now, self.record_start)
             self._session_conflict |= decision.reason in {"conflict", "partial_agreement"}
-            prefix = self.session.text
             gesture_text = " ".join(self._fusion_vocabulary[event.label]["phrase"].strip() for event in
                                     usable_signs(window_events, self._fusion_vocabulary, now, self.record_start))
             candidates = [*(result.candidates if result else []), gesture_text]
-            for candidate in candidates:
-                alternative = " ".join(part for part in (prefix, candidate.strip()) if part)
-                if alternative and alternative not in self._session_alternatives:
-                    self._session_alternatives.append(alternative)
-            self.session.append(decision.text)
+            selected = decision.text.strip()
+            if selected or any(c.strip() for c in candidates):
+                self._session_windows.append((selected, candidates))
+            self.session.append(selected)
             self.events.clear()  # Window evidence must not rerank a later session chunk.
         elif result is not None and result.candidates:
-            self.session.append(result.candidates[0])
+            selected = result.candidates[0].strip()
+            self._session_windows.append((selected, result.candidates))
+            self.session.append(selected)
         text = self.session.text
         self.state["session_text"] = text
         self.state["session_chunks"] = list(self.session.chunks)
@@ -594,7 +609,9 @@ class Runtime:
                         LipResult([text], 0) if text else None)
         self._publish(session_lips, list(self.events) if combined and window_events is None else [], clock_ms(),
                       self.record_start if self._window_motion else None, cleanup_labels=context)
-        self.state["alternatives"] = list(dict.fromkeys([*self.state["alternatives"], *self._session_alternatives]))
+        # Standalone gesture choices are not complete accumulated-session text.
+        if self._session_windows:
+            self._set_session_alternatives()
         if self._session_conflict and text:
             self.state["decision"].update(status="confirmation_needed", reason="conflict", matched_signs=[])
         if not self.state["session_active"]:
@@ -1098,7 +1115,7 @@ class Runtime:
                 self.events.clear()
                 self.seen.clear()
                 self.session.reset()
-                self._session_alternatives.clear()
+                self._session_windows.clear()
                 self._session_conflict = False
                 self.session_signs.clear()
                 self.tracking = {"hands": [], "mouth": None}

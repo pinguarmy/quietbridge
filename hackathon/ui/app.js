@@ -111,8 +111,11 @@ function render(s) {
     if (profileSelect.value !== s.profile_id) profileSelect.value = s.profile_id;
   }
   const lipModel = s.lip_model || {};
-  text('lip-model', (lipModel.mode || 'stock') + (lipModel.vsr_sha256 ? ' · ' + lipModel.vsr_sha256.slice(0,12) : ''));
-  text('language-model', lipModel.language_model_sha256 ? 'personal · ' + lipModel.language_model_sha256.slice(0,12) : 'stock');
+  const lipPending = s.lips === 'warming' || lipModel.status === 'loading';
+  const lipUnavailable = s.lips === 'unavailable' || s.lips === 'disabled';
+  text('lip-model', lipPending ? 'Loading…' : lipUnavailable ? s.lips : (lipModel.mode || 'stock') + (lipModel.vsr_sha256 ? ' · ' + lipModel.vsr_sha256.slice(0,12) : ''));
+  text('language-model', lipPending ? 'Loading…' : lipUnavailable ? s.lips : lipModel.language_model_sha256 ? 'personal · ' + lipModel.language_model_sha256.slice(0,12) : 'stock');
+  text('profile-model-status', lipPending || s.signs === 'loading' ? 'Loading models. Wait before starting the camera.' : s.lips === 'unavailable' || s.signs === 'unavailable' ? 'An input model is unavailable. Check Technical details below.' : s.rehearsal ? 'Preview mode. No recognition model is running.' : 'Model status reflects this running process, not just files saved in Personalize.');
   text('component-errors', [s.profile_warning, s.camera_error, s.lip_error, s.sign_error].filter(Boolean).join('\n'));
   const modeName = {combined:'Lips and gestures', lips:'Lips only', signs:'Gestures only'}[s.mode];
   text('mode-caption', modeName);
@@ -430,7 +433,7 @@ async function handleProfileSwitch() {
     if (!res.ok) {
       throw new Error(result.error || `Switch failed (${res.status})`);
     }
-    text('profile-switch-status', `Active profile is now ${result.profile?.name || targetId}.`);
+    text('profile-switch-status', `Selected ${result.profile?.name || targetId}. ${result.lips === 'warming' || result.signs === 'loading' ? 'Models are loading.' : result.lips === 'unavailable' || result.signs === 'unavailable' ? 'Check model errors below.' : 'Model selection refreshed.'}`);
     render(result);
     if ($('labels')) {
       $('labels').replaceChildren();
@@ -446,6 +449,13 @@ async function handleProfileSwitch() {
   }
 }
 
+if ($('profile-reload-btn')) $('profile-reload-btn').onclick = async () => {
+  if (!state || !$('profile-select')) return;
+  $('profile-select').value = state.profile_id;
+  $('profile-reload-btn').disabled = true;
+  try { await handleProfileSwitch(); }
+  finally { $('profile-reload-btn').disabled = false; }
+};
 if ($('profile-switch-btn')) $('profile-switch-btn').onclick = handleProfileSwitch;
 if ($('profile-select')) loadProfilesList();
 

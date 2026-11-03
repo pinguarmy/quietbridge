@@ -14,9 +14,11 @@
     <div class="profile-switch-form">
       <label for="profile-select">Personal profile<select id="profile-select"><option value="" disabled selected>Loading profiles…</option></select></label>
       <button id="profile-switch-btn" type="button">Use profile</button>
+      <button id="profile-reload-btn" type="button">Reload current models</button>
     </div>
+    <p id="profile-model-status" class="hint" role="status" aria-live="polite"></p>
     <p id="profile-switch-status" class="hint" role="status" aria-live="polite"></p><p id="profile-switch-error" class="error" role="alert"></p>
-    <p class="hint">Stop the camera before switching. <a href="/record">Create a profile or teach personal gestures</a>.</p>
+    <p class="hint">After saving a model in Personalize, stop the camera and reload here. Reload clears the current draft. Explicit startup model paths still take priority. <a href="/record">Personalize your gestures</a>.</p>
   </section>
   <section class="settings-section"><h2>How would you like to communicate?</h2><div class="mode-switch" role="group" aria-label="Input mode"><button data-mode="combined">Lips and gestures</button><button data-mode="lips">Lips only</button><button data-mode="signs">Gestures only</button></div><p id="mode-hint" class="hint">Either input can work on its own.</p></section>
   <section id="gestures" class="settings-section">

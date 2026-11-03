@@ -46,7 +46,7 @@ The communication page separates capture, review and speech. Mouth framing is an
 
 Automatic motion segmentation is available as an opt-in experiment with `QUIETBRIDGE_MOTION_AUTO=1`. It detects movement/rest windows without the Record button. Its thresholds are engineering defaults, not calibrated user-specific probabilities; validate false triggers and missed motions before choosing it for regular use.
 
-During a camera session, lip activity starts a chunk, about 700 ms of low activity ends it, and a bounded in-memory pre-roll retains the preceding 300 ms. Chunks accumulate into a session until you stop the camera. These geometric thresholds are segmentation hints, not speech confidence, and still need real-user validation.
+During a camera session, lip activity starts a chunk, about 700 ms of low activity ends it, and a bounded in-memory pre-roll retains the preceding 300 ms. Chunks accumulate into a session until you stop the camera. Review alternatives replace one window at a time and retain the selected text from every other window; the app does not build every possible cross-window combination. These geometric thresholds are segmentation hints, not speech confidence, and still need real-user validation.
 
 An explicit personal lip candidate and language model can be selected without replacing the legacy Lipflow defaults:
 
@@ -56,9 +56,9 @@ uv run python -m hackathon.server --browser-camera --profile alice \
   --lip-language-model /absolute/path/to/language-candidate.pth
 ```
 
-The main app automatically loads promoted `models/motion.npz`, `models/lip.pth` and `models/lm.pth` from the selected profile. Explicit command-line paths take precedence for candidate evaluation. Settings shows the active profile, separate visual/language model identities, actual frame rate, frame gaps and latency. The main recording limit defaults to 30 seconds and can be changed with `--max-utterance-seconds`.
+The main app loads promoted `models/motion.npz`, `models/lip.pth` and `models/lm.pth` from the selected profile at startup or profile reload. Saving a model in Personalize does not change a recognizer already in memory. Stop the camera, open Settings and choose **Reload current models**. Reload clears the draft and preserves explicit command-line overrides. Wait for model readiness before starting another recording. Settings shows the active profile, separate visual/language model identities, actual frame rate, frame gaps and latency. The main recording limit defaults to 30 seconds and can be changed with `--max-utterance-seconds`.
 
-You can edit an incorrect message before speaking. Applying a correction never speaks automatically. Only an explicit learning choice stores it in that profile's local `corrections.jsonl`; otherwise it remains an in-memory correction. Future language-model candidates include those approved corrected texts in training and report their count. Recording sessions are split-isolated, but correction provenance is not enforced yet. Do not approve held-out validation/test corrections for learning if you intend to use those sessions for an independent score.
+You can edit an incorrect message before speaking. Applying a correction never speaks automatically. Only an explicit learning choice stores it in that profile's local `corrections.jsonl`; otherwise it remains an in-memory correction. Future language-model candidates include those approved corrected texts in training and report their count. Known validation/test sources and contradictory source metadata are excluded from correction learning, including historical records. Training reports source coverage, excluded records and source session/trial IDs. Consented day-to-day corrections without a recording source remain usable, but are marked as unknown provenance. This is not proof of evaluation independence; do not learn from a held-out session.
 
 ## Train and evaluate candidates
 
@@ -103,7 +103,7 @@ uv run python -m hackathon.evaluate_language \
   --output "$HOME/.local/share/quietbridge/profiles/alice/models/lm-comparison.json"
 ```
 
-The comparison is diagnostic, uses beam4 and never promotes a candidate.
+The comparison is diagnostic, uses beam4 and never promotes a candidate. Language promotion requires valid finite, nonnegative error rates and matching candidate/visual SHA-256 identities. Changing either model invalidates the old comparison. Evaluate again to save a new report without overwriting the old one; unchanged reports can be reused.
 
 ## Paired fusion evaluation
 

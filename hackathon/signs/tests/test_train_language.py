@@ -220,6 +220,57 @@ def test_explicit_corrections_join_language_training_only(tmp_path, monkeypatch)
     assert captured["phrases"] == ["HELLO", "HELLO THERE"]
     assert captured["validation_phrases"] == ["WAIT"]
     assert report["counts"]["corrections"] == 1
+    assert report["counts"]["corrections_skipped"] == 0
+    assert report["corrections"]["total"] == 1
+    assert report["corrections"]["learned"] == 1
+    assert report["corrections"]["provenance_unknown"] is True
+    assert report["corrections"]["correction_provenance_complete"] is False
+    assert len(report["corrections"]["warnings"]) == 1
+
+
+def test_heldout_corrections_excluded_from_language_training(tmp_path, monkeypatch):
+    from hackathon.profiles import Profile
+    profile = Profile("alice", "Alice", tmp_path)
+    profile.ensure_dirs()
+    make_npz(profile.mouths_dir / "train", "t1", "HELLO", "sess-train", "trial-1", split="train")
+    make_npz(profile.mouths_dir / "validation", "v1", "WAIT", "sess-val", "trial-2", split="validation")
+
+    # Manually add a legacy held-out validation correction entry
+    jsonl_path = profile.profile_dir / "corrections.jsonl"
+    entry = {
+        "id": "e_heldout",
+        "profile_id": "alice",
+        "original": "WAIT",
+        "corrected": "WAIT A MINUTE",
+        "learn": True,
+        "sources": ["mouths/validation/v1.npz"],
+    }
+    jsonl_path.write_text(json.dumps(entry) + "\n", encoding="utf-8")
+
+    output = profile.profile_dir / "models" / "lm.pth"
+    captured = {}
+
+    def mock_train(**kwargs):
+        captured.update(kwargs)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"weights")
+        return {"train": 1, "val": 1, "before": {}, "after": {}, "saved": True}
+
+    monkeypatch.setattr("lipflow.train_lm.train", mock_train)
+    args = argparse.Namespace(data=str(profile.mouths_dir), output=str(output), epochs=1,
+                              lr=3e-5, bs=32, seed=0, max_general_loss=1.15, device=None)
+    report = train_language.run(args)
+    # The heldout phrase must NOT enter training phrases!
+    assert "WAIT A MINUTE" not in captured["phrases"]
+    assert captured["phrases"] == ["HELLO"]
+    assert report["counts"]["corrections"] == 0
+    assert report["counts"]["corrections_skipped"] == 1
+    assert report["corrections"]["total"] == 1
+    assert report["corrections"]["learned"] == 0
+    assert report["corrections"]["skipped"] == 1
+    assert report["corrections"]["source_coverage"]["heldout_rejected"] == 1
+    assert any("held-out" in w for w in report["corrections"]["warnings"])
+
 
 
 def test_rejected_candidate_does_not_create_pth_and_records_rejection(tmp_path, monkeypatch):

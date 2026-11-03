@@ -37,6 +37,8 @@ def test_same_vsr_and_rois_compare_only_language_candidate(tmp_path, monkeypatch
     assert report["variants"]["stock"]["metrics"]["wer"] == 1.0
     assert report["variants"]["candidate"]["metrics"]["wer"] == 0.0
     assert report["deployment"] is False
+    assert report["candidate_sha256"] is not None
+    assert report["visual_model_sha256"] is None
     assert len(constructions) == 2
     assert {item["personal_vsr_path"] for item in constructions} == {None}
     assert constructions[0]["beam_size"] == constructions[1]["beam_size"] == 4

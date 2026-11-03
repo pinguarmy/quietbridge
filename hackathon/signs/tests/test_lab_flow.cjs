@@ -211,6 +211,24 @@ test('model training buttons show exactly one per selected model type and evalua
   assert.equal(elements.evaluateRecognition.disabled, true, 'evaluateRecognition should be disabled while running');
 });
 
+test('saving a model directs users to reload instead of claiming live activation', async () => {
+  const scriptText = scriptMatch[1];
+  const source = scriptText.match(/async function modelAction\(path,data\)\{[\s\S]*?\n\}/)[0];
+  const notice = { replaceChildren(...children) { this.children = children; } };
+  const context = {
+    recording: false, working: false, modelBusy: false,
+    controls() {}, renderModels() {}, action: async () => ({ active: { language: '/saved/lm.pth' } }),
+    $: id => id === 'modelSaveNotice' ? notice : {},
+    document: { createElement: () => ({}) },
+    URL, getSafeReturnUrl: () => 'http://127.0.0.1:9000/',
+  };
+  vm.createContext(context);
+  vm.runInContext(source, context);
+  await context.modelAction('promote', { kind: 'language' });
+  assert.match(notice.children[0].textContent, /has not reloaded/);
+  assert.equal(notice.children[1].href, 'http://127.0.0.1:9000/settings');
+});
+
 test('a11y: 44px min-height buttons, table scrolling container, and reduced motion styles exist', () => {
   // 44px minimum touch target height
   assert.match(rawHtml, /min-height:\s*44px/);

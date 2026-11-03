@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function screen() {
+function screen(page = 'index.html') {
   const elements = new Map();
   function element(tag = 'DIV') {
     const classes = new Set();
@@ -20,7 +20,7 @@ function screen() {
       replaceChildren(...children) { this.children = children; },
     };
   }
-  const html = fs.readFileSync(path.join(__dirname, '../ui/index.html'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '../ui/', page), 'utf8');
   for (const [, tag, id] of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"/g)) elements.set(id, element(tag));
   const context = {
     document: {
@@ -31,6 +31,7 @@ function screen() {
     window: { addEventListener() {} },
     fetch: () => new Promise(() => {}), setTimeout() {}, clearTimeout() {},
     Date, Promise, console,
+    Option: function (label, value) { return { textContent: label, value }; },
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), context);
@@ -46,6 +47,22 @@ function screen() {
   }
   return { context, elements, render };
 }
+
+test('reloading models targets the running profile and reports warmup truthfully', async () => {
+  const { elements, context, render } = screen('settings.html');
+  render({ profile_id: 'alice', profile_name: 'Alice' });
+  elements.get('profile-select').value = 'bob';
+  const requests = [];
+  context.fetch = async (url, options) => {
+    requests.push([url, JSON.parse(options.body)]);
+    return { ok: true, json: async () => ({ ...context.sample, revision: 2, lips: 'warming', signs: 'loading', profile: { name: 'Alice' } }) };
+  };
+  await elements.get('profile-reload-btn').onclick();
+  assert.deepEqual(requests, [['/api/profile/select', { id: 'alice' }]]);
+  assert.equal(elements.get('lip-model').textContent, 'Loading…');
+  assert.match(elements.get('profile-switch-status').textContent, /loading/);
+  assert.equal(elements.get('profile-reload-btn').disabled, false);
+});
 
 test('custom gestures retain a usable record control inside a camera session', () => {
   const { elements, render } = screen();

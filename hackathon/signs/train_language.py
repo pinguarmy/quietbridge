@@ -119,8 +119,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
     train_phrases = [item["text"] for item in data["train"]]
     val_phrases = [item["text"] for item in data["validation"]]
-    from hackathon.corrections import learning_texts
-    correction_phrases = learning_texts(data_root.parent)
+
+    heldout_sessions = {item["session_id"] for split in ("validation", "test") for item in data.get(split, [])}
+    heldout_trials = {item["trial_id"] for split in ("validation", "test") for item in data.get(split, [])}
+
+    from hackathon.corrections import summarize_corrections
+    corr_summary = summarize_corrections(
+        data_root.parent,
+        heldout_sessions=heldout_sessions,
+        heldout_trials=heldout_trials,
+    )
+    correction_phrases = corr_summary["texts"]
     train_phrases.extend(text for text in correction_phrases if text not in train_phrases)
 
     started = time.perf_counter()
@@ -132,6 +141,18 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "train": len(data["train"]),
             "validation": len(data["validation"]),
             "corrections": len(correction_phrases),
+            "corrections_skipped": corr_summary["skipped_count"],
+        },
+        "corrections": {
+            "total": corr_summary["total_records"],
+            "learned": len(correction_phrases),
+            "skipped": corr_summary["skipped_count"],
+            "source_coverage": corr_summary["source_coverage"],
+            "sessions": corr_summary["sessions"],
+            "trials": corr_summary["trials"],
+            "warnings": corr_summary["warnings"],
+            "provenance_unknown": corr_summary["provenance_unknown"],
+            "correction_provenance_complete": corr_summary["correction_provenance_complete"],
         },
         "config": {
             "epochs": args.epochs,
@@ -220,6 +241,7 @@ def main(argv: list[str] | None = None) -> None:
         "deployment": report["deployment"],
         "auto_deploy": report["auto_deploy"],
         "counts": report["counts"],
+        "corrections": report.get("corrections", {}),
         "perplexity": report.get("perplexity", {}),
         "selection": report.get("selection", {}),
     }, indent=2))

@@ -181,6 +181,8 @@ def test_language_evaluation_arguments_and_visual_model_flag(training):
     proc.returncode = 0
     comp_file = cand_dir / "comparison.json"
     comp_file.write_text(json.dumps({
+        "candidate_sha256": model_lifecycle._file_sha256(Path(candidate["model_path"])),
+        "visual_model": "stock", "visual_model_sha256": None,
         "variants": {
             "stock": {"metrics": {"wer": 0.5, "target_wer": 0.2}},
             "candidate": {"metrics": {"wer": 0.3, "target_wer": 0.1}}
@@ -206,11 +208,13 @@ def test_language_evaluation_arguments_and_visual_model_flag(training):
     assert argv_second[argv_second.index("--visual-model") + 1] == str(lip_path)
 
 
-def test_language_evaluation_reuses_existing_and_refuses_overwrite(training):
+def test_language_evaluation_reuses_current_and_preserves_invalid_report(training):
     lifecycle, profile, candidate, calls = _setup_valid_language_candidate(training)
     cand_dir = Path(candidate["model_path"]).parent
     comp_file = cand_dir / "comparison.json"
     comp_file.write_text(json.dumps({
+        "candidate_sha256": model_lifecycle._file_sha256(Path(candidate["model_path"])),
+        "visual_model": "stock", "visual_model_sha256": None,
         "variants": {
             "stock": {"metrics": {"wer": 0.4, "target_wer": 0.2}},
             "candidate": {"metrics": {"wer": 0.2, "target_wer": 0.1}}
@@ -233,9 +237,11 @@ def test_language_evaluation_reuses_existing_and_refuses_overwrite(training):
     cand2_comp = cand2_dir / "comparison.json"
     cand2_comp.write_text("corrupted json")
 
-    with pytest.raises(ValueError, match="Refusing to overwrite"):
-        lifecycle.evaluate_language(profile, cand2["id"])
-    assert len(calls) == 2  # No new Popen started
+    result = lifecycle.evaluate_language(profile, cand2["id"])
+    assert len(calls) == 3
+    assert cand2_comp.read_text() == "corrupted json"
+    assert Path(result["comparison_path"]) != cand2_comp
+    assert result["eval_status"] == "running" and not result["promotable"]
 
 
 def test_language_evaluation_failure_safe_summary(training, monkeypatch):
@@ -257,6 +263,82 @@ def test_language_evaluation_failure_safe_summary(training, monkeypatch):
     assert cand["promotable"] is False
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -0.1, True, "0.1"])
+def test_invalid_error_rates_never_pass_promotion(value):
+    report = {"variants": {"stock": {"metrics": {"wer": .4}},
+                           "candidate": {"metrics": {"wer": value}}}}
+    assert not model_lifecycle._comparison_gate_passed(report)
+
+
+def test_missing_candidate_target_rate_does_not_hide_regression():
+    report = {"variants": {"stock": {"metrics": {"wer": .4, "target_wer": .2}},
+                           "candidate": {"metrics": {"wer": .1}}}}
+    assert not model_lifecycle._comparison_gate_passed(report)
+
+
+@pytest.mark.parametrize("changed", ["candidate", "visual"])
+def test_language_comparison_cannot_promote_different_weights(training, changed):
+    lifecycle, profile, candidate, calls = _setup_valid_language_candidate(training)
+    directory = Path(candidate["model_path"]).parent
+    model_path = Path(candidate["model_path"])
+    report = {"candidate_sha256": model_lifecycle._file_sha256(model_path),
+              "visual_model": "stock", "visual_model_sha256": None,
+              "variants": {"stock": {"metrics": {"wer": .4}}, "candidate": {"metrics": {"wer": .2}}}}
+    comparison = directory / "comparison.json"
+    comparison.write_text(json.dumps(report))
+    assert lifecycle.status(profile)["candidates"][0]["promotable"]
+    target = model_path if changed == "candidate" else profile.profile_dir / "models" / "lip.pth"
+    target.write_bytes(b"changed weights")
+    described = lifecycle.status(profile)["candidates"][0]
+    assert not described["promotable"] and not described["comparison_current"]
+    assert "weights" in described["comparison_warning"]
+    before = comparison.read_bytes()
+    with pytest.raises(ValueError, match="not eligible"):
+        lifecycle.promote(profile, "language", candidate["id"])
+    reevaluation = lifecycle.evaluate_language(profile, candidate["id"])
+    assert reevaluation["eval_status"] == "running"
+    assert Path(reevaluation["comparison_path"]) != comparison
+    assert comparison.read_bytes() == before
+    assert len(calls) == 2
+    updated = {**report, "candidate_sha256": model_lifecycle._file_sha256(model_path)}
+    if changed == "visual":
+        updated.update(visual_model=str(target), visual_model_sha256=model_lifecycle._file_sha256(target))
+    fresh_report = Path(reevaluation["comparison_path"])
+    fresh_report.write_text(json.dumps(updated))
+    calls[-1][2].returncode = 0
+    current = lifecycle.status(profile)["candidates"][0]
+    assert current["comparison_current"] and current["promotable"]
+    assert lifecycle.evaluate_language(profile, candidate["id"])["promotable"]
+    assert len(calls) == 2
+    assert comparison.read_bytes() == before
+
+
+def test_comparison_is_not_promotable_before_evaluator_finishes(training):
+    lifecycle, profile, candidate, calls = _setup_valid_language_candidate(training)
+    evaluation = lifecycle.evaluate_language(profile, candidate["id"])
+    report = {"candidate_sha256": model_lifecycle._file_sha256(Path(candidate["model_path"])),
+              "visual_model": "stock", "visual_model_sha256": None,
+              "variants": {"stock": {"metrics": {"wer": .4}}, "candidate": {"metrics": {"wer": .2}}}}
+    Path(evaluation["comparison_path"]).write_text(json.dumps(report))
+    assert lifecycle.status(profile)["candidates"][0]["eval_status"] == "running"
+    assert not lifecycle.status(profile)["candidates"][0]["promotable"]
+    calls[-1][2].returncode = 0
+    assert lifecycle.status(profile)["candidates"][0]["promotable"]
+
+
+def test_personal_visual_report_matches_content_not_just_path(training):
+    lifecycle, profile, candidate, _ = _setup_valid_language_candidate(training)
+    visual = profile.profile_dir / "models" / "lip.pth"
+    visual.write_bytes(b"visual v1")
+    report = {"candidate_sha256": model_lifecycle._file_sha256(Path(candidate["model_path"])),
+              "visual_model": str(visual), "visual_model_sha256": model_lifecycle._file_sha256(visual),
+              "variants": {"stock": {"metrics": {"wer": .4}}, "candidate": {"metrics": {"wer": .2}}}}
+    (Path(candidate["model_path"]).parent / "comparison.json").write_text(json.dumps(report))
+    assert lifecycle.status(profile)["candidates"][0]["promotable"]
+    visual.write_bytes(b"visual v2")
+    assert not lifecycle.status(profile)["candidates"][0]["promotable"]
+
+
 def test_language_promotion_gate_wer_and_target_wer(training):
     lifecycle, profile, candidate, calls = _setup_valid_language_candidate(training)
     cand_dir = Path(candidate["model_path"]).parent
@@ -264,6 +346,8 @@ def test_language_promotion_gate_wer_and_target_wer(training):
 
     # Case 1: Overall WER degraded (candidate > stock) -> not promotable
     comp_file.write_text(json.dumps({
+        "candidate_sha256": model_lifecycle._file_sha256(Path(candidate["model_path"])),
+        "visual_model": "stock", "visual_model_sha256": None,
         "variants": {
             "stock": {"metrics": {"wer": 0.2, "target_wer": 0.1}},
             "candidate": {"metrics": {"wer": 0.3, "target_wer": 0.05}}
@@ -275,6 +359,8 @@ def test_language_promotion_gate_wer_and_target_wer(training):
 
     # Case 2: Overall WER passed, but target_wer increased -> not promotable
     comp_file.write_text(json.dumps({
+        "candidate_sha256": model_lifecycle._file_sha256(Path(candidate["model_path"])),
+        "visual_model": "stock", "visual_model_sha256": None,
         "variants": {
             "stock": {"metrics": {"wer": 0.3, "target_wer": 0.1}},
             "candidate": {"metrics": {"wer": 0.2, "target_wer": 0.2}}
@@ -286,6 +372,8 @@ def test_language_promotion_gate_wer_and_target_wer(training):
 
     # Case 3: Both WER <= stock and target_wer <= stock -> promotable & promote succeeds
     comp_file.write_text(json.dumps({
+        "candidate_sha256": model_lifecycle._file_sha256(Path(candidate["model_path"])),
+        "visual_model": "stock", "visual_model_sha256": None,
         "variants": {
             "stock": {"metrics": {"wer": 0.3, "target_wer": 0.1}},
             "candidate": {"metrics": {"wer": 0.25, "target_wer": 0.1}}

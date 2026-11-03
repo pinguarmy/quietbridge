@@ -322,6 +322,34 @@ def test_profile_switching_with_personal_models_and_identity(profile_env):
         runtime.close()
 
 
+def test_same_profile_reload_refreshes_saved_weights_without_switching_users(profile_env):
+    import hashlib
+    manager, default_p, alice_p, _ = profile_env
+    runtime = Runtime(rehearsal=True, profile=default_p, profile_manager=manager)
+    server = make_server(runtime, 0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        _, initial = http_get(url, "/api/state")
+        token = initial["token"]
+        http_post(url, "/api/profile/select", {"id": "alice"}, token)
+        saved_lm = profile_language_model(alice_p)
+        saved_lm.parent.mkdir(parents=True, exist_ok=True)
+        saved_lm.write_bytes(b"newly saved language weights")
+        assert runtime.snapshot()["lip_model"].get("language_model_sha256") is None
+        status, reloaded = http_post(url, "/api/profile/select", {"id": "alice"}, token)
+        assert status == 200
+        assert reloaded["profile_id"] == "alice"
+        assert reloaded["lip_model"]["language_model_sha256"] == hashlib.sha256(saved_lm.read_bytes()).hexdigest()
+        assert reloaded["revision"] > initial["revision"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+        runtime.close()
+
+
 def test_explicit_cli_model_precedence(profile_env, tmp_path):
     manager, default_p, alice_p, bob_p = profile_env
 
