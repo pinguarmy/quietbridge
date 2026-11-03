@@ -105,12 +105,15 @@ class Runtime:
                  profile=None, configuration_warning="", max_utterance_seconds=30.0,
                  lip_activity_config=None, profile_manager=None,
                  explicit_lip_model=None, explicit_lip_language_model=None,
-                 explicit_motion_model=None, explicit_vocabulary_path=None):
+                 explicit_motion_model=None, explicit_vocabulary_path=None, sign_model=None):
         if rehearsal and browser_camera:
             raise ValueError("Browser camera and rehearsal modes are mutually exclusive")
         self.rehearsal = rehearsal
         self.browser_camera = browser_camera
         self.camera_source = camera
+        # Standard-language checkpoints are an explicit backend, never an alias
+        # for the stock poses or a personal motion model.
+        self.isolated_sign_model_path = Path(sign_model).expanduser() if sign_model is not None else None
         self.profile = profile
         if profile_manager is not None:
             self.profile_manager = profile_manager
@@ -137,8 +140,8 @@ class Runtime:
             raise ValueError("Maximum utterance length must be at least one second")
         self.lip_activity_config = lip_activity_config or LipActivityConfig()
         self._lip_activity = LipActivityDetector(self.lip_activity_config)
-        self.vocabulary = load_vocabulary() if vocabulary is None else vocabulary
-        if self.motion_model_path and not rehearsal and vocabulary is None:
+        self.vocabulary = {} if self.isolated_sign_model_path else (load_vocabulary() if vocabulary is None else vocabulary)
+        if self.motion_model_path and not self.isolated_sign_model_path and not rehearsal and vocabulary is None:
             # Stock pose meanings must never leak into the custom motion session.
             self.vocabulary = {label: {"display_name": phrase, "phrase": phrase,
                                "matches": [phrase], "enabled": True, "verified": False}
@@ -204,7 +207,8 @@ class Runtime:
             "auto_recognition": False,
             "session_active": False, "session_finalizing": False,
             "session_text": "", "session_chunks": [], "session_gestures": [],
-            "gesture_model": "personal motion-v2 (experimental)" if self.motion_model_path else "stock",
+            "gesture_model": "isolated sign model (experimental)" if self.isolated_sign_model_path else "personal motion-v2 (experimental)" if self.motion_model_path else "stock",
+            "sign_model": {"status": "loading"} if self.isolated_sign_model_path else None,
             "cleanup": {"status": "disabled", "suggestion": "", "latency_ms": 0,
                         "error": "", "source_revision": 0},
         }
@@ -241,9 +245,9 @@ class Runtime:
         workers = [] if self.browser_camera else [("capture", self._capture)]
         workers += [("hands", self._hands), *([("lips", self._lips)] if self.enable_lips else [])]
         for name, target in workers:
-            def run_worker(t=target):
+            def run_worker(t=target, worker_stop=self._worker_stop):
                 try:
-                    t(worker_gen, self._worker_stop)
+                    t(worker_gen, worker_stop)
                 except TypeError:
                     t()
             thread = threading.Thread(target=run_worker, name=f"demo-{name}", daemon=True)
@@ -277,6 +281,9 @@ class Runtime:
     def configure_cleanup(self, data):
         with self.lock:
             config = self.cleanup.configure(data)
+            previous = self.state["cleanup"].get("suggestion", "")
+            if previous and self.confirmed_revision != self.revision and previous != self.state["decision"]["text"]:
+                self.state["alternatives"] = [text for text in self.state["alternatives"] if text != previous]
             self._cleanup_generation += 1
             self.state["cleanup"] = {"status": "idle" if config["enabled"] else "disabled",
                                      "suggestion": "", "latency_ms": 0, "error": "",
@@ -316,7 +323,7 @@ class Runtime:
         labels = list(dict.fromkeys(e.label for e in usable_signs(events, self._fusion_vocabulary, now, since)))
         if cleanup_labels is not None:
             labels = list(dict.fromkeys([*labels, *cleanup_labels]))
-        candidates = list(lips.candidates) if lips is not None else []
+        candidates = [decision.text] if decision.text else []
         pending = bool(candidates) and not self.state["session_active"] and self.cleanup.submit(
             self._cleanup_generation, self.revision, candidates, labels, self._cleanup_result)
         self.state["cleanup"] = {
@@ -403,10 +410,8 @@ class Runtime:
                     if not (self.state["session_finalizing"] and self._window_motion):
                         self.events.clear()
                     self.state["last_sign"] = None
-                    try:
-                        self.hand_frames.get_nowait()
-                    except queue.Empty:
-                        pass
+                    # The active hand window still needs its queued tail. Idle
+                    # preview frames can be discarded by the worker instead.
             elif name == "mode":
                 if self.state["phase"] != "idle":
                     raise ValueError("Finish the current recording before changing mode")
@@ -421,7 +426,7 @@ class Runtime:
                 if self.rehearsal:
                     raise ValueError("Use synthetic input controls in rehearsal mode")
                 mode = self.state["mode"]
-                motion = self.state["sign_input"] == "motion" and not self._starting_auto_chunk
+                motion = self.state["sign_input"] in {"motion", "isolated"} and not self._starting_auto_chunk
                 if mode == "signs" and not motion:
                     raise ValueError("This gesture mode is automatic; only custom window mode uses Record")
                 if self.state["phase"] != "idle":
@@ -469,7 +474,7 @@ class Runtime:
                 self.window_generation += 1
                 cancelled_generation = self.record_generation
                 self.record_generation = None
-                if self.state["sign_input"] == "motion":
+                if self.state["sign_input"] in {"motion", "isolated"}:
                     self.hand_control.put(("cancel", None, cancelled_generation))
                 self.record_start = self.release_ms = self.finish_at = None
                 self._window_motion = False
@@ -621,7 +626,7 @@ class Runtime:
         """Lip activity endpoint state machine for continuous camera sessions."""
         with self.lock:
             if (not self.state["auto_recognition"] or self._camera_session_active is not True
-                    or (self.state["mode"] != "lips" and self.state["sign_input"] == "motion")
+                    or (self.state["mode"] != "lips" and self.state["sign_input"] in {"motion", "isolated"})
                     or self.state["mode"] == "signs" or self.state["lips"] != "ready"
                     or self.state["camera"] != "ready"):
                 return
@@ -748,17 +753,23 @@ class Runtime:
         recognizer = None
         active_generation = None
         try:
-            module = importlib.import_module("hackathon.signs.recognizer")
-            if self.motion_model_path is not None:
-                recognizer = module.SignRecognizer(motion_model_path=self.motion_model_path)
+            if self.isolated_sign_model_path is not None:
+                from .signs.isolated import IsolatedSignRecognizer
+                recognizer = IsolatedSignRecognizer(self.isolated_sign_model_path)
             else:
-                recognizer = module.SignRecognizer()
-            motion = getattr(recognizer, "_motion", None) is not None
+                module = importlib.import_module("hackathon.signs.recognizer")
+                recognizer = module.SignRecognizer(motion_model_path=self.motion_model_path) if self.motion_model_path is not None else module.SignRecognizer()
+            isolated = self.isolated_sign_model_path is not None
+            motion = isolated or getattr(recognizer, "_motion", None) is not None
             motion_auto = motion and getattr(recognizer, "motion_auto", False)
             with self.lock:
                 if worker_gen == self._worker_generation:
+                    if isolated:
+                        self.vocabulary = {label: entry for label, entry in recognizer.vocabulary.items() if entry["enabled"]}
+                        self._fusion_vocabulary = self.vocabulary
+                        self.state["sign_model"] = recognizer.model_info
                     self.state.update(signs="ready",
-                                      sign_input="motion_auto" if motion_auto else "motion" if motion else "stock")
+                                      sign_input="isolated" if isolated else "motion_auto" if motion_auto else "motion" if motion else "stock")
             last = 0
             active_start = None
             active_generation = None
@@ -797,7 +808,7 @@ class Runtime:
                         camera_stopped = self.browser_camera and self._camera_session_active is False
                         shared_end = (self.finish_at
                                       if self.record_generation == active_generation else None)
-                    if camera_stopped:
+                    if camera_stopped and not (motion and active_start is not None):
                         packet = None
                     window_end = pending_finish if pending_finish is not None else shared_end
                     motion_boundary = getattr(recognizer, "_motion_last_boundary_ms", None)
@@ -833,6 +844,11 @@ class Runtime:
                         pending_finish = end
                 if pending_finish is None or now < pending_finish:
                     continue
+                # Finish only after all chronological frames through this window
+                # have drained, including frames uploaded just before camera stop.
+                with self.hand_frames.mutex:
+                    if self.hand_frames.queue and self.hand_frames.queue[0][1] <= pending_finish:
+                        continue
                 events = recognizer.finish(pending_finish)
                 with self.lock:
                     valid = (worker_gen == self._worker_generation
@@ -840,6 +856,8 @@ class Runtime:
                              and self.record_start == active_start
                              and self.state["phase"] in {"tail", "decoding"})
                     if valid:
+                        if isolated:
+                            self.state["sign_diagnostics"] = recognizer.last_diagnostics
                         self._window_motion_done = True
                         # Keep the runtime lock through event storage and sign-only
                         # publication so cancel cannot turn a late finish into idle input.
@@ -1127,7 +1145,7 @@ class Runtime:
                 self.motion_model_path = target_motion
                 self.lip_model_path = target_lip
                 self.lip_language_model_path = target_lm
-                self.vocabulary = new_vocab
+                self.vocabulary = {} if self.isolated_sign_model_path else new_vocab
                 self._fusion_vocabulary = ({k: {**v, "verified": True} for k, v in self.vocabulary.items()}
                                            if self.rehearsal else self.vocabulary)
 
@@ -1149,7 +1167,9 @@ class Runtime:
                     "signs": "rehearsal" if self.rehearsal else "loading",
                     "sign_input": "rehearsal" if self.rehearsal else "loading",
                     "lip_model": self._rehearsal_lip_model_info() if self.rehearsal else {"mode": "stock", "status": "loading"},
-                    "gesture_model": "personal motion-v2 (experimental)" if self.motion_model_path else "stock",
+                    "gesture_model": "isolated sign model (experimental)" if self.isolated_sign_model_path else "personal motion-v2 (experimental)" if self.motion_model_path else "stock",
+                    "sign_model": {"status": "loading"} if self.isolated_sign_model_path else None,
+                    "sign_diagnostics": None,
                     "camera_error": "", "lip_error": "", "sign_error": "", "error": "",
                     "decision": asdict(Decision("", "unavailable", "sign_only", "local")),
                     "candidates": [], "candidate_scores": [], "alternatives": [], "last_sign": None,

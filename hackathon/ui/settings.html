@@ -23,17 +23,18 @@
   <section class="settings-section"><h2>How would you like to communicate?</h2><div class="mode-switch" role="group" aria-label="Input mode"><button data-mode="combined">Lips and gestures</button><button data-mode="lips">Lips only</button><button data-mode="signs">Gestures only</button></div><p id="mode-hint" class="hint">Either input can work on its own.</p></section>
   <section id="gestures" class="settings-section">
     <h2>Your gesture vocabulary</h2><p id="vocabulary-summary" class="section-copy">Checking your gestures…</p><div id="labels" class="label-list"></div>
-    <p class="support-note"><strong>This is a personal communication tool.</strong> It recognizes the enabled gestures above and silent English speech. It does not translate full BSL, ASL or other sign languages. A saved gesture name is not proof of sign-language support.</p>
+    <p id="sign-model-status" class="support-note" role="status">Checking the sign-language model…</p>
+    <p class="support-note">An explicitly installed BSL or ASL video model can provide isolated sign concepts alongside lips. Standard signs, personal gestures and stock poses are different backends. Full sentences, fingerspelling and non-manual grammar are not yet supported. A saved gesture name is not proof of sign-language support.</p>
   </section>
   <details id="cleanup" class="settings-section">
-    <summary id="cleanup-heading">Optional AI wording suggestions</summary>
-    <p class="section-copy">Off unless you enable it. Suggestions cannot verify what you meant. Your original words remain available.</p>
+    <summary id="cleanup-heading">Optional AI formatting suggestions</summary>
+    <p class="section-copy">Off unless you enable it. It may adjust spacing or add a final period, but cannot change words or verify your intent. Wrong words need your edit.</p>
     <form id="cleanup-settings-form" class="preview-form">
       <label>API base URL<input id="cleanup-base-url" type="url" placeholder="https://.../v1" autocomplete="url"></label>
       <label>Model<input id="cleanup-model" type="text" autocomplete="off"></label>
       <label>API key<input id="cleanup-api-key" type="password" autocomplete="off"></label>
       <label>Processing speed<select id="cleanup-tier"><option value="default">Standard</option><option value="fast">Fast · premium pricing</option></select></label>
-      <label><input id="cleanup-enabled" type="checkbox"> Enable AI wording suggestions</label>
+      <label><input id="cleanup-enabled" type="checkbox"> Enable AI formatting suggestions</label>
       <p class="hint">Sends text candidates and gesture labels to your provider. Never video or audio. The key stays in server memory.</p>
       <div><button id="cleanup-save" type="submit">Save preferences</button> <button id="cleanup-test" type="button">Test connection</button></div>
       <p id="cleanup-settings-status" class="hint" role="status" aria-live="polite"></p><p id="cleanup-settings-error" class="error" role="alert"></p>

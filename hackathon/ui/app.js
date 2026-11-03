@@ -2,7 +2,7 @@ const $ = id => document.getElementById(id);
 const text = (id, value) => { const el = $(id), next = String(value ?? ''); if (el && el.textContent !== next) el.textContent = next; };
 const hide = (id, value) => { if ($(id)) $(id).hidden = value; };
 let state = null, token = '', actionChain = Promise.resolve(), pointerHeld = false, keyHeld = false;
-let speaking = false, pendingActions = 0, renderedRevision = null, renderedAlternatives = '', initialized = false, chosenText = null, connectionLost = false;
+let speaking = false, pendingActions = 0, renderedRevision = null, renderedAlternatives = '', renderedVocabulary = '', initialized = false, chosenText = null, connectionLost = false;
 let browserCameraStream = null, browserCameraStarting = false, browserCameraStopping = false, browserFrameTimer = null, browserFrameCanvas = document.createElement('canvas');
 browserFrameCanvas.width = 960; browserFrameCanvas.height = 720;
 async function uploadBrowserFrames() {
@@ -105,6 +105,8 @@ function render(s) {
   text('camera-status', s.camera); text('lip-status', s.lips); text('hand-status', s.signs);
   text('last-sign', s.last_sign ? s.last_sign.label + ' · ' + s.last_sign.score.toFixed(2) : '—');
   text('sign-input', s.sign_input || '—');
+  const signModel = s.sign_model;
+  text('sign-model-status', signModel?.language ? `${signModel.language.toUpperCase()} isolated signs · experimental${signModel.sha256 ? ' · ' + signModel.sha256.slice(0,12) : ''}. Hold for one sign. Not continuous sentence translation.` : 'Standard sign models are not loaded. The current backend recognizes only its configured gestures.');
   text('profile-name', s.profile_name || 'Stock configuration');
   const profileSelect = $('profile-select');
   if (profileSelect && profilesLoaded && !profileSelect.matches(':focus') && s.profile_id) {
@@ -139,7 +141,7 @@ function render(s) {
   text('preview-status', s.rehearsal ? 'Preview · camera off' : ready || browserCameraStream ? 'Camera on' : browserCameraAvailable ? 'Waiting for browser camera' : s.camera === 'unavailable' ? 'Camera unavailable' : 'Getting ready…');
   text('camera-message', s.rehearsal ? 'Your camera is off in preview.' : browserCameraAvailable && !browserCameraStream ? 'Select Start camera to share this browser camera.' : s.camera === 'unavailable' ? 'Check camera access in Settings.' : 'Getting your camera ready…');
   const record = $('record');
-  const motionInput = s.sign_input === 'motion';
+  const motionInput = ['motion', 'isolated'].includes(s.sign_input);
   const explicitMotionSession = motionInput && s.mode !== 'lips' && s.session_active === true;
   const needsLips = s.mode === 'lips' || s.mode === 'combined';
   if (record) {
@@ -163,7 +165,7 @@ function render(s) {
     text('entry-hint', 'Type a message here, or try a sample in Settings. No camera is used.');
     text('record-hint', 'Preview mode does not test recognition.');
   } else if (explicitMotionSession) {
-    text('entry-hint', 'Hold to capture one gesture and its words together. Release to review.');
+    text('entry-hint', s.sign_input === 'isolated' ? 'Hold for one sign and its words. Keep face, upper body and both hands in view. Release to review.' : 'Hold to capture one gesture and its words together. Release to review.');
     text('record-hint', 'Hold the button or Space. Finish message stops the camera.');
   } else if ((s.session_active === true || s.auto_recognition === true) && !s.rehearsal) {
     text('record-hint', 'Mouth a short phrase. Choose Finish message when you are done.');
@@ -207,6 +209,7 @@ function render(s) {
       });
     }
   }
+  if (chosenText && !s.alternatives.includes(chosenText) && chosenText !== d.text) chosenText = d.reason === 'conflict' ? null : (d.text || null);
   if (!review && s.cleanup?.status !== 'ready' && revisionChanged) chosenText = d.text || null;
   if ($('alternatives') && !$('cleanup-status')) {
     const status = document.createElement('p'); status.id = 'cleanup-status'; status.className = 'hint';
@@ -222,7 +225,11 @@ function render(s) {
   [['metric-camera-fps','camera_input_fps'],['metric-lip-fps','lip_capture_fps']].forEach(([id,key]) => text(id, s.metrics[key] == null ? '—' : s.metrics[key] + ' fps'));
   text('metric-frames', s.metrics.lip_raw_frames == null ? '—' : s.metrics.lip_raw_frames);
   text('metric-gap', s.metrics.lip_max_frame_gap_ms == null ? '—' : s.metrics.lip_max_frame_gap_ms + ' ms');
-  if (!initialized && $('labels')) {
+  const vocabularyKey = JSON.stringify(s.vocabulary);
+  if ((!initialized || renderedVocabulary !== vocabularyKey) && $('labels')) {
+    renderedVocabulary = vocabularyKey;
+    $('labels').replaceChildren();
+    if ($('test-label')) $('test-label').replaceChildren(new Option('No gesture', ''));
     const entries = Object.entries(s.vocabulary), enabled = entries.filter(([,v]) => v.enabled ?? v.verified);
     text('vocabulary-summary', enabled.length ? enabled.length + ' gesture mappings are enabled. Review the message before speaking. Live accuracy is still being checked.' : 'No gesture mappings are enabled yet.');
     entries.forEach(([label, entry]) => {

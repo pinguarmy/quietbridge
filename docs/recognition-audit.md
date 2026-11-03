@@ -4,7 +4,7 @@ Date: 2026-11-03. Scope: current local application, personal recording workflow,
 
 ## Conclusion
 
-QuietBridge is a personal communication aid for silent English speech and a small configured gesture vocabulary. It is not a full BSL, ASL or multilingual sign-language translator. Splitting the work between lip and hand models is sensible, but does not guarantee higher accuracy. The system must show a gain over both single-input baselines on the same independent recordings before claiming one.
+QuietBridge is a personal communication aid for silent English speech, personal gestures and an explicit experimental standard-sign video backend. The BSL-1K path now loads real external weights for isolated word-level windows alongside lips; setup and the limits of actual verification are in [standard-sign support](sign-language-support.md). It is not a full BSL, ASL or multilingual sign-language translator. Splitting the work between lip and hand models is sensible, but does not guarantee higher accuracy. The system must show a gain over both single-input baselines on the same independent recordings before claiming one.
 
 BSL has its own grammar and uses handshapes, facial expressions and body language. ASL is also a distinct natural language, not English performed with the hands. Sign languages are not universal.[1][2] A list of gesture names cannot substitute for language-specific sequence recognition and translation.
 
@@ -14,13 +14,22 @@ BSL has its own grammar and uses handshapes, facial expressions and body languag
 | --- | --- | --- |
 | Stock hand model | Four mapped poses: thumb up, thumb down, open palm and pointing up | Not a BSL/ASL vocabulary or fingerspelling decoder |
 | Personal motion model | Matches one bounded movement against personal hand-landmark templates; rejects REST and unmatched inputs | One label per explicit recording window; no continuous sign-language grammar |
+| Explicit sign-video backend | Loads a local hashed TorchScript bundle, including exported BSL-1K 1,064-class weights; shares capture window with lips | Engineering smoke only, selected concepts require confirmation, no trained REST/unknown or sentence grammar |
 | Lip reader | Ranked text candidates from aligned mouth crops, with optional personal visual/language weights | Ambiguous visual speech; candidate scores are not calibrated probabilities |
 | Fusion | Keyword reranking and a single user-declared template slot | No learned word-level alignment or general translation |
 | Speech | Local text-to-speech after explicit user action | Does not establish that recognition was correct |
 
 Evidence: [stock pose map](../hackathon/signs/recognizer.py#L43-L58), [one-event motion classification](../hackathon/signs/recognizer.py#L250-L296), [hand-only features](../hackathon/signs/motion.py#L143-L191), [fusion rules](../hackathon/fusion.py).
 
-The personal motion input contains two sets of 21 hand landmarks and presence masks. It does not encode body posture or facial grammar as sign-language features. The separate lip model is not a non-manual sign-language grammar model. Supporting full BSL would require a BSL-specific dataset, temporal language model, non-manual features, fingerspelling handling where needed, and validation with BSL users. ASL and other sign languages need their own validated language paths. This is a proposed future project, not a switch already present in Settings.
+The personal motion input contains two sets of 21 hand landmarks and presence masks. It does not encode body posture or facial grammar as sign-language features. The separate lip model is not a non-manual sign-language grammar model. Supporting full BSL would require a BSL-specific dataset, temporal language model, non-manual features, fingerspelling handling where needed, and validation with BSL users. ASL and other sign languages need their own validated language paths. Full translation remains future work. The explicit isolated-sign backend is now implemented and distinguished from personal gestures in Settings; it does not provide those missing language capabilities.
+
+## Standard-sign and runtime follow-up, 2026-11-03 evening
+
+Standard BSL word-level input is now an explicit external video-model backend, not a relabelled personal gesture. Actual BSL-1K weights were loaded and converted, with exact logits equivalence on one public clip; the public whole-window sample was low-score and produced no text. The real lip and sign models loaded together in an isolated server. This establishes engineering integration, not useful signer accuracy or permission to distribute the external model. See [setup and evidence](sign-language-support.md).
+
+The optional AI client still forced a fixed hackathon welcome phrase and rejected ordinary sentences. That stale prompt/whitelist is removed. Formatting now preserves all original words and symbols, uses the current fused message, and discards unselected AI alternatives after settings changes. It does not repair wrong words. The full suite also covers disabled/stale UI choices, real TorchScript bundle conversion, short/gapped/overflowed sign capture and chronological hand-tail draining on camera stop.
+
+The hand worker previously finished after processing only one queued tail packet, and camera stop explicitly discarded another queued frame. It now drains all frames through the shared window before classifying; a gated worker regression checks every timestamp. Worker stop events are captured when each thread is created rather than read from later mutable runtime state.
 
 ## Follow-up audit, 2026-11-03 afternoon
 

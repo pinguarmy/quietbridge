@@ -214,6 +214,7 @@ def main():
     parser.add_argument("--profile", help="Profile id; also selects its trained custom motion model when present")
     parser.add_argument("--lip-model", type=Path, help="Explicit personal VSR delta; stock remains the default")
     parser.add_argument("--lip-language-model", type=Path, help="Explicit personal language-model weights")
+    parser.add_argument("--sign-model", type=Path, help="Explicit local BSL/ASL isolated-sign manifest; replaces stock/personal gesture backend")
     parser.add_argument("--max-utterance-seconds", type=float, default=30.0)
     args = parser.parse_args()
     from .profiles import (ProfileManager, profile_language_model,
@@ -230,7 +231,7 @@ def main():
                       camera=args.camera, enable_lips=not args.sign_only,
                       vocabulary=vocabulary, lip_model=lip_model,
                       lip_language_model=language_model,
-                      motion_model=motion_model,
+                      motion_model=motion_model, sign_model=args.sign_model,
                       profile_name=profile.name if use_profile else None,
                       profile=profile if use_profile else None,
                       configuration_warning=profile_warning,

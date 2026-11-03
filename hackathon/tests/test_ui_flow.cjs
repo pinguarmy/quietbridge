@@ -64,6 +64,13 @@ test('reloading models targets the running profile and reports warmup truthfully
   assert.equal(elements.get('profile-reload-btn').disabled, false);
 });
 
+test('isolated sign backend retains shared-window capture controls', () => {
+  const { elements, render } = screen();
+  render({ sign_input: 'isolated', session_active: true, auto_recognition: true });
+  assert.equal(elements.get('record').hidden, false);
+  assert.equal(elements.get('record').disabled, false);
+});
+
 test('custom gestures retain a usable record control inside a camera session', () => {
   const { elements, render } = screen();
   render({ sign_input: 'motion', session_active: true, auto_recognition: true });
@@ -87,6 +94,25 @@ test('conflicts require a choice and AI wording never replaces the selected mess
   assert.match(elements.get('alternatives').children[1].textContent, /AI suggestion/);
   elements.get('alternatives').children[1].onclick();
   assert.equal(elements.get('message').textContent, 'AI words');
+});
+
+test('removed AI alternative is no longer selected after disable', () => {
+  const { elements, render } = screen();
+  const decision = { text: 'Please wait', status: 'confirmation_needed', reason: 'lip_only' };
+  render({ decision, alternatives: ['Please wait', 'Please wait.'], cleanup: { status: 'ready', suggestion: 'Please wait.', source_revision: 1 } });
+  elements.get('alternatives').children[1].onclick();
+  assert.equal(elements.get('message').textContent, 'Please wait.');
+  render({ decision, alternatives: ['Please wait'], cleanup: { status: 'disabled' } });
+  assert.equal(elements.get('message').textContent, 'Please wait');
+});
+
+test('sign vocabulary refreshes when a slow model finishes loading', () => {
+  const { elements, render } = screen('settings.html');
+  render({ vocabulary: {}, signs: 'loading' });
+  assert.equal(elements.get('labels').children.length, 0);
+  render({ vocabulary: { BSL_WATER: { phrase: 'water', matches: ['water'], enabled: true, verified: false } }, signs: 'ready', sign_input: 'isolated', sign_model: { language: 'bsl', sha256: 'a'.repeat(64) } });
+  assert.equal(elements.get('labels').children.length, 1);
+  assert.match(elements.get('sign-model-status').textContent, /BSL isolated/);
 });
 
 test('typed messages use the current revision without speaking or enabling learning', async () => {

@@ -144,6 +144,19 @@ def test_frame_rejects_wrong_content_type(conn, server):
     assert "error" in data
 
 
+def test_frame_rejects_oversize_length_before_body(conn, server):
+    # Header-only request checks the actual 413 contract without OS-dependent
+    # mid-upload resets masking the response.
+    conn.putrequest("POST", "/api/frame")
+    conn.putheader("X-QuietBridge-Token", server.token)
+    conn.putheader("Content-Type", "image/jpeg")
+    conn.putheader("Content-Length", str(513 * 1024))
+    conn.endheaders()
+    response = conn.getresponse()
+    assert response.status == 413
+    assert "too large" in json.loads(response.read())["error"]
+
+
 def test_frame_rejects_oversize_body(conn, server):
     # The server closes the connection on an over-limit Content-Length; the
     # client may therefore see either the 413 response or a reset mid-write.
@@ -151,7 +164,7 @@ def test_frame_rejects_oversize_body(conn, server):
         response, _ = _json(conn, server, "POST", "/api/frame", body=b"x" * (513 * 1024),
                             headers={"Content-Type": "image/jpeg"})
         assert response.status == 413
-    except (ConnectionResetError, BrokenPipeError):
+    except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
         pass
     # The server itself is still healthy afterwards.
     connection = http.client.HTTPConnection("127.0.0.1", server.server_address[1])

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Build a local-first assistive-communication tool that a person can use repeatedly: silent lip movements and custom gestures produce reviewable text, then local speech. Each user has an isolated profile, data and model candidates. This is not a general BSL/ASL translator.
+Build a local-first assistive-communication tool that a person can use repeatedly: silent lip movements, standard sign-language concepts and personal gestures produce reviewable text, then local speech. Each user has an isolated profile, data and model candidates. Standard sign recognition is a product goal. The explicit BSL I3D backend currently handles isolated sign windows, not continuous BSL/ASL sentences; do not equate a named gesture with a validated standard sign.
 
 The product lead coordinates architecture and shared files. Delegated work must have disjoint write scopes and return actual checks. Do not restore hackathon-only scope or fixed demo phrases.
 
@@ -20,6 +20,7 @@ The product lead coordinates architecture and shared files. Delegated work must 
 - Reuse Auto-AVSR and face processing from `lipflow/`; keep product work in `hackathon/`.
 - One camera feeds independent workers. Idle preview keeps only the latest frame; active capture uses a bounded 90-frame chronological buffer and reports overflow drops. Record actual input fps, raw frame count and gaps; resampling to 25 fps does not create missing motion.
 - Lip results retain ordered candidates, decoder scores and capture timing. Decoder scores are not calibrated probabilities. Camera sessions use mouth-activity endpoints with bounded pre-roll; geometric mouth opening is a segmentation hint, not speech confidence.
+- Explicit `--sign-model` selects a local, hashed isolated-sign bundle instead of stock/personal gestures. Use language-specific class ordering and preprocessing. Standard signs share an explicit window with lips and always need confirmation. Do not download, redistribute or activate artifacts without checking their separate source/weight/data rights. A high softmax score is not an UNKNOWN/REST guarantee.
 - Stock gestures remain automatic. Custom MotionModel gestures default to an explicit start/release window and emit at most one accepted event per window. Optional `motion_auto` movement/rest segmentation is experimental and disabled by default. REST and rejected motions stay silent.
 - Combined recording uses a generation ID. Lips wait for the current motion result before fusion. Cancel invalidates late results from either worker.
 - Fusion preserves lip ranking, reranks on gesture agreement, reports partial agreement, and composes only supported gesture phrases in time order. Unknown input contributes no text. Intent templates fill a declared gesture slot only on exact static-context matches; never erase unrecognized words.

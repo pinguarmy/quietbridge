@@ -68,6 +68,23 @@ class CleanupRuntimeTests(unittest.TestCase):
         self.cleanup.finish(1, suggestion="Second.")
         self.assertIn("Second.", self.runtime.snapshot()["alternatives"])
 
+    def test_disabling_removes_unselected_api_alternative(self):
+        self.publish("Please wait")
+        self.cleanup.finish(0, suggestion="Please wait.")
+        with patch.object(self.cleanup, "configure", create=True, return_value={"enabled": False}):
+            self.runtime.configure_cleanup({"enabled": False})
+        state = self.runtime.snapshot()
+        self.assertEqual(state["cleanup"]["status"], "disabled")
+        self.assertNotIn("Please wait.", state["alternatives"])
+        self.assertIn("Please wait", state["alternatives"])
+
+    def test_formats_selected_fusion_proposal_not_different_lip_candidate(self):
+        from hackathon.contracts import LipResult, SignEvent
+        self.runtime._fusion_vocabulary = {"WATER": {"phrase": "water", "matches": ["water"], "verified": False, "enabled": True}}
+        self.runtime._publish(LipResult(["tea", "water"], 1), [SignEvent("WATER", .9, 1000, 1500, True)], 1600)
+        self.assertEqual(self.runtime.state["decision"]["text"], "water")
+        self.assertEqual(self.cleanup.jobs[-1][2], ["water"])
+
     def test_failure_preserves_local_result(self):
         original = self.publish("local text")
         self.cleanup.finish(0, error="Service unavailable")
@@ -99,7 +116,7 @@ class CleanupWorkerTests(unittest.TestCase):
                     entered.set()
                     if not release.wait(2):
                         raise ValueError("Test timed out waiting for release")
-                    return "Cleaned text."
+                    return "local text."
 
                 def callback(*args):
                     try:
@@ -121,10 +138,10 @@ class CleanupWorkerTests(unittest.TestCase):
                         self.assertTrue(finished.wait(2), "worker did not finish")
                         state = runtime.snapshot()
                         if cancelled:
-                            self.assertNotIn("Cleaned text.", state["alternatives"])
+                            self.assertNotIn("local text.", state["alternatives"])
                             self.assertEqual(state["cleanup"]["suggestion"], "")
                         else:
-                            self.assertIn("Cleaned text.", state["alternatives"])
+                            self.assertIn("local text.", state["alternatives"])
                             self.assertEqual(state["cleanup"]["status"], "ready")
                 finally:
                     release.set()

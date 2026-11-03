@@ -30,7 +30,8 @@ def inspect_source_npz(
         return {"status": "invalid", "relative_path": str(path_val), "session_id": None, "trial_id": None,
                 "reason": f"source escapes profile directory: {exc}"}
 
-    rel_str = str(relative)
+    # Persist portable relative references; native filesystem paths stay Path.
+    rel_str = relative.as_posix()
     if not path.is_file() or path.suffix != ".npz":
         return {"status": "invalid", "relative_path": rel_str, "session_id": None, "trial_id": None,
                 "reason": f"source is not an existing NPZ file inside profile: {rel_str}"}

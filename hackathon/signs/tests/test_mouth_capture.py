@@ -1,4 +1,6 @@
 """MouthCapture tests with a fake tracker — no camera, no real model, no network."""
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -66,7 +68,8 @@ def test_save_contents(cap, tmp_path):
     assert snap["saved_count"] == 1 and snap["recording"] is False
     assert snap["mouth_box"] is None and snap["quality"] == 1.0
     path = snap["last_saved"]
-    assert path.startswith(str(tmp_path / "train")) and path.split("/")[-1].startswith("s1_")
+    assert Path(path).parent == tmp_path / "train"
+    assert Path(path).name.startswith("s1_")
     with np.load(path, allow_pickle=False) as z:
         assert z["text"].shape == () and str(z["text"]) == "hello world"
         assert z["rois"].shape == (20, 96, 96) and z["rois"].dtype == np.uint8

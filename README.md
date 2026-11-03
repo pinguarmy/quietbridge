@@ -1,8 +1,8 @@
 # QuietBridge
 
-**Lips and custom gestures, turned into a voice.** A local-first communication tool under active development.
+**Lips, sign concepts and personal gestures, turned into a voice.** A local-first communication tool under active development.
 
-One webcam supports silent lip movements, stock gestures or a personal dynamic-gesture model. The person reviews the proposed text and presses **Speak** for on-device speech. QuietBridge is not a general sign-language translator.
+One webcam feeds silent lip reading and either stock poses, a personal gesture model or an explicitly installed isolated-sign video model. The person reviews the proposed text and presses **Speak** for on-device speech. Standard sign-language support is part of the product direction. The experimental BSL backend is word-level recognition, not full sentence translation or validated daily-use BSL support.
 
 ## Product workflow
 
@@ -59,6 +59,19 @@ uv run python -m hackathon.server --browser-camera --profile alice \
 The main app loads promoted `models/motion.npz`, `models/lip.pth` and `models/lm.pth` from the selected profile at startup or profile reload. Saving a model in Personalize does not change a recognizer already in memory. Stop the camera, open Settings and choose **Reload current models**. Reload clears the draft and preserves explicit command-line overrides. Wait for model readiness before starting another recording. Settings shows the active profile, separate visual/language model identities, actual frame rate, frame gaps and latency. The main recording limit defaults to 30 seconds and can be changed with `--max-utterance-seconds`.
 
 You can edit an incorrect message before speaking. Applying a correction never speaks automatically. Only an explicit learning choice stores it in that profile's local `corrections.jsonl`; otherwise it remains an in-memory correction. Future language-model candidates include those approved corrected texts in training and report their count. Known validation/test sources and contradictory source metadata are excluded from correction learning, including historical records. Training reports source coverage, excluded records and source session/trial IDs. Consented day-to-day corrections without a recording source remain usable, but are marked as unknown provenance. This is not proof of evaluation independence; do not learn from a held-out session.
+
+## Standard sign language with lips
+
+The main runtime now accepts an explicit local sign-video bundle:
+
+```sh
+uv run python -m hackathon.server --browser-camera \
+  --sign-model /absolute/path/to/bsl-bundle/manifest.json
+```
+
+This replaces the stock/personal hand classifier, not the lip reader. Start the camera, hold Record for **one sign and its words**, release, then finish the message and review. Both workers share the window. Only enabled class mappings can contribute a sign concept; low scores, unmapped classes, short capture, large gaps and overflow stay silent. This classifier has no trained REST/unknown class, so thresholds alone cannot guarantee safe rejection of arbitrary movements. All standard-sign output requires confirmation.
+
+The BSL-1K exporter consumes an externally installed upstream source, checkpoint and its exact class-ordered JSON labels. It does not download, bundle or license them. See [standard-sign setup, sources and validation limits](docs/sign-language-support.md) before exporting. Explicit model load failure is visible; it never falls back to stock and calls that BSL. ASL is an allowed manifest language, but no ASL pretrained model was integrated or verified in this round.
 
 ## Train and evaluate candidates
 
@@ -130,7 +143,7 @@ For capture-only checks, `uv run python -m hackathon.signs.capture_analysis <mou
 - An optional profile `intent_template`, such as `I want {gesture}`, fills a concept only when the lip candidate exactly matches the declared static context. Unknown words and conflicting gestures are not erased.
 - Supported gesture-only sequences compose in time order. Unknown input never contributes text.
 - Combined decoding waits for the current dynamic-gesture result. Cancellation invalidates late work from either worker.
-- Text and local speech work offline. Optional API suggestions must remain asynchronous and revision-bound.
+- Text and local speech work offline. Optional API formatting stays asynchronous and revision-bound. It can normalize spacing or add a final period, not replace words or translate sign grammar. Suggestions are separate choices; errors preserve local text, and changing AI settings removes unselected suggestions.
 
 ## Verification
 
