@@ -1,6 +1,6 @@
 # Standard sign support and runtime findings
 
-Checked 2026-11-03. Standard sign recognition is now part of QuietBridge's product direction. Personal gestures alone do not meet that goal.
+Checked 2026-11-04. Standard sign recognition is now part of QuietBridge's product direction. Personal gestures alone do not meet that goal.
 
 ## What is implemented
 
@@ -68,6 +68,32 @@ Public input: `https://github.com/gulvarol/bsldict/blob/master/demo/sample_data/
 
 TorchScript is deprecated in the installed Torch version, though export and loading succeeded. Fixed-shape tracing is constrained to the declared input; future variable-shape/streaming backends need their own validation.
 
+## Consented paired capture and replay, 2026-11-04
+
+The old paired recorder saved hand landmarks and mouth crops, not RGB frames. The old evaluator accepted only MotionModel. Those were real gaps: the BSL video backend could not be measured on its own paired recordings.
+
+The lab now accepts `--sign-model` and checks the local artifact identity without loading TorchScript inference. **Paired → Standard sign + lips** uses its enabled labels plus REST and UNKNOWN. Video is off by default and requires explicit consent for each trial, checked by both page and API. It saves at most 240 actual resized BGR frames with their original sequence timestamps, language, model SHA-256 and manifest SHA-256. Face, body and hands are included: this is more sensitive than coordinates, and is described before capture. No camera was activated for the engineering checks below. Discard saves no recording. Limit overflow is rejected before saving either half of the pair.
+
+Run the lab with the trusted manifest, record independent sessions, then run:
+
+```sh
+uv run python -m hackathon.evaluate_fusion \
+  --profile alice --split validation \
+  --sign-model /absolute/path/to/bsl-bundle/manifest.json \
+  --output /absolute/path/to/new-sign-report.json
+```
+
+The evaluator replays the actual isolated-sign adapter, including whole-head ranking, fixed preprocessing and rejection gates. It does not resample already stored mouth ROIs. Separate trials use a normalized monotonic replay clock; reports retain the original capture timing. Personal-motion and standard-video cohorts are separate, including in personal motion training. Missing consent, malformed video and known cross-split session/trial/pair reuse fail visibly. Captured and current bundle identities are recorded so deliberate re-evaluation with another bundle is possible. Report files are never overwritten. The report remains diagnostic: these checks cannot establish what a pretrained model or historical corrections have seen.
+
+Actual engineering checks used the existing public demo, not a new signer benchmark:
+
+- After a post-hoc window scan, the **actual adapter** accepted garden on frames 80–95 at softmax `0.9144` and apple on frames 116–131 at `0.99999`. Tree on frames 128–143 scored `0.7903` and was rejected by the unchanged `0.8` gate. These selected windows are not independent trials, and softmax is not calibrated confidence. A separate diagnostic's direct-224 resize was not used as adapter evidence.
+- Replayed frames 108–131 through the real loopback capture API with real MediaPipe hand/face tracking. It saved a `[24,256,256,3]` video sequence and `[24,96,96]` mouth ROIs; their raw timestamps matched exactly. The replay used source-time 25 fps, not measured live-camera throughput.
+- The real lip model and real BSL bundle then read those saved files through both the evaluator function and command-line path. Lips returned `HOW MUCH`, signs returned `apple` (score `0.9643`), and fusion kept `HOW MUCH` as **conflict / confirmation needed**, rather than fabricating a combined sentence. Sign inference took about `496 ms` in that one four-thread CPU run; three-path evaluation took `1.21 s`, excluding model load and capture.
+- The recording's intended sentence was a placeholder from the default profile, **not the video's verified transcript**. Its WER/exact metrics must not be reported as accuracy. It proves capture-to-replay integration and conflict handling only. Cached recordings/reports remain outside Git. No private samples, camera, speech or paid AI calls were used.
+
+Implementation: [paired recorder](../hackathon/signs/lab.py), [consent controls](../hackathon/signs/lab.html), [three-path evaluator](../hackathon/evaluate_fusion.py), [capture tests](../hackathon/signs/tests/test_sign_video_capture.py), [evaluation tests](../hackathon/tests/test_evaluate_sign_fusion.py).
+
 ## AI text repair: actual problems and current boundary
 
 The old optional backend still contained the hackathon welcome prompt and a two-message whitelist. It rejected normal daily sentences and could replace unrelated input with a fixed welcome. This was a real defect, not a provider-quality guess.
@@ -93,6 +119,8 @@ The prior main Windows run was red: three path-dependent assertions failed while
 These are specific portability fixes, not evidence that all Windows camera or BSL paths work. Remote CI is checked separately from the local Mac suite.
 
 Local final integration run: 562 Python tests passed, 11 skipped, 34 subtests passed; 16 Node UI tests passed. The additional deterministic upload-limit check passed with the existing large-body check in a focused two-test run. Installed Torch emitted deprecation warnings; they were not suppressed. The real model/browser checks above are separate evidence.
+
+2026-11-04 paired-capture integration: the final local suite passed **576 Python tests**, with 11 skipped and 34 subtests passed; **21 Node UI tests** passed. The real public-frame capture/replay checks above are separate from these synthetic/API tests. Windows is checked on the pushed commit separately; a previous green commit does not validate this change.
 
 ## Remaining product work, in order
 

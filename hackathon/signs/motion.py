@@ -57,6 +57,8 @@ def load_trials(data_dir, split, session_prefix="peter-motion-v2-"):
     trials = []
     for path in sorted(split_dir.glob("*.npz")):
         with np.load(path, allow_pickle=False) as d:
+            if "sign_language" in d.files or "bgr_frames" in d.files:
+                continue  # Standard-sign checks are not personal gesture training.
             session_id = str(d["session_id"])
             if not session_id.startswith(session_prefix):
                 continue  # never touch older pose/other collections

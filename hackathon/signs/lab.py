@@ -3,7 +3,7 @@
 Independent from Sam's runtime: serves ``lab.html`` and a small JSON/JPEG API
 on 127.0.0.1 only, records raw MediaPipe hand landmarks (both hands, no
 normalization) into local ``.npz`` sequence files. Nothing is uploaded and no
-images or video are stored.
+images or video are stored unless explicitly consented for paired video capture.
 
 CLI::
 
@@ -12,6 +12,7 @@ CLI::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import secrets
@@ -32,6 +33,8 @@ MIN_SCORE = 0.75
 NUM_HANDS = 2
 MAX_FRAME_BYTES = 512 * 1024
 MAX_JSON_BYTES = 4096
+MAX_VIDEO_FRAMES = 240
+MAX_VIDEO_SECONDS = 10.0
 MAX_RECORD_FRAMES = 600
 MAX_RECORD_SECONDS = 60.0
 DEFAULT_PORT = 8766
@@ -149,14 +152,17 @@ class _Recording:
     pair_id: str | None = None
     profile_id: str | None = None
     expected_text: str | None = None
+    bgr_frames: list | None = None
+    video_overflow: bool = False
 
 
 class _LabServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, engine, data_root, max_frames, max_seconds, profile_manager=None):
+    def __init__(self, address, engine, data_root, max_frames, max_seconds, profile_manager=None, sign_model_info=None):
         super().__init__(address, _Handler)
         self.engine = engine
+        self.sign_model_info = sign_model_info
         from .lip_lab import LipLab
         from .mouth_capture import MouthCapture
         from hackathon.profiles import ProfileManager, get_default_root
@@ -195,6 +201,8 @@ class _LabServer(ThreadingHTTPServer):
             self.mouth.set_root(active_p.mouths_dir)
 
     def server_close(self):
+        self.recording = None
+        self.paired_recording = None
         self.lips.close()
         self.mouth.close()
         super().server_close()
@@ -253,6 +261,13 @@ def _save_sequence(server: _LabServer, rec: _Recording) -> Path:
         payload["profile_id"] = np.asarray(rec.profile_id)
     if rec.expected_text is not None:
         payload["expected_text"] = np.asarray(rec.expected_text)
+
+    if rec.bgr_frames is not None:
+        info = server.sign_model_info
+        payload.update(bgr_frames=np.stack(rec.bgr_frames), video_consent=np.bool_(True),
+                       sign_language=np.asarray(info["language"]),
+                       sign_model_sha256=np.asarray(info["sha256"]),
+                       sign_manifest_sha256=np.asarray(info["manifest_sha256"]))
 
     # Exclusive creation: never overwrite an existing recording.
     with destination.open("xb") as archive:
@@ -418,6 +433,7 @@ class _Handler(BaseHTTPRequestHandler):
                 combined_support = list(dict.fromkeys(GESTURE_SUPPORT + prof_labels))
                 payload = {
                     "token": self.server.token,
+                    "sign_model": self.server.sign_model_info,
                     "recording": rec is not None or bool(self.server.mouth.snapshot()["recording"]),
                     "paired": self.server.paired_recording is not None,
                     "saved_count": self.server.saved_count,
@@ -426,7 +442,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "gesture_support": combined_support,
                     "note": STATE_NOTE,
                     "recorded_frames": len(rec.timestamps_ms) if rec else (self.server.mouth.snapshot().get("frames", 0)),
-                    "limit_reached": bool((rec and rec.limit_reached) or self.server.mouth.snapshot().get("limit_reached")),
+                    "limit_reached": bool((rec and (rec.limit_reached or rec.video_overflow)) or self.server.mouth.snapshot().get("limit_reached")),
                     "lips": self.server.lips.snapshot(),
                     "mouth": self.server.mouth.snapshot(),
                     "active_profile": active_p.id,
@@ -434,6 +450,8 @@ class _Handler(BaseHTTPRequestHandler):
                 }
                 if self.server.paired_recording is not None:
                     payload["paired_recording"] = dict(self.server.paired_recording)
+                    if rec and rec.bgr_frames is not None:
+                        payload["paired_recording"].update(capture_video=True, video_frames=len(rec.bgr_frames), video_overflow=rec.video_overflow)
             self._send_json(200, payload)
             return
         self._error(404, "not found")
@@ -525,7 +543,15 @@ class _Handler(BaseHTTPRequestHandler):
             process_ms = (time.perf_counter() - start) * 1000.0
             rec = self.server.recording
             if rec is not None and not rec.limit_reached:
-                _append_frame(self.server, rec, result, timestamp_ms)
+                if rec.bgr_frames is not None and len(rec.bgr_frames) >= MAX_VIDEO_FRAMES:
+                    rec.video_overflow = True
+                elif rec.bgr_frames is not None and time.monotonic() - rec.start_monotonic >= MAX_VIDEO_SECONDS:
+                    rec.limit_reached = True
+                else:
+                    before = len(rec.timestamps_ms)
+                    _append_frame(self.server, rec, result, timestamp_ms)
+                    if rec.bgr_frames is not None and len(rec.timestamps_ms) > before:
+                        rec.bgr_frames.append(cv2.resize(decoded, (256, 256), interpolation=cv2.INTER_LINEAR))
             payload = {
                 "raw": [{"label": h.label, "score": h.score} for h in result.hands],
                 "mouth": mouth_state,
@@ -536,7 +562,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "process_ms": process_ms,
                 "recording": rec is not None or bool(mouth_state.get("recording")),
                 "recorded_frames": len(rec.timestamps_ms) if rec else (mouth_state.get("frames", 0)),
-                "limit_reached": bool((rec and rec.limit_reached) or mouth_state.get("limit_reached")),
+                "limit_reached": bool((rec and (rec.limit_reached or rec.video_overflow)) or mouth_state.get("limit_reached")),
                 "paired": self.server.paired_recording is not None,
             }
         # Same decoded camera frame, independent latest-frame lip worker. Hand
@@ -626,6 +652,13 @@ class _Handler(BaseHTTPRequestHandler):
         label = data.get("label")
         split = data.get("split")
         session = data.get("session")
+        capture_video = data.get("capture_video", False)
+        if not isinstance(capture_video, bool):
+            self._error(400, "capture_video must be a boolean")
+            return
+        if capture_video and (data.get("video_consent") is not True or self.server.sign_model_info is None):
+            self._error(400, "video capture requires consent and a configured sign model")
+            return
 
         if not profile_id or not isinstance(profile_id, str):
             self._error(400, "profile must be a non-empty string")
@@ -661,10 +694,15 @@ class _Handler(BaseHTTPRequestHandler):
                 self._error(400, f"profile error: {error}")
                 return
 
-            prof_gesture_labels = {g["label"] for g in prof.gestures} | {"REST"}
-            if label not in prof_gesture_labels:
-                self._error(400, f"label {label!r} does not belong to profile gestures or REST")
-                return
+            if capture_video:
+                if label not in self.server.sign_model_info["vocabulary"] and label not in {"REST", "UNKNOWN"}:
+                    self._error(400, f"label {label!r} is not an enabled sign label, REST or UNKNOWN")
+                    return
+            else:
+                prof_gesture_labels = {g["label"] for g in prof.gestures} | {"REST"}
+                if label not in prof_gesture_labels:
+                    self._error(400, f"label {label!r} does not belong to profile gestures or REST")
+                    return
 
             if text not in prof.lip_prompts:
                 self._error(400, f"text {text!r} does not belong to profile lip prompts")
@@ -696,6 +734,7 @@ class _Handler(BaseHTTPRequestHandler):
                 pair_id=pair_id,
                 profile_id=prof.id,
                 expected_text=text,
+                bgr_frames=[] if capture_video else None,
             )
             self.server.mouth.set_root(prof.mouths_dir)
             try:
@@ -725,7 +764,8 @@ class _Handler(BaseHTTPRequestHandler):
         })
 
     def _handle_paired_stop(self):
-        self._read_body(MAX_JSON_BYTES)
+        if self._read_body(MAX_JSON_BYTES) is None:
+            return
         with self.server.lock:
             if self.server.paired_recording is None:
                 self._error(400, "not recording a paired trial")
@@ -734,6 +774,12 @@ class _Handler(BaseHTTPRequestHandler):
             rec = self.server.recording
             if rec is None or not rec.timestamps_ms:
                 self._error(400, "no frames captured in gesture sequence; nothing to save")
+                return
+
+            if rec.bgr_frames is not None and (rec.video_overflow or rec.limit_reached
+                    or time.monotonic() - rec.start_monotonic > MAX_VIDEO_SECONDS
+                    or len(rec.bgr_frames) != len(rec.timestamps_ms)):
+                self._error(400, "video capture exceeded a limit or has mismatched frames; discard this trial")
                 return
 
             if self.server.mouth._rec is None:
@@ -788,6 +834,8 @@ class _Handler(BaseHTTPRequestHandler):
                 "sequence_frames": len(rec.timestamps_ms),
                 "saved_count": self.server.saved_count,
             }
+            if rec.bgr_frames is not None:
+                payload["capture_video"] = True
         self._send_json(200, payload)
 
     def _handle_paired_discard(self):
@@ -989,16 +1037,34 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json(200, {"discarded": had, "recording": False})
 
 
+def _sign_model_info(path):
+    from .isolated import IsolatedSignRecognizer
+
+    path = Path(path).expanduser().resolve()
+    manifest = IsolatedSignRecognizer._load_manifest(path)
+    model = (path.parent / manifest["model_file"]).resolve()
+    if model.parent != path.parent or not model.is_file():
+        raise ValueError("model_file must name an existing local file beside the manifest")
+    digest = hashlib.sha256(model.read_bytes()).hexdigest()
+    if digest != manifest["model_sha256"]:
+        raise ValueError("TorchScript model SHA-256 does not match manifest")
+    return {"language": manifest["language"], "sha256": digest,
+            "manifest_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "vocabulary": {entry["label"]: dict(entry) for entry in manifest["vocabulary"].values() if entry["enabled"]},
+            "status": "capture_only"}
+
+
 def create_server(engine=None, port: int = DEFAULT_PORT, data_root=None,
                   max_frames: int = MAX_RECORD_FRAMES,
                   max_seconds: float = MAX_RECORD_SECONDS,
-                  profile_manager=None) -> _LabServer:
+                  profile_manager=None, sign_model=None) -> _LabServer:
     """Build the loopback lab server.
 
     ``engine`` defaults to a real MediaPipe :class:`Engine`; tests pass a
     fake engine with compatible ``infer``/``close`` methods. The server is
     bound to 127.0.0.1 only; call ``serve_forever`` to start it.
     """
+    info = _sign_model_info(sign_model) if sign_model is not None else None
     if engine is None:
         engine = Engine()
     return _LabServer(
@@ -1008,6 +1074,7 @@ def create_server(engine=None, port: int = DEFAULT_PORT, data_root=None,
         max_frames=max_frames,
         max_seconds=max_seconds,
         profile_manager=profile_manager,
+        sign_model_info=info,
     )
 
 
@@ -1017,6 +1084,7 @@ def main(argv=None):
     parser.add_argument("--data-root", type=Path, default=None)
     parser.add_argument("--profile", type=str, default=None, help="active profile id")
     parser.add_argument("--model", type=Path, default=None, help="gesture .task model path")
+    parser.add_argument("--sign-model", type=Path, default=None, help="isolated-sign manifest for consented video capture")
     args = parser.parse_args(argv)
 
     try:
@@ -1027,7 +1095,7 @@ def main(argv=None):
         # One tiny warmup inference so the first real frame is not slowed by
         # lazy backend initialization. Timestamp goes through the server's
         # monotonic helper, so warmup cannot break strict ordering.
-        server = create_server(engine=engine, port=args.port, data_root=args.data_root)
+        server = create_server(engine=engine, port=args.port, data_root=args.data_root, sign_model=args.sign_model)
         if args.profile:
             server.profile_manager.set_active_profile(args.profile)
             p = server.profile_manager.get_active_profile()

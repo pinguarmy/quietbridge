@@ -70,6 +70,20 @@ def test_hash_checked_before_torchscript_load(tmp_path, monkeypatch):
         IsolatedSignRecognizer(path)
 
 
+def test_model_changes_during_load_do_not_get_stale_identity(tmp_path, monkeypatch):
+    path = model_files(tmp_path)
+    import torch
+    original = torch.jit.load
+    def changing_load(model_path, **kwargs):
+        loaded = original(model_path, **kwargs)
+        with open(model_path, 'ab') as out:
+            out.write(b'changed during loading')
+        return loaded
+    monkeypatch.setattr(torch.jit, 'load', changing_load)
+    with pytest.raises(ValueError, match='changed during loading'):
+        IsolatedSignRecognizer(path)
+
+
 def test_nonfinite_checkpoint_output_is_rejected(tmp_path):
     recognizer = IsolatedSignRecognizer(model_files(tmp_path))
     import torch

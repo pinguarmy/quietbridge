@@ -32,6 +32,7 @@ class IsolatedSignRecognizer:
     def __init__(self, manifest_path):
         self.manifest_path = Path(manifest_path).expanduser().resolve()
         self._manifest = self._load_manifest(self.manifest_path)
+        manifest_digest = hashlib.sha256(self.manifest_path.read_bytes()).hexdigest()
         model_path = (self.manifest_path.parent / self._manifest["model_file"]).resolve()
         if model_path.parent != self.manifest_path.parent.resolve() or not model_path.is_file():
             raise ValueError("model_file must name an existing local file beside the manifest")
@@ -45,6 +46,9 @@ class IsolatedSignRecognizer:
         self._torch = torch
         self._model = torch.jit.load(str(model_path), map_location="cpu")
         self._model.eval()
+        if (hashlib.sha256(model_path.read_bytes()).hexdigest() != digest
+                or hashlib.sha256(self.manifest_path.read_bytes()).hexdigest() != manifest_digest):
+            raise ValueError("Sign model bundle changed during loading")
         # Public shape matches fusion's label->entry contract. Model metadata is
         # not validation evidence, so this backend never promotes verified mappings.
         self.vocabulary = {}
@@ -56,6 +60,7 @@ class IsolatedSignRecognizer:
             self._class_to_entry[class_name] = runtime_entry
         self.model_info = {
             "language": self._manifest["language"], "sha256": digest,
+            "manifest_sha256": manifest_digest,
             "status": "experimental", "class_count": len(self._manifest["labels"]),
             "enabled_count": sum(bool(v["enabled"]) for v in self.vocabulary.values()),
             "source_url": self._manifest["source_url"], "license": self._manifest["license"],

@@ -368,6 +368,9 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
 .paired-box label{display:block;font-size:12px;font-weight:700;color:var(--teal-hover);text-transform:uppercase;margin:8px 0 4px}
 .paired-box select{width:100%;font:inherit;font-size:14px;min-height:44px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink)}
 .paired-note{font-size:12px;color:var(--teal-hover);line-height:1.4;margin-bottom:6px}
+#videoConsentBox{margin:12px 0;padding:12px;background:var(--surface);border-left:3px solid var(--teal)}
+#videoConsentBox label{display:flex;align-items:center;gap:10px;min-height:44px;text-transform:none;font-size:14px;line-height:1.45}
+#videoConsent{width:20px;height:20px;flex-shrink:0;accent-color:var(--teal)}
 
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{
@@ -431,7 +434,7 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
         <span>Received: <strong id="receivedFrames">0 frames</strong></span>
       </div>
       <div class="fps-note">Target 25 fps capture pacing; measured fps reflects serial upload rate without buffering backlog.</div>
-      <p class="privacy">Live guides use one camera. Hand sequences store coordinates; lip clips store aligned mouth crops. Split data is strictly isolated per profile.</p>
+      <p class="privacy">Live guides use one camera. Coordinates and mouth crops are the default. Standard-sign checks can also save local video after explicit consent. Split data stays isolated per profile.</p>
     </div>
   </details>
 </div>
@@ -460,7 +463,7 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
         <span id="mouthTracking" class="mouth-status">Face not detected</span>
       </div>
     </div>
-    <p class="privacy">Hand sequences store coordinates; lip clips store aligned mouth crops. No audio, no cloud, no auto-training.</p>
+    <p class="privacy">Personal gestures save coordinates; lip clips save mouth crops. A standard-sign check also saves face, body and hand video only with your explicit consent below. No audio, cloud or auto-training.</p>
   </section>
 
   <section class="lesson" aria-label="Current recording lesson">
@@ -469,7 +472,14 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
       <div class="paired-note">
         <strong>Paired Multimodal Collection:</strong> Synchronous gesture + silent lip recording. Saves paired dataset samples; no recognition or transcription claimed.
       </div>
-      <label for="pairedGestureSelect">Profile Gesture (or REST):</label>
+      <label for="pairedCaptureKind">What are you checking?</label>
+      <select id="pairedCaptureKind"><option value="personal">Personal gesture + lips · coordinates and mouth crops</option><option value="video" disabled>Standard sign + lips · local video</option></select>
+      <p id="pairedSignModel" class="paired-note">No standard-sign model configured for this recorder.</p>
+      <div id="videoConsentBox" hidden>
+        <p class="paired-note">Saves your face, upper body and both hands as a local 256 × 256 video sequence, alongside mouth crops. Record one sign, at most 240 frames or 10 seconds. No audio or uploads. Discard writes nothing.</p>
+        <label for="videoConsent"><input id="videoConsent" type="checkbox"> I agree to save this trial's video locally.</label>
+      </div>
+      <label for="pairedGestureSelect">Gesture, sign or negative example:</label>
       <select id="pairedGestureSelect"></select>
       <label for="pairedPromptSelect">Intended Lip Prompt:</label>
       <select id="pairedPromptSelect"></select>
@@ -608,6 +618,22 @@ let token='',stream=null,loop=null,inflight=false,working=false,recording=false,
 let mouthPreviewError='',frames=0,started=0,lastTracking=0,mouthCrop=null;
 let activeProfile=null,allProfiles=[],currentStage='train'; // setup, train, validation, test, models
 let modelData=null,modelBusy=false;
+let signModelInfo=null,activeVideoCapture=false;
+
+function videoRequested(){return mode==='paired'&&$('pairedCaptureKind').value==='video';}
+function recordingModeKey(m){return m==='paired'&&videoRequested()?`paired-video-${signModelInfo?.manifest_sha256?.slice(0,12)||'unconfigured'}`:m;}
+function pairedItems(){
+  if(!videoRequested())return activeProfile?.gestures||[];
+  const signs=Object.entries(signModelInfo?.vocabulary||{}).filter(([,entry])=>entry.enabled).map(([label,entry])=>({label,display_name:entry.phrase,concept:entry.phrase,description:'Perform this standard sign once while mouthing the selected sentence. Keep face, upper body and both hands in view.'}));
+  return [...signs,{label:'REST',display_name:'Rest',description:'Remain relaxed without signing while mouthing the selected sentence.'},{label:'UNKNOWN',display_name:'Unrelated movement',description:'Perform an unrelated movement or an unsupported sign while mouthing the selected sentence.'}];
+}
+function pairedRequest(split,session){
+  const captureVideo=videoRequested();
+  if(captureVideo&&(!signModelInfo||!$('videoConsent').checked))throw Error('Agree to save this trial’s video before recording.');
+  const label=$('pairedGestureSelect').value,text=$('pairedPromptSelect').value;
+  if(!label||!text)throw Error('Choose a sign or gesture and an intended sentence.');
+  return {profile:activeProfile.id,label,text,split,session,capture_video:captureVideo,video_consent:captureVideo&&$('videoConsent').checked};
+}
 
 const TARGET_FPS=25;
 const UPLOAD_INTERVAL_MS=40; // 1000 / 25 fps
@@ -648,10 +674,11 @@ if(retLink){
 function getFreshSessionId(profileId,stageMode,split){
   const stamp=Date.now().toString(36);
   const rand=Math.random().toString(36).substring(2,6);
-  return `${profileId}-${stageMode}-${split}-${stamp}-${rand}`;
+  return `${profileId.slice(0,10)}-${stageMode.slice(0,25)}-${split}-${stamp}-${rand}`;
 }
 
 function getActiveSession(profileId,stageMode,split){
+  stageMode=recordingModeKey(stageMode);
   const key=`${profileId}:${stageMode}:${split}`;
   if(!sessionStore[key]){
     sessionStore[key]=getFreshSessionId(profileId,stageMode,split);
@@ -661,6 +688,7 @@ function getActiveSession(profileId,stageMode,split){
 }
 
 function renewActiveSession(profileId,stageMode,split){
+  stageMode=recordingModeKey(stageMode);
   const key=`${profileId}:${stageMode}:${split}`;
   sessionStore[key]=getFreshSessionId(profileId,stageMode,split);
   localStorage.setItem(sessionStoreKey,JSON.stringify(sessionStore));
@@ -673,7 +701,7 @@ let progressStore={};
 try{progressStore=JSON.parse(localStorage.getItem(progressStoreKey)||'{}')}catch{progressStore={}}
 
 function getProgressData(profileId,stage,m){
-  const key=`${profileId}:${stage}:${m}`;
+  const key=`${profileId}:${stage}:${recordingModeKey(m)}`;
   if(!progressStore[key]){
     progressStore[key]={index:0,counts:[]};
   }
@@ -681,7 +709,7 @@ function getProgressData(profileId,stage,m){
 }
 
 function saveProgressData(profileId,stage,m,data){
-  const key=`${profileId}:${stage}:${m}`;
+  const key=`${profileId}:${stage}:${recordingModeKey(m)}`;
   progressStore[key]=data;
   localStorage.setItem(progressStoreKey,JSON.stringify(progressStore));
 }
@@ -800,8 +828,8 @@ function render(){
   $('pairedTab').classList.toggle('selected',isPaired);
 
   if(isPaired){
-    $('title').textContent='Record paired gesture + lip trial.';
-    $('intro').textContent='Synchronized recording of hand landmarks and silent mouth crops. Paired data collection only — no recognition or transcription claimed.';
+    $('title').textContent=videoRequested()?'Check one standard sign with its words.':'Record paired gesture + lip trial.';
+    $('intro').textContent=videoRequested()?'Save a consented local video and mouth crops for lips-only, signs-only and combined evaluation. No automatic training or recognition score.':'Synchronized recording of hand landmarks and silent mouth crops. Paired data collection only, no recognition or transcription claimed.';
   }else if(isLip){
     $('title').textContent='Mouth the prompt. Record one try.';
     $('intro').textContent='Practice custom lip phrases silently for the face tracker.';
@@ -819,8 +847,12 @@ function render(){
   }
 
   $('pairedBox').hidden=!isPaired;
+  $('pairedCaptureKind').querySelector('[value="video"]').disabled=!signModelInfo;
+  $('videoConsentBox').hidden=!videoRequested();
+  $('pairedSignModel').textContent=signModelInfo?`${signModelInfo.language.toUpperCase()} · ${signModelInfo.sha256.slice(0,12)} · configured concepts, not a recognition score.`:'No standard-sign model configured. Start this recorder with --sign-model to enable video checks.';
   $('mouthPrompt').hidden=!isLip&&!isPaired;
   $('mouthNote').hidden=!isLip&&!isPaired;
+  $('mouthNote').textContent=videoRequested()?'Mouth the sentence while signing. Full-frame video and mouth crops are saved only after consent and Finish & save. No microphone.':'Mouth these words silently at a natural pace. Face camera. Saved mouth crops only; no microphone.';
   $('trackingNote').hidden=false;
   $('trackingNote').textContent=isPaired
     ?'Paired data collection only · No recognition or transcription claimed'
@@ -844,7 +876,7 @@ function render(){
   };
 
   if(isPaired){
-    const gestures=activeProfile.gestures||[];
+    const gestures=pairedItems();
     const prompts=activeProfile.lip_prompts||[];
     const gSel=$('pairedGestureSelect');
     const pSel=$('pairedPromptSelect');
@@ -923,10 +955,11 @@ function render(){
 }
 
 function checkStageCompletion(){
+  if(videoRequested()){$('advanceBox').hidden=true;return;} // Data collection is not trainer selection or model activation.
   const prog=getProgressData(activeProfile.id,currentStage,mode);
   let items;
   if(mode==='lips') items=activeProfile.lip_prompts||[];
-  else if(mode==='paired') items=activeProfile.gestures||[];
+  else if(mode==='paired') items=pairedItems();
   else items=activeProfile.gestures||[];
   const targetCount=STAGE_TARGETS[currentStage]?.[mode]||3;
   const allMet=items.length>0&&prog.counts.length>=items.length&&items.every((_,i)=>(prog.counts[i]||0)>=targetCount);
@@ -966,7 +999,7 @@ $('btnAdvanceStage').onclick=()=>{
 
 function controls(){
   const b=$('record');
-  b.disabled=working||!token||currentStage==='setup';
+  b.disabled=working||!token||currentStage==='setup'||(!recording&&videoRequested()&&(!$('videoConsent').checked||!signModelInfo));
   b.textContent=working?'Please wait…':recording?'Finish & save':'Start recording';
   b.classList.toggle('active',recording);
   $('discard').disabled=!recording||working;
@@ -976,6 +1009,8 @@ function controls(){
   $('pairedTab').disabled=recording||working;
   $('pairedGestureSelect').disabled=recording||working;
   $('pairedPromptSelect').disabled=recording||working;
+  $('pairedCaptureKind').disabled=recording||working;
+  $('videoConsent').disabled=recording||working;
   for(const id of ['stepSetup','stepTrain','stepValidation','stepTest','stepModels','profileSelect','btnNewProfile','btnNewSession']) $(id).disabled=recording||working||modelBusy;
   modelControls();
 }
@@ -1112,7 +1147,7 @@ async function sendFrame(){
       }
     }
     if(d.mouth?.limit_reached||d.limit_reached){
-      note('Trial limit reached. Press Finish & save.',true);
+      note(activeVideoCapture?'Video limit reached. Discard this trial and record a shorter sign.':'Trial limit reached. Press Finish & save.',true);
     }
   }catch(e){
     draw.clearRect(0,0,640,480);
@@ -1179,7 +1214,7 @@ function advanceItem(){
   const prog=getProgressData(activeProfile.id,currentStage,mode);
   let items;
   if(mode==='lips') items=activeProfile.lip_prompts||[];
-  else if(mode==='paired') items=activeProfile.gestures||[];
+  else if(mode==='paired') items=pairedItems();
   else items=activeProfile.gestures||[];
   if(!items.length)return;
   prog.index=(prog.index+1)%items.length;
@@ -1213,6 +1248,13 @@ $('pairedTab').onclick=()=>{
   render();
 };
 
+$('pairedCaptureKind').onchange=()=>{
+  if(recording||working)return;
+  $('videoConsent').checked=false;
+  render();
+};
+$('videoConsent').onchange=()=>controls();
+
 $('pairedGestureSelect').onchange=()=>{
   if(recording||working)return;
   render();
@@ -1229,6 +1271,7 @@ $('record').onclick=async()=>{
   controls();
   try{
     if(!recording){
+      if(videoRequested())pairedRequest(currentStage,'check'); // Check consent before opening the camera.
       await camera();
       const split=currentStage==='validation'?'validation':(currentStage==='test'?'test':'train');
       const session=getActiveSession(activeProfile.id,mode,split);
@@ -1256,17 +1299,9 @@ $('record').onclick=async()=>{
           profile:activeProfile.id
         });
       }else if(mode==='paired'){
-        const gLabel=$('pairedGestureSelect').value;
-        const pText=$('pairedPromptSelect').value;
-        if(!gLabel)throw Error('Select a profile gesture or REST');
-        if(!pText)throw Error('Select an intended lip prompt');
-        await action('paired/start',{
-          profile:activeProfile.id,
-          label:gLabel,
-          text:pText,
-          split:split,
-          session:session
-        });
+        const body=pairedRequest(split,session);
+        await action('paired/start',body);
+        activeVideoCapture=body.capture_video;
       }
       recording=true;
       frames=0;
@@ -1278,7 +1313,7 @@ $('record').onclick=async()=>{
       }else if(mode==='gestures'){
         note('Recording. Pause still for 0.5s, do the gesture once, return to REST for 0.5s.');
       }else{
-        note('Recording paired trial. Perform gesture and mouth prompt silently. Paired collection only.');
+        note(activeVideoCapture?'Recording local video. Perform one sign with the selected silent sentence. Finish before 10 seconds.':'Recording paired trial. Perform gesture and mouth prompt silently. Paired collection only.');
       }
     }else{
       if(!frames)throw Error('No frames received yet. Wait for live camera guide, then save.');
@@ -1300,11 +1335,13 @@ $('record').onclick=async()=>{
       }else if(mode==='gestures'){
         note('Coordinates saved on this Mac. Take a pause before next gesture.');
       }else{
-        note('Paired trial saved: hand coordinates + mouth crops. Paired data capture only.');
+        note(activeVideoCapture?'Video, hand coordinates and mouth crops saved locally. Consent resets for the next trial.':'Paired trial saved: hand coordinates + mouth crops. Paired data capture only.');
+        $('videoConsent').checked=false;
+        activeVideoCapture=false;
       }
 
       const targetCount=STAGE_TARGETS[currentStage]?.[mode]||3;
-      if(prog.counts[prog.index]>=targetCount){
+      if(!videoRequested()&&prog.counts[prog.index]>=targetCount){
         advanceItem();
       }else{
         render();
@@ -1331,6 +1368,8 @@ $('discard').onclick=async()=>{
       await action('paired/discard');
     }
     recording=false;
+    activeVideoCapture=false;
+    $('videoConsent').checked=false;
     note('Trial discarded without saving.');
     render();
   }catch(e){
@@ -1633,6 +1672,7 @@ $('profileSelect').onchange=async()=>{
   try{
     const updated=await action('profile/select',{id:targetId});
     activeProfile=updated;
+    $('videoConsent').checked=false;
     note(`Switched to profile: ${activeProfile.name} (${activeProfile.id})`);
     modelData=null;
     render();
@@ -1686,9 +1726,12 @@ window.addEventListener('pagehide',()=>{
 
 request('/api/state').then(async s=>{
   token=s.token;
+  signModelInfo=s.sign_model||null;
   await loadProfiles();
   if(s.paired){
     mode='paired';
+    activeVideoCapture=Boolean(s.paired_recording?.capture_video);
+    if(activeVideoCapture)$('pairedCaptureKind').value='video';
     recording=true;
     frames=s.recorded_frames||0;
     note('An earlier paired trial is active. Finish & save it before switching lessons.',true);

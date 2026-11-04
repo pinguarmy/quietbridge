@@ -16,6 +16,16 @@ A quiet communication desk. The message is the focal point, with one clear captu
 
 Pass A changes hierarchy. Pass B checks rendered desktop/mobile spacing, keyboard access, disabled/loading states and state transitions. Existing element IDs and API contracts stay intact.
 
+## Paired standard-sign check, 2026-11-04
+
+- Surface and purpose: existing paired recorder, not a new daily-use page. A user can distinguish personal coordinates from a standard-sign video check before opening the camera.
+- Signature: one clear capture-type choice followed by a plain consent row, using the existing teal/off-white styling and system type.
+- Layout and sequence: choose paired type, sign/negative and intended sentence, consent, capture one short trial, save or discard, then record on a separate occasion for held-out evaluation.
+- Copy and privacy: say that face, upper body and hands are saved locally as a 256-square video sequence. No microphone, no cloud or automatic training. Reconfirm each trial.
+- Interaction: disabled unavailable model choice; locked controls during recording; overflow offers discard, never a misleading successful partial save. Progress and sessions stay separate from personal gestures.
+- Accessibility: native labels and checkboxes, visible focus, 44-pixel actions and live status. No new motion.
+- Success and scope: consent reaches the actual capture API, saved video can enter the standard-sign evaluator, and the existing coordinate-only default is unchanged. No model marketplace, license waiver or claim of recognition accuracy.
+
 ## Earlier native Lipflow brief
 
 

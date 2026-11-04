@@ -23,6 +23,12 @@ Evidence: [stock pose map](../hackathon/signs/recognizer.py#L43-L58), [one-event
 
 The personal motion input contains two sets of 21 hand landmarks and presence masks. It does not encode body posture or facial grammar as sign-language features. The separate lip model is not a non-manual sign-language grammar model. Supporting full BSL would require a BSL-specific dataset, temporal language model, non-manual features, fingerspelling handling where needed, and validation with BSL users. ASL and other sign languages need their own validated language paths. Full translation remains future work. The explicit isolated-sign backend is now implemented and distinguished from personal gestures in Settings; it does not provide those missing language capabilities.
 
+## Paired standard-sign capture and evaluation, 2026-11-04
+
+Found and closed a data-path gap: paired recording stored landmarks/mouth crops, while the BSL backend needs RGB video; evaluation only ran personal MotionModel. Optional standard-sign recording now has per-trial video consent before camera access, a bounded full-frame buffer and model/manifest identity. Default capture remains coordinate-only. Video pairs replay the actual sign backend alongside lips and fusion; personal-motion training/evaluation excludes them.
+
+Real public-frame replay passed through MediaPipe, paired files and both real vision models. Apple was accepted; conflicting lips remained confirmation-needed rather than being overwritten. Post-hoc selected public windows and a placeholder intended sentence are **not accuracy evidence**. No threshold tuning, private uploads or webcam activation. Commands and exact observations are in [the support report](sign-language-support.md#consented-paired-capture-and-replay-2026-11-04).
+
 ## Standard-sign and runtime follow-up, 2026-11-03 evening
 
 Standard BSL word-level input is now an explicit external video-model backend, not a relabelled personal gesture. Actual BSL-1K weights were loaded and converted, with exact logits equivalence on one public clip; the public whole-window sample was low-score and produced no text. The real lip and sign models loaded together in an isolated server. This establishes engineering integration, not useful signer accuracy or permission to distribute the external model. See [setup and evidence](sign-language-support.md).

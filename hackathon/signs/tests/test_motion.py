@@ -77,6 +77,19 @@ def make_train():
     return [make_trial(label, seed=s) for label in LABELS for s in range(4)]
 
 
+def test_standard_sign_checks_do_not_enter_personal_motion_training(tmp_path):
+    from hackathon.signs.motion import load_trials
+    folder = tmp_path / 'train'
+    folder.mkdir()
+    personal = make_trial('HELLO')
+    np.savez(folder / 'personal.npz', **personal)
+    standard = {**make_trial('HELLO', trial_id='bsl-trial'), 'sign_language': np.array('bsl')}
+    np.savez(folder / 'standard.npz', **standard)
+    loaded = load_trials(tmp_path, 'train', session_prefix='')
+    assert len(loaded) == 1
+    assert loaded[0]['trial_id'] == personal['trial_id']
+
+
 def test_fit_predict_held_out():
     model = MotionModel().fit(make_train())
     for label in LABELS:
