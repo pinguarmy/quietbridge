@@ -4,7 +4,9 @@
   if (!form) return;
 
   let token = '';
-  let busy = false;
+  let busy = false, dirty = false;
+  form.addEventListener('input', () => { dirty = true; });
+  window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
   const status = message => { $('cleanup-settings-status').textContent = message; };
   const error = message => { $('cleanup-settings-error').textContent = message; };
   const setBusy = value => {
@@ -25,7 +27,7 @@
       $('cleanup-model').value = config.model || 'gpt-6-luna';
       $('cleanup-tier').value = config.service_tier || 'default';
       $('cleanup-enabled').checked = Boolean(config.enabled);
-      $('cleanup-api-key').placeholder = config.configured ? 'Key saved — leave blank to keep it' : 'Paste your OpenAI API key';
+      $('cleanup-api-key').placeholder = config.configured ? 'Key held in memory; leave blank to keep it' : 'Paste your provider API key';
       status(config.configured ? 'API key is saved. No need to enter it again after refreshing. Restarting the backend clears it.' : 'No API key saved yet.');
     } catch (_) {
       error('Could not load AI cleanup settings. Please refresh and try again.');
@@ -42,14 +44,15 @@
         headers: {'Content-Type':'application/json', 'X-Lipflow-Token':token},
         body: JSON.stringify({base_url:$('cleanup-base-url').value.trim(), model:$('cleanup-model').value.trim(), api_key:key, enabled:$('cleanup-enabled').checked, service_tier:$('cleanup-tier').value})
       });
-      if (!response.ok) throw new Error();
       const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not save preferences');
       $('cleanup-api-key').placeholder = result.configured ? 'Key saved — leave blank to keep it' : 'Paste your OpenAI API key';
       status(result.configured ? 'Saved. API key is configured; leave the password field blank unless replacing it.' : 'Settings saved. No API key saved yet.');
-    } catch (_) {
-      error('Could not save settings. Check the values and try again.'); status('');
-    } finally {
       $('cleanup-api-key').value = '';
+      dirty = false;
+    } catch (failure) {
+      error(`${failure.message}. Your entries are still here. Correct them and try again.`); status('');
+    } finally {
       setBusy(false);
     }
   });

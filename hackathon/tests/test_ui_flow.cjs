@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function screen(page = 'index.html') {
+function screen(page = 'index.html', sessionValues = new Map(), localValues = new Map()) {
   const elements = new Map();
   function element(tag = 'DIV') {
     const classes = new Set();
@@ -14,7 +14,9 @@ function screen(page = 'index.html') {
       classList: { toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }, contains(name) { return classes.has(name); } },
       setAttribute(name, value) { this.attributes[name] = value; },
       removeAttribute(name) { delete this.attributes[name]; },
-      matches() { return false; }, addEventListener() {}, getContext() { return null; },
+      listeners: {},
+      matches() { return false; }, addEventListener(name, fn) { this.listeners[name] = fn; }, getContext() { return null; },
+      focus() { this.focused = true; }, select() {},
       append(child) { this.children.push(child); if (child.id) elements.set(child.id, child); },
       before(child) { if (child.id) elements.set(child.id, child); },
       replaceChildren(...children) { this.children = children; },
@@ -28,7 +30,9 @@ function screen(page = 'index.html') {
       createElement: element, addEventListener() {},
       querySelectorAll(selector) { return selector === '.alternative' ? elements.get('alternatives').children : []; },
     },
-    window: { addEventListener() {} },
+    window: { addEventListener() {}, confirm: () => true,
+      sessionStorage: {getItem: key => sessionValues.get(key) || null, setItem: (key,value) => sessionValues.set(key,value), removeItem: key => sessionValues.delete(key)},
+      localStorage: {getItem: key => localValues.get(key) || null, setItem: (key,value) => localValues.set(key,value)} },
     fetch: () => new Promise(() => {}), setTimeout() {}, clearTimeout() {},
     Date, Promise, console,
     Option: function (label, value) { return { textContent: label, value }; },
@@ -45,7 +49,7 @@ function screen(page = 'index.html') {
     };
     vm.runInContext('render(sample)', context);
   }
-  return { context, elements, render };
+  return { context, elements, render, sessionValues, localValues };
 }
 
 test('reloading models targets the running profile and reports warmup truthfully', async () => {
@@ -115,6 +119,90 @@ test('sign vocabulary refreshes when a slow model finishes loading', () => {
   assert.match(elements.get('sign-model-status').textContent, /BSL isolated/);
 });
 
+test('choosing a conflict alternative explicitly replaces an unfinished draft and never applies stale text', async () => {
+  const a=screen();a.render({profile_id:'alice'});
+  a.elements.get('corrected-text').value='Old unfinished draft';a.elements.get('corrected-text').listeners.input();
+  a.render({profile_id:'alice',revision:2,decision:{text:'I need water',status:'confirmation_needed',reason:'conflict'},alternatives:['I need water','No.']});
+  a.context.window.confirm=()=>false;
+  a.elements.get('alternatives').children[1].onclick();
+  assert.equal(a.elements.get('corrected-text').value,'Old unfinished draft');
+  assert.equal(a.elements.get('speak').disabled,true);
+  a.context.window.confirm=()=>true;
+  a.elements.get('alternatives').children[1].onclick();
+  assert.equal(a.elements.get('message').textContent,'No.');
+  assert.equal(a.elements.get('corrected-text').value,'No.');
+  assert.equal(a.sessionValues.size,0);
+  const calls=[];
+  a.context.fetch=async(url,options)=>{calls.push(JSON.parse(options.body));return {ok:true,json:async()=>({...a.context.sample,revision:3,decision:{text:'No.',status:'accepted',reason:'corrected'}})}};
+  await a.elements.get('save-correction').onclick();
+  assert.equal(calls[0].text,'No.');
+  assert.equal(a.elements.get('message').textContent,'No.');
+});
+
+test('main page shows backend input failures while keeping typing available', () => {
+  const a=screen();a.render({camera_error:'Camera stopped',sign_error:'Model missing'});
+  assert.match(a.elements.get('input-warning').textContent,/Camera stopped.*Model missing.*type your message/);
+  assert.equal(a.elements.get('corrected-text').disabled,false);
+});
+
+test('unfinished editor survives new revisions and a fresh page in the same tab', () => {
+  const storage = new Map();
+  const a = screen('index.html', storage); a.render({profile_id:'alice'});
+  a.elements.get('corrected-text').value = 'My unfinished words';
+  a.elements.get('corrected-text').listeners.input();
+  a.render({profile_id:'alice',revision:2,decision:{text:'New recognition',status:'accepted',reason:'lip_only'}});
+  assert.equal(a.elements.get('corrected-text').value,'My unfinished words');
+  assert.equal(a.elements.get('speak').disabled,true);
+  const b = screen('index.html', storage); b.render({profile_id:'alice',decision:{text:'Backend words',status:'accepted',reason:'lip_only'}});
+  assert.equal(b.elements.get('corrected-text').value,'My unfinished words');
+  assert.equal(b.elements.get('speak').disabled,true);
+});
+
+test('record control toggles with one activation, without sustained hold', async () => {
+  const a=screen(); a.render(); const calls=[];
+  a.context.fetch=async(url,options)=>{
+    const action=url.split('/').pop(); calls.push(action);
+    return {ok:true,json:async()=>({...a.context.sample,phase:action==='start'?'recording':'tail'})};
+  };
+  await a.elements.get('record').onclick();
+  assert.equal(a.elements.get('record-label').textContent,'Finish recording');
+  await a.elements.get('record').onclick();
+  assert.deepEqual(calls,['start','stop']);
+});
+
+test('guide is dismissible and reopenable without changing message state', () => {
+  const a=screen(); a.render();
+  assert.equal(a.elements.get('first-use-guide').hidden,false);
+  a.elements.get('guide-dismiss').onclick();
+  assert.equal(a.elements.get('first-use-guide').hidden,true);
+  a.elements.get('open-guide').onclick();
+  assert.equal(a.elements.get('first-use-guide').hidden,false);
+  assert.equal(a.elements.get('guide-heading').focused,true);
+  assert.equal(a.elements.get('message').textContent,'Your words will appear here.');
+});
+
+test('explicit new message sends current revision and clears unfinished editor only on success', async () => {
+  const a=screen(); a.render({profile_id:'alice',decision:{text:'Previous',status:'accepted',reason:'corrected'}});
+  a.elements.get('corrected-text').value='Unfinished';a.elements.get('corrected-text').listeners.input();
+  let body;
+  a.context.fetch=async(url,options)=>{body=JSON.parse(options.body);return {ok:true,json:async()=>({...a.context.sample,revision:2,decision:{text:'',status:'unavailable',reason:'lip_only'}})}};
+  await a.elements.get('new-message').onclick();
+  assert.deepEqual(body,{revision:1});
+  assert.equal(a.elements.get('corrected-text').value,'');
+  assert.equal(a.sessionValues.size,0);
+  assert.equal(a.elements.get('speak').disabled,true);
+});
+
+test('failed apply keeps unfinished text and blocks stale speech', async () => {
+  const a=screen();a.render({profile_id:'alice',decision:{text:'Old words',status:'accepted',reason:'corrected'}});
+  a.elements.get('corrected-text').value='New words';a.elements.get('corrected-text').listeners.input();
+  a.context.fetch=async()=>{throw Error('Network unavailable')};
+  await a.elements.get('save-correction').onclick();
+  assert.equal(a.elements.get('corrected-text').value,'New words');
+  assert.equal(a.elements.get('speak').disabled,true);
+  assert.match(a.elements.get('error').textContent,/edit is kept/);
+});
+
 test('typed messages use the current revision without speaking or enabling learning', async () => {
   const { elements, context, render } = screen();
   render();
@@ -124,7 +212,8 @@ test('typed messages use the current revision without speaking or enabling learn
     return { ok: true, json: async () => ({ ...context.sample, revision: 2, alternatives: ['Please wait'], decision: { text: 'Please wait', status: 'accepted', reason: 'corrected' } }) };
   };
   elements.get('corrected-text').value = 'Please wait';
-  elements.get('save-correction').onclick();
+  elements.get('corrected-text').listeners.input();
+  await elements.get('save-correction').onclick();
   await vm.runInContext('actionChain', context);
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0], ['/api/action/correct', { revision: 1, text: 'Please wait', learn: false }]);

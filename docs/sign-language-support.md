@@ -35,7 +35,7 @@ The exporter imports the explicitly supplied external source and reads checkpoin
 
 The runtime verifies the exported model hash before loading. Only use trusted local TorchScript bundles. The hash identifies bytes, not their permission, provenance or accuracy.
 
-In the app, check Settings for **BSL isolated signs**, model identity and enabled concepts. Start the camera, keep your upper body, face and both hands in view, hold Record for one sign and its words, then release. Keep each sign short. The adapter retains at most 240 resized frames, approximately 9.6 seconds at 25 fps; it rejects overflow rather than classifying a truncated ending. Finish message, review, edit if necessary, then choose Speak. Multiple windows accumulate a message; they are not a continuous-sign decoder.
+In the app, check Settings for **BSL isolated signs**, model identity and enabled concepts. Start the camera, keep your upper body, face and both hands in view, choose Start recording for one sign and its words, then choose Finish recording. Keep each sign short. The adapter retains at most 240 resized frames, approximately 9.6 seconds at 25 fps; it rejects overflow rather than classifying a truncated ending. Finish message, review, edit if necessary, then choose Speak. Multiple windows accumulate a message; they are not a continuous-sign decoder.
 
 Explicit sign-model failure is visible and does not fall back to stock poses. The command-line selection persists across profile reloads, like other explicit model choices. Personal gesture training does not fine-tune this BSL model.
 

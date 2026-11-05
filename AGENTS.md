@@ -13,6 +13,7 @@ The product lead coordinates architecture and shared files. Delegated work must 
 - Train candidates beside the profile, review validation and final-test reports, then explicitly promote them. Never overwrite the stock model or an existing candidate.
 - Display which model and profile are active. Missing explicit model paths fail visibly; do not silently load an old personal model.
 - Display text first and speak only after the user's action. Conflicts and uncertain inputs require confirmation. Never invent a sentence from UNKNOWN. User-edited corrections create a new revision and never speak automatically; only an explicit learning choice writes them to the profile's correction store.
+- First use must permit typing without camera, training or a mandatory wizard. Preserve unfinished edits through navigation and incoming results. Explicit recording uses an accessible start/finish toggle; do not require sustained holds or reorder live mobile controls. Personalize is an owned, on-demand loopback page, not a prerequisite second manual process.
 - The core path works offline. Optional API suggestions remain asynchronous and revision-bound.
 
 ## Recognition architecture

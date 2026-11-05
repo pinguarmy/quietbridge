@@ -15,7 +15,9 @@ mouths/{train,validation,test}/      Labelled mouth crops
 models/                      Explicitly selected model candidates
 ```
 
-Open the recording lab to create a profile, customize gestures and prompts, and record independent sessions:
+Choose **Personalize** in the main app to create a profile, customize gestures and prompts, and record independent sessions. The main app opens its own local recording page on demand; no second command or fixed port is required. Camera tracking loads only after an explicit recording action. Rehearsal permits profile editing but does not permit camera capture.
+
+You can still run the recording lab separately:
 
 ```sh
 uv run python -m hackathon.signs.lab
@@ -23,7 +25,7 @@ uv run python -m hackathon.signs.lab
 
 Open <http://127.0.0.1:8766>, or choose **Personalize** in the main app. New profiles begin with **Choose phrases**, then **Practice**, **Check on another occasion**, **Final check** and **Activate**. These remain separate train, validation and test recording sessions. Gesture details expand individually; internal labels and sentence templates stay under Advanced. Capture statistics and session IDs are optional details. The model page shows one training action for the selected model type and preserves explicit activation and rollback.
 
-The browser targets 25 fps and displays the actual received rate; resampling does not recover lost frames. Both local server processes must be running to move between the main app and Personalize.
+The browser targets 25 fps and displays the actual received rate; resampling does not recover lost frames. Personalize asks before saving local training samples, and separately asks before each full-frame sign-video trial. Saving or discarding a trial turns the camera off. Leaving with an active trial warns first; the page then attempts an authenticated discard and releases browser tracks. Exit delivery is best effort, not a guarantee after an abrupt browser termination.
 
 ## Run the main app
 
@@ -40,9 +42,9 @@ Open <http://127.0.0.1:8765>. Stock models and gestures remain the default. Sele
 uv run python -m hackathon.server --browser-camera --profile alice
 ```
 
-If `alice` has a promoted `models/motion.npz`, the app uses its custom vocabulary and dynamic recognizer. Otherwise it keeps compatible stock gestures and shows a setup warning. Start the camera, then hold **Record lips + gesture** or Space for one custom motion and its words. Release to decode the shared window. **Finish message** stops the camera for final review. REST, rejected and cancelled windows emit nothing. Pure lip input and stock gestures retain automatic capture.
+If `alice` has a promoted `models/motion.npz`, the app uses its custom vocabulary and dynamic recognizer. Otherwise it keeps compatible stock gestures and shows a setup warning. Start the camera, then choose **Start lips + gesture recording** for one custom motion and its words. Choose **Finish recording** to decode the shared window. The button is a toggle, so there is no sustained hold requirement; Space from the page background also toggles capture. **Finish message** stops the camera for final review. REST, rejected and cancelled windows emit nothing. Pure lip input and stock gestures retain automatic capture.
 
-The communication page separates capture, review and speech. Mouth framing is an optional preview. You can type a message without a camera; applying it never speaks automatically. On narrow screens, a nonempty message moves above the camera so review and speech remain easy to find.
+The communication page separates capture, review and speech. Its short first-use guide can be skipped and reopened. Typing is visible without a camera or training, and a skip link goes straight to it. Use this message applies the words without speaking or learning automatically. Unfinished edits stay in this tab through Settings/Personalize navigation and new recognition results; they are cleared when applied or deliberately discarded with New message. Speak is disabled while an edit is unapplied. Message and camera order stays fixed at every screen size, with message first in both visual and keyboard order. The main page names the active backend and enabled concepts. Mouth framing is optional.
 
 Automatic motion segmentation is available as an opt-in experiment with `QUIETBRIDGE_MOTION_AUTO=1`. It detects movement/rest windows without the Record button. Its thresholds are engineering defaults, not calibrated user-specific probabilities; validate false triggers and missed motions before choosing it for regular use.
 
@@ -69,7 +71,7 @@ uv run python -m hackathon.server --browser-camera \
   --sign-model /absolute/path/to/bsl-bundle/manifest.json
 ```
 
-This replaces the stock/personal hand classifier, not the lip reader. Start the camera, hold Record for **one sign and its words**, release, then finish the message and review. Both workers share the window. Only enabled class mappings can contribute a sign concept; low scores, unmapped classes, short capture, large gaps and overflow stay silent. This classifier has no trained REST/unknown class, so thresholds alone cannot guarantee safe rejection of arbitrary movements. All standard-sign output requires confirmation.
+This replaces the stock/personal hand classifier, not the lip reader. Start the camera, choose Start recording for **one sign and its words**, choose Finish recording, then finish the message and review. Both workers share the window. Only enabled class mappings can contribute a sign concept; low scores, unmapped classes, short capture, large gaps and overflow stay silent. This classifier has no trained REST/unknown class, so thresholds alone cannot guarantee safe rejection of arbitrary movements. All standard-sign output requires confirmation.
 
 The BSL-1K exporter consumes an externally installed upstream source, checkpoint and its exact class-ordered JSON labels. It does not download, bundle or license them. See [standard-sign setup, sources and validation limits](docs/sign-language-support.md) before exporting. Explicit model load failure is visible; it never falls back to stock and calls that BSL. ASL is an allowed manifest language, but no ASL pretrained model was integrated or verified in this round.
 

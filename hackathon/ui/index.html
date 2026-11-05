@@ -5,15 +5,47 @@
   <title>QuietBridge</title><link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<a class="skip-link" href="#corrected-text">Skip to typing</a>
 <main class="communication-page">
   <header>
     <a class="wordmark" href="/">QuietBridge<span class="bridge-mark" aria-hidden="true"></span></a>
-    <nav class="header-links" aria-label="Main navigation"><a href="/record">Personalize</a><a href="/settings">Settings</a></nav>
+    <nav class="header-links" aria-label="Main navigation"><a href="/record">Personalize</a><a href="/settings">Settings</a><button id="open-guide" class="text-button" type="button" aria-controls="first-use-guide" aria-expanded="false">Quick guide</button></nav>
   </header>
   <div id="rehearsal-banner" class="banner" hidden>Preview only. No camera or recognition. <a href="/settings#preview">Try an example</a></div>
   <section class="intro"><p class="eyebrow">Your words. Your pace.</p><h1>A little space to say it.</h1><p id="entry-hint">Start the camera, build your message, then review it before speaking.</p></section>
+  <section id="first-use-guide" class="first-use-guide" aria-labelledby="guide-heading" hidden>
+    <h2 id="guide-heading" tabindex="-1">Say your first message</h2>
+    <p>Type below and choose <strong>Use this message</strong>. Check the words, then choose <strong>Speak message</strong>. Nothing is spoken automatically.</p>
+    <p>Camera input is optional. It reads silent English mouth movements and the gestures listed below. It can make mistakes. Personal training is optional, and this is not full sign-language translation.</p>
+    <p>No microphone. Live video stays on this device and is not saved as training data. Personalize asks before saving recordings. Optional AI sends text only when enabled in Settings.</p>
+    <div class="guide-actions"><button id="guide-type" type="button">Type my first message</button><button id="guide-dismiss" class="text-button" type="button">Skip guide</button></div>
+  </section>
+  <p id="active-input" class="active-input" role="status">Checking available input. You can type without a camera.</p>
+  <p id="input-warning" class="error" role="status"></p>
   <ol class="flow-steps" aria-label="How to communicate"><li id="step-capture" aria-current="step"><span>1</span> Capture</li><li id="step-review"><span>2</span> Review</li><li id="step-speak"><span>3</span> Speak</li></ol>
   <div class="workspace">
+    <section class="message-panel" aria-labelledby="message-heading">
+      <div class="message-heading"><h2 id="message-heading">Your message</h2><span id="decision-status" class="status" role="status">Ready when you are</span></div>
+      <p id="draft-label" class="draft-label" hidden>Live draft. Review before speaking.</p>
+      <p id="message" class="message empty" aria-live="polite">Your words will appear here.</p>
+      <p id="reason" class="reason">Nothing is spoken until you choose.</p>
+      <div id="alternatives" class="alternatives" role="group" aria-label="Choose the message you intended"></div>
+      <div class="message-actions"><button id="speak" class="speak" type="button" disabled><span id="speak-label">Speak message</span><span aria-hidden="true">↗</span></button><button id="new-message" class="text-button" type="button" disabled>New message</button><button id="copy-message" class="text-button" type="button" disabled>Copy message</button></div>
+      <details id="correction-panel" class="correction-panel" open>
+        <summary>Edit or type a message</summary>
+        <div class="preview-form">
+          <label for="corrected-text">What would you like to say?</label><textarea id="corrected-text" maxlength="2000" rows="3" placeholder="Type here, or edit the recognized words."></textarea>
+          <label class="check-label"><input id="learn-correction" type="checkbox"> Use this text in future personal training</label>
+          <button id="save-correction" type="button">Use this message</button>
+          <p class="hint">Typing works without the camera. Use this message never speaks or trains automatically. Unfinished edits stay in this tab while you visit Settings or Personalize, and are cleared when you use them or start a new message.</p>
+          <p id="draft-status" class="hint" role="status"></p>
+        </div>
+      </details>
+      <p id="correction-status" class="hint" role="status"></p>
+      <p id="error" class="error" role="alert"></p>
+      <p id="result-timing" class="timing-note"></p>
+      <p id="last-spoken" class="last-spoken"></p>
+    </section>
     <section class="camera-panel" aria-labelledby="capture-heading">
       <div class="panel-heading"><h2 id="capture-heading">Your camera</h2><span class="local-note">No microphone</span></div>
       <div class="preview">
@@ -23,32 +55,11 @@
         <div id="camera-placeholder"><span class="viewfinder" aria-hidden="true"></span><p id="camera-message">Keep your face and hands in view.</p></div>
         <span id="preview-status" class="preview-label">Camera off</span><span id="hands-status" class="preview-label secondary">Waiting for tracking</span>
       </div>
-      <div class="record-controls"><button id="browser-camera-button" class="camera-action" type="button">Start camera</button><button id="record" class="record" type="button" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">Hold to record</span></button><button id="cancel" class="text-button" type="button" hidden>Cancel</button></div>
+      <div class="record-controls"><button id="browser-camera-button" class="camera-action" type="button">Start camera</button><button id="record" class="record" type="button" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">Start recording</span></button><button id="cancel" class="text-button" type="button" hidden>Cancel</button></div>
       <p id="record-hint" class="hint">Nothing is spoken automatically.</p>
       <div class="camera-options"><span id="mode-caption">Lips and gestures</span><a href="/settings">Change input</a></div>
       <details class="tracking-detail"><summary>Check mouth framing</summary><div class="mouth-view"><canvas id="mouth-overlay" width="320" height="200" aria-hidden="true"></canvas><span id="mouth-status">Face not detected</span></div></details>
-      <p class="capability-note">Personal gestures, not full sign-language translation. <a href="/record">Set up your phrases</a></p>
-    </section>
-    <section class="message-panel" aria-labelledby="message-heading">
-      <div class="message-heading"><h2 id="message-heading">Your message</h2><span id="decision-status" class="status">Ready when you are</span></div>
-      <p id="draft-label" class="draft-label" hidden>Live draft. Review before speaking.</p>
-      <p id="message" class="message empty" aria-live="polite">Your words will appear here.</p>
-      <p id="reason" class="reason">Nothing is spoken until you choose.</p>
-      <div id="alternatives" class="alternatives" role="group" aria-label="Choose the message you intended"></div>
-      <div class="message-actions"><button id="speak" class="speak" type="button" disabled><span id="speak-label">Speak message</span><span aria-hidden="true">↗</span></button></div>
-      <details id="correction-panel" class="correction-panel">
-        <summary>Edit or type a message</summary>
-        <div class="preview-form">
-          <label for="corrected-text">What would you like to say?</label><textarea id="corrected-text" maxlength="2000" rows="3" placeholder="Type here, or edit the recognized words."></textarea>
-          <label class="check-label"><input id="learn-correction" type="checkbox"> Use this text in future personal training</label>
-          <button id="save-correction" type="button">Use this message</button>
-          <p class="hint">Typing works without the camera. Saving never speaks or trains a model automatically.</p>
-        </div>
-      </details>
-      <p id="correction-status" class="hint" role="status"></p>
-      <p id="error" class="error" role="alert"></p>
-      <p id="result-timing" class="timing-note"></p>
-      <p id="last-spoken" class="last-spoken"></p>
+      <p id="capability-note" class="capability-note">Checking supported gestures. No full sign-language translation.</p><a class="capability-link" href="/settings#gestures">See supported concepts</a>
     </section>
   </div>
   <footer><span>Video stays on this device. You choose when to speak.</span><a href="/settings#gestures">What can it recognize?</a></footer>

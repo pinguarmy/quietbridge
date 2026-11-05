@@ -32,7 +32,8 @@ test('gesture intent template loads, saves, clears and validates', async () => {
     $: id => elements[id],
     activeProfile: {id: 'p', name: 'P', gestures: [{label: 'HELLO', intent_template: 'Say "{gesture}" & go'}], lip_prompts: []},
     action: async (path, data) => { sent = data; return context.activeProfile; },
-    loadProfiles: async () => {}, alert: message => alerts.push(message), setStage: () => {}
+    loadProfiles: async () => {}, alert: message => alerts.push(message), setStage: () => {},
+    setupBaseline: 'already captured'
   };
   vm.createContext(context);
   vm.runInContext(render + save, context);

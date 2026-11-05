@@ -16,6 +16,18 @@ A quiet communication desk. The message is the focal point, with one clear captu
 
 Pass A changes hierarchy. Pass B checks rendered desktop/mobile spacing, keyboard access, disabled/loading states and state transitions. Existing element IDs and API contracts stay intact.
 
+## First-use and everyday communication review, 2026-11-04 late
+
+- Product and surface: the local web app, Settings and Personalize. First successful expression comes before optional model training.
+- Metaphor and signature: the existing quiet communication desk, with a short dismissible first-use guide and a direct typed-message route.
+- Reference and stack: accessible native utility conventions; existing HTML/CSS/vanilla JavaScript. No remote fonts, new frontend dependency or marketing page.
+- Palette, type and layout: preserve off-white/navy/teal and system type. Message remains the focal point. Narrow-screen updates must not move a held or focused capture control.
+- Storyboard: understand the active input, type or choose camera, capture, review/edit, explicitly speak, begin another message. Personalize remains optional and returns to the current app.
+- Copy and motion: concrete short instructions matched to actual backend and camera state. No decorative motion or accuracy promises.
+- Accessibility and privacy: a non-hold capture option, keyboard/focus flow, labelled controls, no auto camera/speech/learning, explicit sensitive-data consent and useful error recovery.
+- Avoid: compulsory wizard, diagnostic wall, jargon-led profile creation, fake ready states, dead cross-port links and ratings substituted for user evidence.
+- Success: the frozen UX rubric in ux-review.md is independently scored by three model reviewers, with reproducible journeys and no serious unresolved defects. Real signer accuracy and user study are separate, unverified work.
+
 ## Paired standard-sign check, 2026-11-04
 
 - Surface and purpose: existing paired recorder, not a new daily-use page. A user can distinguish personal coordinates from a standard-sign video check before opening the camera.

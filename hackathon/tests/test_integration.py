@@ -318,7 +318,7 @@ class ServerTests(unittest.TestCase):
             response = conn.getresponse()
             self.assertEqual(response.status, 302)
             location = urlsplit(response.getheader("Location"))
-            self.assertEqual(location.netloc, "127.0.0.1:8766")
+            self.assertEqual(location.netloc, f"127.0.0.1:{self.server._lab.server_port}")
             self.assertEqual(parse_qs(location.query)["return_to"], [self.url + "/"])
             response.read()
         finally:

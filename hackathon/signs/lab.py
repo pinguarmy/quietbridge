@@ -434,11 +434,12 @@ class _Handler(BaseHTTPRequestHandler):
                 payload = {
                     "token": self.server.token,
                     "sign_model": self.server.sign_model_info,
+                    "capture_available": not bool(getattr(self.server.engine, "rehearsal", False)),
                     "recording": rec is not None or bool(self.server.mouth.snapshot()["recording"]),
                     "paired": self.server.paired_recording is not None,
                     "saved_count": self.server.saved_count,
                     "last_saved": self.server.last_saved,
-                    "model_ready": self.server.engine is not None,
+                    "model_ready": bool(getattr(self.server.engine, "ready", self.server.engine is not None)),
                     "gesture_support": combined_support,
                     "note": STATE_NOTE,
                     "recorded_frames": len(rec.timestamps_ms) if rec else (self.server.mouth.snapshot().get("frames", 0)),
@@ -539,7 +540,11 @@ class _Handler(BaseHTTPRequestHandler):
             mouth_state = self.server.mouth.snapshot()
             rgb = cv2.cvtColor(decoded, cv2.COLOR_BGR2RGB)
             start = time.perf_counter()
-            result = self.server.engine.infer(rgb, timestamp_ms)
+            try:
+                result = self.server.engine.infer(rgb, timestamp_ms)
+            except (FileNotFoundError, RuntimeError, ValueError) as error:
+                self._error(503, f"Hand tracking unavailable: {error}. Stop the camera and check local model setup.")
+                return
             process_ms = (time.perf_counter() - start) * 1000.0
             rec = self.server.recording
             if rec is not None and not rec.limit_reached:

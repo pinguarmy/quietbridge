@@ -481,6 +481,23 @@ class Runtime:
                 self._window_motion_done = False
                 self.state.update(phase="idle", recording=False)
                 self._publish(None, [], clock_ms())
+            elif name == "new_message":
+                self._check_revision(data)
+                process = getattr(self.speaker, "_process", None)
+                if (self.state["session_active"] or self.state["session_finalizing"]
+                        or self.state["phase"] != "idle"
+                        or (process is not None and process.poll() is None)):
+                    raise ValueError("Finish the current input or speech before starting a new message")
+                # Cancel publishes a decision, so discard the accumulated session first.
+                self.session.reset()
+                self._session_windows.clear()
+                self._session_conflict = False
+                self.session_signs.clear()
+                self.events.clear()
+                self.seen.clear()
+                self.state.update(session_text="", session_chunks=[], session_gestures=[],
+                                  last_sign=None, last_correction="")
+                self.action("cancel", {})
             elif name == "correct":
                 self._check_revision(data)
                 if self.state["session_active"] or self.state["session_finalizing"] or self.state["phase"] != "idle":

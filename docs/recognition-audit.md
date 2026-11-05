@@ -23,6 +23,12 @@ Evidence: [stock pose map](../hackathon/signs/recognizer.py#L43-L58), [one-event
 
 The personal motion input contains two sets of 21 hand landmarks and presence masks. It does not encode body posture or facial grammar as sign-language features. The separate lip model is not a non-manual sign-language grammar model. Supporting full BSL would require a BSL-specific dataset, temporal language model, non-manual features, fingerspelling handling where needed, and validation with BSL users. ASL and other sign languages need their own validated language paths. Full translation remains future work. The explicit isolated-sign backend is now implemented and distinguished from personal gestures in Settings; it does not provide those missing language capabilities.
 
+## First-use and everyday communication, 2026-11-05
+
+Independent onboarding reviews exposed message/profile edit loss, a separate-server Personalize prerequisite, sustained-hold recording, missing New message, unclear active input and mobile live reordering. The current pass preserves unfinished text through navigation and incoming results, makes typing visible, adds a reopenable short guide and revision-checked New message, uses a single-press capture toggle, and keeps message/camera order fixed. Personalize opens an owned on-demand loopback recorder with lazy tracking. Form edits survive add/remove, profile creation is name-first with keyboard focus, and local training capture has explicit consent and camera-off control.
+
+The frozen criteria, independent scores, fixes and remaining verification limits are in [the usability review](ux-review.md). These changes improve engineering usability; they do not measure recognition accuracy or replace testing with intended users.
+
 ## Paired standard-sign capture and evaluation, 2026-11-04
 
 Found and closed a data-path gap: paired recording stored landmarks/mouth crops, while the BSL backend needs RGB video; evaluation only ran personal MotionModel. Optional standard-sign recording now has per-trial video consent before camera access, a bounded full-frame buffer and model/manifest identity. Default capture remains coordinate-only. Video pairs replay the actual sign backend alongside lips and fusion; personal-motion training/evaluation excludes them.

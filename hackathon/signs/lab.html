@@ -441,6 +441,7 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
 
 <h1 id="title">Practice your phrases. Record one try.</h1>
 <p id="intro" class="intro">Per-profile custom gesture sequences and lip clips. Data remains local on this Mac.</p>
+<p id="captureUnavailable" class="hint" role="status" hidden>Preview only. Camera recording is unavailable here. Return to the main app to type, or restart without --rehearsal for local recording.</p>
 
 <div id="recordingLayout" class="layout">
   <section>
@@ -493,9 +494,11 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
     <p id="mouthNote" class="small" hidden>Mouth these words silently at a natural pace. Face camera. Saved mouth crops only; no microphone.</p>
     <p id="trackingNote" class="small">Tracking only · not a transcript or trained recognizer</p>
     <div id="status" role="status" aria-live="polite">Ready. Press Start recording when framed.</div>
+    <label><input id="localConsent" type="checkbox"> I agree to save samples locally: gesture coordinates and mouth crops. Full video requires separate consent.</label>
     <div class="btn-group">
       <button id="record" type="button" disabled>Connecting…</button>
       <button id="discard" type="button" disabled>Discard</button>
+      <button id="cameraOff" type="button" class="btn-secondary" disabled>Turn camera off</button>
     </div>
     <div class="progress">
       <span id="progress">0 / 5 recordings</span>
@@ -511,7 +514,7 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
 <div id="setupLayout" class="setup-panel" hidden>
   <div id="setupOnboarding" class="setup-onboarding">
     <h3>1. Choose your personal phrases</h3>
-    <p>QuietBridge tailors recognition to your custom gestures and lip movements. Review the phrases below or add new ones. When ready, save to begin practicing.</p>
+    <p>Personal training is optional. Review or add phrases if you want to practice, or return to your message without training.</p>
   </div>
   <h2>Your phrases and gestures</h2>
   <p class="intro">Start with a few useful phrases. Open a gesture to change what it means and how you make it. These are personal movements, not a BSL or ASL course.</p>
@@ -587,16 +590,13 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
 </section>
 
 <div id="newProfileDialog" class="dialog-backdrop" hidden>
-  <div class="dialog" role="dialog" aria-labelledby="dialogTitle">
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
     <h3 id="dialogTitle">Create New Profile</h3>
-    <div class="form-field">
-      <label for="newProfileId">Profile Identifier (e.g. alice, user-1):</label>
-      <input type="text" id="newProfileId" maxlength="64" placeholder="letters, numbers, hyphen, underscore">
-    </div>
-    <div class="form-field">
-      <label for="newProfileName">Display Name (e.g. Alice Smith):</label>
-      <input type="text" id="newProfileName" maxlength="64" placeholder="User name">
-    </div>
+    <div class="form-field"><label for="newProfileName">Your name</label>
+      <input type="text" id="newProfileName" maxlength="64" autocomplete="name"></div>
+    <details><summary>Advanced: profile identifier</summary>
+      <div class="form-field"><label for="newProfileId">Optional identifier</label>
+      <input type="text" id="newProfileId" maxlength="64" placeholder="Generated automatically if blank"></div></details>
     <div class="dialog-buttons">
       <button id="btnCancelNewProfile" class="btn-cancel" type="button">Cancel</button>
       <button id="btnConfirmNewProfile" type="button">Create Profile</button>
@@ -618,7 +618,8 @@ let token='',stream=null,loop=null,inflight=false,working=false,recording=false,
 let mouthPreviewError='',frames=0,started=0,lastTracking=0,mouthCrop=null;
 let activeProfile=null,allProfiles=[],currentStage='train'; // setup, train, validation, test, models
 let modelData=null,modelBusy=false;
-let signModelInfo=null,activeVideoCapture=false;
+let signModelInfo=null,activeVideoCapture=false,captureAvailable=true;
+let setupBaseline=null,dialogReturnFocus=null,startingCapture=false,pageLeaving=false;
 
 function videoRequested(){return mode==='paired'&&$('pairedCaptureKind').value==='video';}
 function recordingModeKey(m){return m==='paired'&&videoRequested()?`paired-video-${signModelInfo?.manifest_sha256?.slice(0,12)||'unconfigured'}`:m;}
@@ -658,7 +659,7 @@ function getSafeReturnUrl(){
     const isRootPath=url.pathname==='/';
     const noCreds=!url.username&&!url.password;
     const noExtra=!url.search&&!url.hash;
-    const notSelfLab=url.port!=='8766';
+    const notSelfLab=url.port!==window.location.port;
     if(isLoopback&&isHttp&&isRootPath&&noCreds&&noExtra&&notSelfLab){
       return url.href;
     }
@@ -949,6 +950,7 @@ function render(){
     $('next').textContent='Next gesture →';
   }
 
+  $('progress').textContent+=' (browser guide count, not model validation)';
   // Check if current stage is completed for this modality
   checkStageCompletion();
   controls();
@@ -967,13 +969,13 @@ function checkStageCompletion(){
   if(allMet){
     $('advanceBox').hidden=false;
     if(currentStage==='train'){
-      $('advanceMsg').textContent='Practice round completed. Ready for independent validation.';
+      $('advanceMsg').textContent='Browser guide target reached. Record a separate validation session; this does not validate a model.';
       $('btnAdvanceStage').textContent='Continue to Check on another occasion →';
     }else if(currentStage==='validation'){
-      $('advanceMsg').textContent='Validation round completed. Ready for final check.';
+      $('advanceMsg').textContent='Browser guide target reached. Record a separate final-test session; this is not a model result.';
       $('btnAdvanceStage').textContent='Continue to Final check →';
     }else if(currentStage==='test'){
-      $('advanceMsg').textContent='Final check completed for this profile. Ready to activate models.';
+      $('advanceMsg').textContent='Browser guide target reached. Review model reports before activation.';
       $('btnAdvanceStage').textContent='Continue to Activate →';
     }else{
       $('advanceMsg').textContent='Setup completed.';
@@ -999,10 +1001,12 @@ $('btnAdvanceStage').onclick=()=>{
 
 function controls(){
   const b=$('record');
-  b.disabled=working||!token||currentStage==='setup'||(!recording&&videoRequested()&&(!$('videoConsent').checked||!signModelInfo));
+  b.disabled=!captureAvailable||working||!token||currentStage==='setup'||(!recording&&videoRequested()&&(!$('videoConsent').checked||!signModelInfo));
   b.textContent=working?'Please wait…':recording?'Finish & save':'Start recording';
   b.classList.toggle('active',recording);
   $('discard').disabled=!recording||working;
+  $('cameraOff').disabled=!stream||working;
+  $('localConsent').disabled=recording||working;
   $('next').disabled=recording||working||currentStage==='setup';
   $('gesturesTab').disabled=recording||working;
   $('lipsTab').disabled=recording||working;
@@ -1150,10 +1154,10 @@ async function sendFrame(){
       note(activeVideoCapture?'Video limit reached. Discard this trial and record a shorter sign.':'Trial limit reached. Press Finish & save.',true);
     }
   }catch(e){
-    draw.clearRect(0,0,640,480);
-    $('tracking').textContent='Tracking disconnected';
-    clearMouth('Face preview unavailable');
-    note(e.message,true);
+    stopCamera();
+    $('tracking').textContent='Camera off';
+    note(`${e.message} Camera is off.${recording?' Discard or save the current trial before retrying.':''}`,true);
+    controls();
   }finally{
     inflight=false;
   }
@@ -1183,6 +1187,9 @@ async function camera(){
 
 function setStage(stage){
   if(recording||working||modelBusy)return;
+  if(stage===currentStage)return;
+  if(currentStage==='setup' && !confirmDiscardSetup())return;
+  if(stage==='setup')setupBaseline=null;
   currentStage=stage;
   if(stage==='models'){
     render();
@@ -1229,6 +1236,7 @@ $('next').onclick=()=>{
 
 $('gesturesTab').onclick=()=>{
   if(recording||working)return;
+  if(currentStage==='setup')collectSetupFields();
   mode='gestures';
   note('Ready. Press Start recording when framed.');
   render();
@@ -1236,6 +1244,7 @@ $('gesturesTab').onclick=()=>{
 
 $('lipsTab').onclick=()=>{
   if(recording||working)return;
+  if(currentStage==='setup')collectSetupFields();
   mode='lips';
   note('Ready. Mouth the displayed words silently.');
   render();
@@ -1243,6 +1252,7 @@ $('lipsTab').onclick=()=>{
 
 $('pairedTab').onclick=()=>{
   if(recording||working)return;
+  if(currentStage==='setup')collectSetupFields();
   mode='paired';
   note('Ready. Select gesture & intended prompt, then Start recording.');
   render();
@@ -1271,11 +1281,18 @@ $('record').onclick=async()=>{
   controls();
   try{
     if(!recording){
-      if(videoRequested())pairedRequest(currentStage,'check'); // Check consent before opening the camera.
+      if(!activeProfile?.id)throw Error('Choose a profile first.');
+      if(!$('localConsent').checked)throw Error('Agree to save local training samples before recording.');
+      const selected=getProgressData(activeProfile.id,currentStage,mode);
+      if(mode==='gestures'&&!activeProfile.gestures?.[selected.index]?.label)throw Error('Choose a configured gesture first.');
+      if(mode==='lips'&&!activeProfile.lip_prompts?.[selected.index]?.trim())throw Error('Choose a configured prompt first.');
+      if(mode==='paired')pairedRequest(currentStage,'check'); // Validate before opening the camera.
       await camera();
+      if(pageLeaving){stopCamera();return;}
       const split=currentStage==='validation'?'validation':(currentStage==='test'?'test':'train');
       const session=getActiveSession(activeProfile.id,mode,split);
 
+      startingCapture=true;
       if(mode==='gestures'){
         const gestures=activeProfile.gestures||[];
         const prog=getProgressData(activeProfile.id,currentStage,mode);
@@ -1304,6 +1321,8 @@ $('record').onclick=async()=>{
         activeVideoCapture=body.capture_video;
       }
       recording=true;
+      startingCapture=false;
+      if(pageLeaving){discardOnExit();stopCamera();return;}
       frames=0;
       framesReceivedCount=0;
       started=Date.now();
@@ -1325,6 +1344,7 @@ $('record').onclick=async()=>{
         await action('paired/stop',{});
       }
       recording=false;
+      stopCamera();
       const prog=getProgressData(activeProfile.id,currentStage,mode);
       while(prog.counts.length<=prog.index)prog.counts.push(0);
       prog.counts[prog.index]=(prog.counts[prog.index]||0)+1;
@@ -1348,8 +1368,10 @@ $('record').onclick=async()=>{
       }
     }
   }catch(e){
+    if(!recording)stopCamera();
     note(e.name==='NotAllowedError'?'Allow camera access in your browser, then try again.':e.message,true);
   }finally{
+    startingCapture=false;
     working=false;
     controls();
   }
@@ -1368,6 +1390,7 @@ $('discard').onclick=async()=>{
       await action('paired/discard');
     }
     recording=false;
+    stopCamera();
     activeVideoCapture=false;
     $('videoConsent').checked=false;
     note('Trial discarded without saving.');
@@ -1379,6 +1402,17 @@ $('discard').onclick=async()=>{
     controls();
   }
 };
+
+function stopCamera(){
+  clearInterval(loop); loop=null;
+  stream?.getTracks().forEach(t=>t.stop());
+  stream=null; video.srcObject=null;
+  $('placeholder').hidden=false;
+  $('tracking').textContent='Camera off';
+  draw.clearRect(0,0,640,480);
+  clearMouth('Camera off');
+}
+$('cameraOff').onclick=()=>{if(!working){stopCamera();if(recording)note('Camera off. Discard this trial or save any frames already received.',true);controls();}};
 
 // Model operations use the active profile on the server.
 function modelControls(){
@@ -1529,6 +1563,29 @@ $('rollbackModel').onclick=()=>{
 };
 
 // Setup Panel & Customization Logic
+function collectSetupFields(){
+  activeProfile.name=$('profileDisplayName').value;
+  $('gestureTbody').querySelectorAll('tr').forEach((row,i)=>{
+    const gesture=activeProfile.gestures[i];
+    for(const field of ['emoji','label','display_name','concept','description','intent_template']){
+      const value=row.querySelector(`[data-field="${field}"]`).value;
+      if(field==='intent_template'&&!value)delete gesture[field]; else gesture[field]=value;
+    }
+  });
+  activeProfile.lip_prompts=Array.from($('promptTbody').querySelectorAll('tr'),row=>row.querySelector('input').value);
+}
+function setupDirty(){
+  if(currentStage!=='setup'||!setupBaseline)return false;
+  collectSetupFields();
+  return JSON.stringify(activeProfile)!==setupBaseline;
+}
+function confirmDiscardSetup(){
+  if(!setupDirty())return true;
+  if(!confirm('Discard unsaved changes to your phrases?'))return false;
+  activeProfile=JSON.parse(setupBaseline);
+  renderSetupView();
+  return true;
+}
 function renderSetupView(){
   $('profileDisplayName').value=activeProfile.name||'';
   const tbodyG=$('gestureTbody');
@@ -1572,6 +1629,7 @@ function renderSetupView(){
         alert('Profile must retain at least one gesture definition.');
         return;
       }
+      collectSetupFields();
       activeProfile.gestures.splice(idx,1);
       renderSetupView();
     };
@@ -1584,13 +1642,16 @@ function renderSetupView(){
         alert('Profile must retain at least one lip prompt.');
         return;
       }
+      collectSetupFields();
       activeProfile.lip_prompts.splice(idx,1);
       renderSetupView();
     };
   });
+  if(!setupBaseline){ collectSetupFields(); setupBaseline=JSON.stringify(activeProfile); }
 }
 
 $('btnAddGesture').onclick=()=>{
+  collectSetupFields();
   activeProfile.gestures.push({
     label:`GESTURE_${activeProfile.gestures.length+1}`,
     display_name:`Gesture ${activeProfile.gestures.length+1}`,
@@ -1603,6 +1664,7 @@ $('btnAddGesture').onclick=()=>{
 };
 
 $('btnAddPrompt').onclick=()=>{
+  collectSetupFields();
   activeProfile.lip_prompts.push('New custom prompt sentence.');
   renderSetupView();
 };
@@ -1613,7 +1675,7 @@ $('btnSaveProfile').onclick=async()=>{
     // Collect updated gestures from inputs
     const gRows=$('gestureTbody').querySelectorAll('tr');
     const newGestures=[];
-    gRows.forEach(row=>{
+    gRows.forEach((row,index)=>{
       const emoji=row.querySelector('[data-field="emoji"]').value.trim()||'✋';
       const label=row.querySelector('[data-field="label"]').value.trim().toUpperCase();
       const display_name=row.querySelector('[data-field="display_name"]').value.trim()||label;
@@ -1621,8 +1683,8 @@ $('btnSaveProfile').onclick=async()=>{
       const description=row.querySelector('[data-field="description"]').value.trim();
       const intent_template=row.querySelector('[data-field="intent_template"]').value.trim();
       if(intent_template && intent_template.split('{gesture}').length!==2)throw Error('Intent template must contain exactly one {gesture} placeholder.');
-      const gesture={emoji,label,display_name,concept,description,hint:''};
-      if(intent_template)gesture.intent_template=intent_template;
+      const gesture={...activeProfile.gestures[index],emoji,label,display_name,concept,description};
+      if(intent_template)gesture.intent_template=intent_template; else delete gesture.intent_template;
       newGestures.push(gesture);
     });
 
@@ -1641,6 +1703,7 @@ $('btnSaveProfile').onclick=async()=>{
     });
     activeProfile=updated;
     await loadProfiles();
+    setupBaseline=null;
     setStage('train');
     note('Saved. Start recording when you are ready.');
   }catch(e){
@@ -1669,46 +1732,52 @@ async function loadProfiles(){
 $('profileSelect').onchange=async()=>{
   const targetId=$('profileSelect').value;
   if(targetId===activeProfile.id)return;
+  if(!confirmDiscardSetup()){ $('profileSelect').value=activeProfile.id; return; }
   try{
     const updated=await action('profile/select',{id:targetId});
     activeProfile=updated;
+    if(currentStage==='setup')setupBaseline=null;
     $('videoConsent').checked=false;
     note(`Switched to profile: ${activeProfile.name} (${activeProfile.id})`);
     modelData=null;
     render();
     if(currentStage==='models')await refreshModelStatus();
   }catch(e){
+    $('profileSelect').value=activeProfile.id;
     alert('Failed to switch profile: '+e.message);
   }
 };
 
-$('btnNewProfile').onclick=()=>{
-  $('newProfileId').value='';
-  $('newProfileName').value='';
-  $('newProfileDialog').hidden=false;
-};
-
-$('btnCancelNewProfile').onclick=()=>{
+function closeProfileDialog(){
   $('newProfileDialog').hidden=true;
+  dialogReturnFocus?.focus();
+}
+$('btnNewProfile').onclick=()=>{
+  if(!confirmDiscardSetup())return;
+  dialogReturnFocus=$('btnNewProfile');
+  $('newProfileId').value=''; $('newProfileName').value='';
+  $('newProfileDialog').hidden=false; $('newProfileName').focus();
 };
-
+$('btnCancelNewProfile').onclick=closeProfileDialog;
+$('newProfileDialog').addEventListener('keydown',event=>{
+  if(event.key==='Escape'){event.preventDefault();closeProfileDialog();return;}
+  if(event.key!=='Tab')return;
+  const focusable=Array.from($('newProfileDialog').querySelectorAll('input,button,summary')).filter(el=>el.getClientRects().length&&!el.disabled);
+  if(!focusable.length)return;
+  const first=focusable[0],last=focusable[focusable.length-1];
+  if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+  else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+});
 $('btnConfirmNewProfile').onclick=async()=>{
-  const id=$('newProfileId').value.trim();
   const name=$('newProfileName').value.trim();
-  if(!id){
-    alert('Please provide a profile identifier');
-    return;
-  }
+  if(!name){alert('Please enter your name.');$('newProfileName').focus();return;}
+  const id=$('newProfileId').value.trim()||`profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
   try{
     const created=await action('profile/create',{id,name});
-    $('newProfileDialog').hidden=true;
-    await loadProfiles();
-    activeProfile=created;
-    setStage('setup');
+    closeProfileDialog(); await loadProfiles(); activeProfile=created;
+    setupBaseline=null; currentStage='train'; setStage('setup');
     note(`Created new profile: ${created.name} (${created.id})`);
-  }catch(e){
-    alert('Failed to create profile: '+e.message);
-  }
+  }catch(e){alert('Failed to create profile: '+e.message);}
 };
 
 setInterval(()=>{
@@ -1719,14 +1788,29 @@ setInterval(()=>{
   }
 },500);
 
+$('returnLink').addEventListener('click',event=>{
+  if(!confirmDiscardSetup())event.preventDefault();
+});
+window.addEventListener('beforeunload',event=>{
+  if(recording||working||setupDirty()){event.preventDefault(); event.returnValue='';}
+});
+function discardOnExit(){
+  if(!token)return;
+  const path=mode==='paired'?'paired/discard':mode==='lips'?'mouth/discard':'discard';
+  fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-QuietBridge-Token':token},body:'{}',keepalive:true}).catch(()=>{});
+}
 window.addEventListener('pagehide',()=>{
-  clearInterval(loop);
-  stream?.getTracks().forEach(t=>t.stop());
+  pageLeaving=true;
+  if(recording||startingCapture)discardOnExit();
+  stopCamera();
 });
 
 request('/api/state').then(async s=>{
   token=s.token;
   signModelInfo=s.sign_model||null;
+  captureAvailable=s.capture_available!==false;
+  $('captureUnavailable').hidden=captureAvailable;
+  if(!captureAvailable)note('Preview only. Camera recording is unavailable here. Return to the main app to type, or restart without --rehearsal for local recording.',true);
   await loadProfiles();
   if(s.paired){
     mode='paired';
@@ -1749,6 +1833,7 @@ request('/api/state').then(async s=>{
   const hasSamples=hasRecordedSamples(activeProfile?.id);
   if(!hasSamples&&!recording){
     currentStage='setup';
+    setupBaseline=null;
   }
 
   render();

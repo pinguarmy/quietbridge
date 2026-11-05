@@ -222,7 +222,7 @@ def test_tracking_endpoint_deepcopy_and_record_redirect():
         assert response.status == 302
         from urllib.parse import urlsplit, parse_qs
         location = urlsplit(response.getheader("Location"))
-        assert location.netloc == "127.0.0.1:8766"
+        assert location.hostname == "127.0.0.1" and location.port == server._lab.server_port
         assert parse_qs(location.query)["return_to"] == [f"http://127.0.0.1:{server.server_port}/"]
         response.read()
         connection.close()

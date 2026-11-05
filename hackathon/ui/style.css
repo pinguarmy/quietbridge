@@ -40,7 +40,7 @@ h2 { font-size: 16px; font-weight: 650; margin: 0; letter-spacing: -.25px; }
 .flow-steps span { display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid #aebfc9; border-radius: 50%; font-size: 11px; }
 .flow-steps [aria-current="step"] { color: var(--accent); font-weight: 650; }
 .flow-steps [aria-current="step"] span { background: var(--accent); border-color: var(--accent); color: white; }
-.workspace { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 32px; align-items: start; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: 32px; align-items: start; }
 .camera-panel, .message-panel { min-width: 0; }
 .panel-heading, .message-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 15px; }
 .local-note { color: var(--muted); font-size: 12px; }
@@ -124,6 +124,20 @@ footer { margin-top: 34px; padding-top: 20px; border-top: 1px solid var(--line);
 .support-note { background: #e8eff2; padding: 14px 16px; font-size: 13px; border-radius: 6px; color: var(--muted); }
 .support-note strong { color: var(--ink); }
 .message.cleanup-pending { text-decoration: none; }
+.skip-link { position: absolute; left: 12px; top: -80px; z-index: 5; padding: 12px 16px; background: var(--white); border: 2px solid var(--accent); }
+.skip-link:focus { top: 12px; }
+.first-use-guide { border-left: 3px solid var(--accent); background: var(--white); padding: 18px 22px; margin-bottom: 20px; }
+.first-use-guide p { max-width: 76ch; font-size: 14px; color: var(--muted); }
+.guide-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.active-input { font-size: 13px; color: var(--muted); margin: 0 0 18px; overflow-wrap: anywhere; }
+.capability-link { font-size: 13px; display: inline-flex; align-items: center; min-height: 44px; }
+.header-links { flex-wrap: wrap; gap: 16px; }
+.header-links button { font-size: 13px; }
+.message-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.message-actions .speak { flex-basis: 100%; }
+#draft-status { color: var(--accent); }
+#corrected-text { scroll-margin-top: 18px; }
+@media(max-width: 760px) { header { flex-wrap: wrap; gap: 6px; } .first-use-guide { padding: 15px; } .flow-steps { flex-wrap: wrap; } }
 @media (max-width: 760px) {
   main { padding: 18px 20px; }
   header { padding-bottom: 14px; }
@@ -135,10 +149,6 @@ footer { margin-top: 34px; padding-top: 20px; border-top: 1px solid var(--line);
   .workspace { grid-template-columns: 1fr; gap: 25px; }
   .profile-switch-form { grid-template-columns: 1fr; }
   .preview { aspect-ratio: 16/9; }
-  .communication-page:has(.message:not(.empty)) .workspace { display: flex; flex-direction: column; }
-  .communication-page:has(.message:not(.empty)) .message-panel { order: -1; width: 100%; }
-  .communication-page:has(.message:not(.empty)) .camera-panel { width: 100%; }
-  .communication-page:has(.message:not(.empty)) .message { min-height: 60px; }
   .message-panel { min-height: 380px; padding: 22px; }
   .message { min-height: 100px; font-size: 28px; }
   .flow-steps { margin-bottom: 22px; gap: 24px; }

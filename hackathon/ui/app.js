@@ -5,6 +5,34 @@ let state = null, token = '', actionChain = Promise.resolve(), pointerHeld = fal
 let speaking = false, pendingActions = 0, renderedRevision = null, renderedAlternatives = '', renderedVocabulary = '', initialized = false, chosenText = null, connectionLost = false;
 let browserCameraStream = null, browserCameraStarting = false, browserCameraStopping = false, browserFrameTimer = null, browserFrameCanvas = document.createElement('canvas');
 browserFrameCanvas.width = 960; browserFrameCanvas.height = 720;
+let editorDirty = false, editorProfile = null;
+const draftKey = profile => 'quietbridge-unsent-v1:' + (profile || 'default');
+function storageRead(key) { try { return window.sessionStorage?.getItem(key) || ''; } catch (_) { return ''; } }
+function storageWrite(key, value) { try { if (value) window.sessionStorage?.setItem(key, value); else window.sessionStorage?.removeItem(key); } catch (_) {} }
+function persistEditor() {
+  if (!$('corrected-text') || !state) return;
+  storageWrite(draftKey(editorProfile || state.profile_id), editorDirty ? $('corrected-text').value : '');
+}
+function editMessage() {
+  editorDirty = $('corrected-text').value !== (state?.decision?.text || '');
+  persistEditor(); updateMessage();
+  text('draft-status', editorDirty ? 'Unfinished edit kept in this tab. Choose Use this message before speaking it.' : '');
+}
+function confirmDiscard(message) { return typeof window.confirm === 'function' && window.confirm(message); }
+function hasCurrentMessage() { return Boolean(editorDirty || state?.decision?.text || state?.session_text); }
+function focusEditor() { if ($('correction-panel')) $('correction-panel').open = true; $('corrected-text')?.focus(); }
+function setGuide(open) {
+  hide('first-use-guide', !open);
+  $('open-guide')?.setAttribute('aria-expanded', String(open));
+  if (!open) { try { window.localStorage?.setItem('quietbridge-guide-seen-v1', 'yes'); } catch (_) {} }
+}
+function renderCapabilities(s) {
+  const enabled = Object.values(s.vocabulary || {}).filter(v => v.enabled ?? v.verified).map(v => v.phrase.replace(/[.!?]+$/, ''));
+  const backend = s.rehearsal ? 'Preview only, no recognition' : s.signs === 'unavailable' ? 'Gesture input unavailable' : s.sign_input === 'isolated' ? `${s.sign_model?.language?.toUpperCase() || 'Standard'} isolated signs, experimental` : s.sign_input === 'motion' ? 'Personal gestures, experimental' : s.signs === 'loading' ? 'Gesture model loading' : 'Stock hand poses';
+  const concepts = enabled.length ? enabled.slice(0, 6).join(', ') + (enabled.length > 6 ? ` and ${enabled.length - 6} more` : '') : 'no enabled concepts';
+  text('active-input', `${s.profile_name || 'Stock configuration'} · ${s.rehearsal ? backend : s.mode === 'lips' ? 'Lips only' : s.mode === 'signs' ? backend : 'Lips + ' + backend}. Typing is always available.`);
+  text('capability-note', `${backend}: ${concepts}. ${s.rehearsal ? 'Examples do not test recognition.' : 'Only these configured concepts can contribute text. Not full sign-language translation.'}`);
+}
 async function uploadBrowserFrames() {
   if (!browserCameraStream || !state?.browser_camera || state.rehearsal) return;
   try {
@@ -24,11 +52,12 @@ async function uploadBrowserFrames() {
         } else if (!response.ok) text('error', `Browser camera upload failed (${response.status}).`);
       }
     }
-  } catch (_) { /* Keep the camera active; the status endpoint reports server-side errors. */ }
+  } catch (_) { text('error', 'Camera frames could not reach QuietBridge. Finish message to stop the camera, then retry or type below.'); }
   if (browserCameraStream) browserFrameTimer = setTimeout(uploadBrowserFrames, 40);
 }
 async function startBrowserCamera() {
   if (browserCameraStarting || browserCameraStopping || browserCameraStream) return;
+  if (hasCurrentMessage() && !confirmDiscard('Starting the camera begins a new message and replaces the current words. Continue?')) return;
   browserCameraStarting = true;
   const button = $('browser-camera-button');
   if (button) { button.disabled = true; button.textContent = 'Starting camera…'; }
@@ -50,7 +79,8 @@ async function startBrowserCamera() {
     const hadCamera = Boolean(browserCameraStream);
     stopBrowserCamera();
     if (hadCamera) await requestAction('camera_session', {active:false});
-    text('error', e.name === 'NotAllowedError' ? 'Camera access was blocked. Allow camera access for this site in your browser, then try again.' : e.name === 'NotFoundError' ? 'No camera was found. Connect a camera and try again.' : `Could not start the browser camera: ${e.message || 'check browser camera permissions and try again.'}`);
+    text('error', e.name === 'NotAllowedError' ? 'Camera access was blocked. Allow this site in your browser address bar and try again, or type your message below.' : e.name === 'NotFoundError' ? 'No camera was found. Connect one and try again, or type your message below.' : `Could not start the camera: ${e.message || 'check your browser camera permissions'}. You can type below.`);
+    focusEditor();
   } finally {
     browserCameraStarting = false;
     if (button) { button.disabled = false; button.textContent = browserCameraStream ? 'Finish message' : 'Start camera'; }
@@ -94,19 +124,20 @@ function requestAction(name, data = {}) {
     const result = await res.json();
     if (!res.ok) throw new Error(result.error || 'Please try again.');
     render(result); text('error', ''); return true;
-  }).catch(e => { text('error', e.message); return false; }).finally(() => { pendingActions--; });
+  }).catch(e => { text('error', `${e.message || 'Connection unavailable.'} Your edit is kept. Try again when connected, or copy your typed text.`); return false; }).finally(() => { pendingActions--; updateMessage(); });
   return actionChain;
 }
 
 function render(s) {
   if (state && s.revision < state.revision) return;
   state = s; if (s.token) token = s.token;
+  renderCapabilities(s);
   hide('rehearsal-banner', !s.rehearsal); hide('preview', !s.rehearsal);
   text('camera-status', s.camera); text('lip-status', s.lips); text('hand-status', s.signs);
   text('last-sign', s.last_sign ? s.last_sign.label + ' · ' + s.last_sign.score.toFixed(2) : '—');
   text('sign-input', s.sign_input || '—');
   const signModel = s.sign_model;
-  text('sign-model-status', signModel?.language ? `${signModel.language.toUpperCase()} isolated signs · experimental${signModel.sha256 ? ' · ' + signModel.sha256.slice(0,12) : ''}. Hold for one sign. Not continuous sentence translation.` : 'Standard sign models are not loaded. The current backend recognizes only its configured gestures.');
+  text('sign-model-status', signModel?.language ? `${signModel.language.toUpperCase()} isolated signs · experimental${signModel.sha256 ? ' · ' + signModel.sha256.slice(0,12) : ''}. Record one sign at a time. Not continuous sentence translation.` : 'Standard sign models are not loaded. The current backend recognizes only its configured gestures.');
   text('profile-name', s.profile_name || 'Stock configuration');
   const profileSelect = $('profile-select');
   if (profileSelect && profilesLoaded && !profileSelect.matches(':focus') && s.profile_id) {
@@ -119,7 +150,9 @@ function render(s) {
   text('language-model', lipPending ? 'Loading…' : lipUnavailable ? s.lips : lipModel.language_model_sha256 ? 'personal · ' + lipModel.language_model_sha256.slice(0,12) : 'stock');
   text('profile-model-status', lipPending || s.signs === 'loading' ? 'Loading models. Wait before starting the camera.' : s.lips === 'unavailable' || s.signs === 'unavailable' ? 'An input model is unavailable. Check Technical details below.' : s.rehearsal ? 'Preview mode. No recognition model is running.' : 'Model status reflects this running process, not just files saved in Personalize.');
   text('component-errors', [s.profile_warning, s.camera_error, s.lip_error, s.sign_error].filter(Boolean).join('\n'));
-  const modeName = {combined:'Lips and gestures', lips:'Lips only', signs:'Gestures only'}[s.mode];
+  const inputWarnings = [s.camera_error, s.sign_error].filter(Boolean);
+  text('input-warning', inputWarnings.length ? inputWarnings.join(' ') + ' You can still type your message. Check input details in Settings before retrying the camera.' : '');
+  const modeName = {combined:s.sign_input === 'isolated' ? 'Lips and isolated signs' : 'Lips and gestures', lips:'Lips only', signs:s.sign_input === 'isolated' ? 'Isolated signs only' : 'Gestures only'}[s.mode];
   text('mode-caption', modeName);
   if ($('test-text')) $('test-text').disabled = s.mode === 'signs';
   if ($('test-label')) $('test-label').disabled = s.mode === 'lips';
@@ -139,7 +172,7 @@ function render(s) {
     browserCameraButton.disabled = browserCameraStarting || browserCameraStopping || (!browserCameraStream && s.session_finalizing === true);
   }
   text('preview-status', s.rehearsal ? 'Preview · camera off' : ready || browserCameraStream ? 'Camera on' : browserCameraAvailable ? 'Waiting for browser camera' : s.camera === 'unavailable' ? 'Camera unavailable' : 'Getting ready…');
-  text('camera-message', s.rehearsal ? 'Your camera is off in preview.' : browserCameraAvailable && !browserCameraStream ? 'Select Start camera to share this browser camera.' : s.camera === 'unavailable' ? 'Check camera access in Settings.' : 'Getting your camera ready…');
+  text('camera-message', s.rehearsal ? 'Your camera is off in preview.' : browserCameraAvailable && !browserCameraStream ? 'Select Start camera to share this browser camera.' : s.camera === 'unavailable' ? 'Allow camera access in your browser, or type your message below.' : 'Getting your camera ready…');
   const record = $('record');
   const motionInput = ['motion', 'isolated'].includes(s.sign_input);
   const explicitMotionSession = motionInput && s.mode !== 'lips' && s.session_active === true;
@@ -150,23 +183,24 @@ function render(s) {
     record.disabled = sessionBusy || s.rehearsal || !ready || !['idle','recording'].includes(s.phase)
       || (needsLips && s.lips !== 'ready') || (s.mode === 'signs' && s.signs !== 'ready');
     record.classList.toggle('listening', s.phase === 'recording');
-    const idleLabel = s.mode === 'signs' ? 'Hold to record a gesture' : motionInput ? 'Hold to record lips + gesture' : 'Hold to mouth words';
-    text('record-label', ({recording:s.mode === 'signs' ? 'Make one gesture… release to finish' : 'Mouth your words… release to finish', tail:'Finishing…', decoding:'Reading your lips…'})[s.phase] || idleLabel);
+    const idleLabel = s.mode === 'signs' ? 'Start gesture recording' : motionInput ? 'Start lips + gesture recording' : 'Start recording words';
+    text('record-label', ({recording:'Finish recording', tail:'Finishing…', decoding:'Reading your words…'})[s.phase] || idleLabel);
+    record.setAttribute('aria-pressed', String(s.phase === 'recording'));
   }
   hide('cancel', s.phase === 'idle' || (s.session_active === true && !explicitMotionSession) || s.session_finalizing === true);
-  text('record-hint', s.rehearsal ? 'Try an example from Settings.' : s.mode === 'signs' && !motionInput ? 'Show a supported gesture to the camera.' : s.lips === 'warming' && needsLips ? 'Getting the lip reader ready…' : s.lips === 'unavailable' && needsLips ? 'Lip reading needs attention in Settings.' : s.mode === 'combined' ? 'Hold Space or the button before mouthing and gesturing.' : 'Or hold Space, then release when you finish.');
-  text('entry-hint', s.mode === 'signs' ? motionInput ? 'Hold the button, make one custom gesture, then release.' : 'Show a supported gesture, then speak your message.' : s.mode === 'lips' ? 'Hold the button, mouth a sentence, then release.' : 'Show a supported gesture, or hold the button to combine input.');
+  text('record-hint', s.rehearsal ? 'Try an example from Settings.' : s.mode === 'signs' && !motionInput ? 'Show a supported gesture to the camera.' : s.lips === 'warming' && needsLips ? 'Getting the lip reader ready…' : s.lips === 'unavailable' && needsLips ? 'Lip reading needs attention in Settings.' : s.mode === 'combined' ? 'Choose Start recording, mouth your words and gesture, then Finish recording.' : 'Press the recording button or Space once to start, and again to finish.');
+  text('entry-hint', s.mode === 'signs' ? motionInput ? 'Start recording, make one gesture, then choose Finish recording.' : 'Show a supported gesture, then speak your message.' : s.mode === 'lips' ? 'Start recording, mouth a short sentence, then finish.' : 'Show a supported gesture, or start a recording to combine input.');
   const gesturesReady = s.signs === 'ready' && Object.values(s.vocabulary).some(v => v.enabled ?? v.verified);
   if (!s.rehearsal && !gesturesReady && s.mode !== 'lips') {
-    text('entry-hint', s.mode === 'signs' ? 'Gestures need setup. Choose another input in Settings.' : 'Hold the button to mouth a short sentence.');
+    text('entry-hint', s.mode === 'signs' ? 'Gestures need setup. Choose another input in Settings.' : 'Start a recording to mouth a short sentence.');
     text('record-hint', s.mode === 'signs' ? 'Open Settings to check gesture input.' : 'Gesture input is being set up. You can still use your lips once ready.');
   }
   if (s.rehearsal) {
     text('entry-hint', 'Type a message here, or try a sample in Settings. No camera is used.');
     text('record-hint', 'Preview mode does not test recognition.');
   } else if (explicitMotionSession) {
-    text('entry-hint', s.sign_input === 'isolated' ? 'Hold for one sign and its words. Keep face, upper body and both hands in view. Release to review.' : 'Hold to capture one gesture and its words together. Release to review.');
-    text('record-hint', 'Hold the button or Space. Finish message stops the camera.');
+    text('entry-hint', s.sign_input === 'isolated' ? 'Record one sign and its words. Keep face, upper body and both hands in view. Finish recording, then Finish message to review.' : 'Start recording one gesture and its words together. Finish recording, then Finish message to review.');
+    text('record-hint', 'Press the recording button or Space to start and finish. Finish message stops the camera.');
   } else if ((s.session_active === true || s.auto_recognition === true) && !s.rehearsal) {
     text('record-hint', 'Mouth a short phrase. Choose Finish message when you are done.');
     text('entry-hint', 'Build your message at your pace. Nothing is spoken yet.');
@@ -189,7 +223,16 @@ function render(s) {
   if (revisionChanged) {
     chosenText = review && d.reason === 'conflict' ? null : (d.text || null);
     renderedRevision = s.revision;
-    if ($('corrected-text')) $('corrected-text').value = d.text || '';
+    if ($('corrected-text')) {
+      if (editorProfile !== (s.profile_id || 'default')) {
+        editorProfile = s.profile_id || 'default';
+        const saved = storageRead(draftKey(editorProfile));
+        editorDirty = Boolean(saved) && saved !== (d.text || '');
+        $('corrected-text').value = saved || d.text || '';
+        if (saved && !editorDirty) storageWrite(draftKey(editorProfile), '');
+      } else if (!editorDirty) $('corrected-text').value = d.text || '';
+      text('draft-status', editorDirty ? 'Your unfinished edit is preserved. Use it explicitly, or start a new message to discard it.' : '');
+    }
   }
   if (revisionChanged || renderedAlternatives !== alternativesKey) {
     renderedAlternatives = alternativesKey;
@@ -204,7 +247,15 @@ function render(s) {
       if ((review && (d.reason === 'conflict' || alternatives.length > 1)) || (s.cleanup?.status === 'ready' && alternatives.includes(s.cleanup.suggestion))) alternatives.forEach(candidate => {
         const button = document.createElement('button'); button.className = 'alternative';
         button.textContent = candidate === s.cleanup?.suggestion && s.cleanup?.status === 'ready' ? `AI suggestion: ${candidate}` : candidate;
-        button.onclick = () => { if (!speaking) {chosenText = candidate; updateMessage();} };
+        button.onclick = () => {
+          if (speaking) return;
+          if (editorDirty && !confirmDiscard('Use these selected words instead of your unfinished edit? The unfinished edit will be replaced.')) return;
+          chosenText = candidate;
+          if ($('corrected-text')) $('corrected-text').value = candidate;
+          editorDirty = false; persistEditor();
+          if ($('learn-correction')) $('learn-correction').checked = false;
+          text('draft-status', ''); updateMessage();
+        };
         button.dataset.candidate = candidate; $('alternatives').append(button);
       });
     }
@@ -270,21 +321,23 @@ function updateMessage() {
   $('message').style.textUnderlineOffset = liveDraft ? '0.18em' : '';
   hide('draft-label', !(liveDraft || processing && Boolean(draft)));
   if ((sessionBusy || processing) && $('alternatives')) $('alternatives').replaceChildren();
-  text('decision-status', cleanupPending ? 'Polishing…' : sessionFinalizing ? 'Finishing last words…' : sessionActive ? 'Recognizing…' : review ? 'Check your message' : d.status === 'accepted' ? 'Ready to speak' : state.phase === 'tail' ? 'Finishing' : state.phase === 'decoding' ? 'Reading lips…' : state.phase === 'recording' ? 'Listening' : state.lips === 'warming' ? 'Warming up' : 'Waiting');
+  text('decision-status', editorDirty ? 'Unapplied edit' : cleanupPending ? 'Formatting suggestion…' : sessionFinalizing ? 'Finishing last words…' : sessionActive ? 'Recognizing…' : review ? 'Check your message' : d.status === 'accepted' ? 'Ready to speak' : state.phase === 'tail' ? 'Finishing' : state.phase === 'decoding' ? 'Reading lips…' : state.phase === 'recording' ? 'Recording silent input' : state.lips === 'warming' ? 'Warming up' : 'Waiting');
   $('decision-status').classList.toggle('review', review);
   if ($('corrected-text')) $('corrected-text').disabled = sessionBusy || processing;
-  text('reason', state.lip_error ? 'Some words could not be read. You can edit or type your message. ' + state.lip_error : sessionActive ? 'Live draft. Choose Finish message when you are done.' : sessionFinalizing ? 'Camera off. Finishing the last words.' : !state.speech_available ? 'Speech is unavailable on this device. Check Settings.' : review && d.reason === 'conflict' ? 'The inputs differ. Choose the message you intended.' : review && d.reason === 'partial_agreement' ? 'Only part of the gesture sequence matches. Review the words and alternatives.' : review ? 'If these are your words, confirm and speak.' : d.status === 'accepted' ? 'Speak whenever you are ready.' : 'Nothing is spoken until you choose.');
+  text('reason', editorDirty ? 'Your edit has not replaced the displayed message. Choose Use this message before speaking.' : state.lip_error ? 'Some words could not be read. You can edit or type your message. ' + state.lip_error : sessionActive ? 'Live draft. Choose Finish message when you are done.' : sessionFinalizing ? 'Camera off. Finishing the last words.' : !state.speech_available ? 'On-device speech is unavailable. You can show this message or choose Copy message.' : review && d.reason === 'conflict' ? 'The inputs differ. Choose the message you intended.' : review && d.reason === 'partial_agreement' ? 'Only part of the gesture sequence matches. Review the words and alternatives.' : review ? 'If these are your words, confirm and speak.' : d.status === 'accepted' ? 'Speak whenever you are ready.' : 'Nothing is spoken until you choose.');
   document.querySelectorAll('.alternative').forEach(b => {const selected = b.dataset.candidate === chosenText; b.classList.toggle('selected', selected); b.setAttribute('aria-pressed', String(selected)); b.disabled = speaking;});
   text('speak-label', review || (chosenText && chosenText !== d.text) ? 'Confirm & speak' : 'Speak message');
-  $('speak').disabled = sessionBusy || processing || !chosenText || !state.speech_available || speaking || !['accepted','confirmation_needed'].includes(d.status);
+  $('speak').disabled = sessionBusy || processing || editorDirty || connectionLost || pendingActions > 0 || !chosenText || !state.speech_available || speaking || !['accepted','confirmation_needed'].includes(d.status);
+  if ($('new-message')) $('new-message').disabled = sessionBusy || processing || speaking || pendingActions > 0 || !hasCurrentMessage();
+  if ($('copy-message')) $('copy-message').disabled = !($('corrected-text')?.value.trim() || chosenText);
   if ($('save-correction')) {
     const edited = $('corrected-text')?.value.trim() || '';
-    $('save-correction').disabled = sessionBusy || processing || !edited || edited === d.text;
+    $('save-correction').disabled = sessionBusy || processing || speaking || connectionLost || pendingActions > 0 || !edited || edited === d.text;
   }
 }
 
 async function speakMessage() {
-  if (!state || speaking || !chosenText) return;
+  if (!state || speaking || editorDirty || connectionLost || !chosenText) return;
   const revision = state.revision, message = chosenText, needsConfirmation = state.decision.status === 'confirmation_needed' || message !== state.decision.text;
   speaking = true; updateMessage();
   try {
@@ -343,7 +396,7 @@ async function poll() {
     const response = await fetch('/api/state'); if (!response.ok) throw new Error();
     if (connectionLost) {text('error', ''); connectionLost = false;}
     const result = await response.json(); if (!pendingActions) render(result);
-  } catch (_) { connectionLost = true; text('error', 'Connection lost. Reopen QuietBridge when it is ready.'); if ($('speak')) $('speak').disabled = true; if ($('record')) $('record').disabled = true; }
+  } catch (_) { connectionLost = true; persistEditor(); text('error', 'Connection lost. Reconnecting automatically. Your edit is kept in this tab; you can still type or copy it.'); if ($('speak')) $('speak').disabled = true; if ($('record')) $('record').disabled = true; if ($('save-correction')) $('save-correction').disabled = true; }
   setTimeout(poll, 180);
 }
 async function preview() {
@@ -366,31 +419,70 @@ async function preview() {
   }
   setTimeout(preview, 100);
 }
-document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => requestAction('mode', {mode:b.dataset.mode}));
+document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
+  if (hasCurrentMessage() && b.dataset.mode !== state?.mode && !confirmDiscard('Changing input clears the current message. Continue?')) return;
+  return requestAction('mode', {mode:b.dataset.mode});
+});
 if ($('browser-camera-button')) $('browser-camera-button').onclick = async () => {
   if (browserCameraStream) { await stopCameraSession(); return; }
   if (state?.browser_camera === true && !state.rehearsal) await startBrowserCamera();
 };
-window.addEventListener('beforeunload', endCameraSessionOnUnload);
-const recordButton = $('record');
-recordButton?.addEventListener('pointerdown', e => {if (recordButton.disabled || keyHeld) return; e.preventDefault(); pointerHeld = true; recordButton.setPointerCapture(e.pointerId); requestAction('start');});
-function releasePointer() {if (pointerHeld) {pointerHeld = false; requestAction('stop');}}
-['pointerup','pointercancel','lostpointercapture'].forEach(event => recordButton?.addEventListener(event, releasePointer));
-document.addEventListener('keydown', e => {
-  if (e.code === 'Escape' && state && state.phase !== 'idle') {pointerHeld = keyHeld = false; requestAction('cancel'); return;}
-  if (!recordButton || ['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName) || (e.target.tagName === 'BUTTON' && e.target !== recordButton)) return;
-  if (e.code === 'Space' && !e.repeat && !recordButton.disabled && !pointerHeld) {e.preventDefault(); keyHeld = true; requestAction('start');}
+window.addEventListener('pagehide', endCameraSessionOnUnload);
+window.addEventListener('beforeunload', event => {
+  persistEditor();
+  if (browserCameraStream || state?.session_active) { event.preventDefault(); event.returnValue = ''; }
 });
-document.addEventListener('keyup', e => {if (e.code === 'Space' && keyHeld) {e.preventDefault(); keyHeld = false; requestAction('stop');}});
-window.addEventListener('blur', () => {if (keyHeld || pointerHeld) {keyHeld = pointerHeld = false; requestAction('stop');}});
+const recordButton = $('record');
+async function toggleRecording() {
+  if (!state || !recordButton || recordButton.disabled || pendingActions) return;
+  await requestAction(state.phase === 'recording' ? 'stop' : 'start');
+}
+if (recordButton) recordButton.onclick = toggleRecording;
+document.addEventListener('keydown', e => {
+  if (e.code === 'Escape' && state && state.phase !== 'idle') {requestAction('cancel'); return;}
+  if (e.code === 'Escape' && $('first-use-guide') && !$('first-use-guide').hidden) { setGuide(false); $('open-guide')?.focus(); return; }
+  if (!recordButton || ['INPUT','SELECT','TEXTAREA','BUTTON','A','SUMMARY'].includes(e.target.tagName) || e.target.isContentEditable) return;
+  if (e.code === 'Space' && !e.repeat && !recordButton.disabled) {e.preventDefault(); toggleRecording();}
+});
 if ($('cancel')) $('cancel').onclick = () => {keyHeld = pointerHeld = false; requestAction('cancel');};
 if ($('speak')) $('speak').onclick = speakMessage;
-if ($('corrected-text')) $('corrected-text').addEventListener('input', updateMessage);
-if ($('save-correction')) $('save-correction').onclick = () => {
-  if (!state) return;
-  requestAction('correct', {revision:state.revision, text:$('corrected-text').value,
+if ($('corrected-text')) $('corrected-text').addEventListener('input', editMessage);
+if ($('save-correction')) $('save-correction').onclick = async () => {
+  if (!state || pendingActions || $('save-correction').disabled) return;
+  const value = $('corrected-text').value;
+  const applied = await requestAction('correct', {revision:state.revision, text:value,
                             learn:$('learn-correction').checked});
+  if (applied) {
+    if ($('corrected-text').value === value) { editorDirty = false; persistEditor(); text('draft-status', ''); }
+    $('learn-correction').checked = false;
+    updateMessage(); $('speak')?.focus();
+  }
 };
+if ($('new-message')) $('new-message').onclick = async () => {
+  if (!state || $('new-message').disabled) return;
+  if (hasCurrentMessage() && !confirmDiscard('Start a new message? The current words and unfinished edit will be cleared.')) return;
+  if (await requestAction('new_message', {revision:state.revision})) {
+    editorDirty = false; storageWrite(draftKey(editorProfile), '');
+    $('corrected-text').value = ''; $('learn-correction').checked = false;
+    text('draft-status', ''); updateMessage(); focusEditor();
+  }
+};
+if ($('copy-message')) $('copy-message').onclick = async () => {
+  const value = editorDirty ? $('corrected-text').value : chosenText || $('corrected-text').value;
+  try { await navigator.clipboard.writeText(value); text('correction-status', 'Message copied.'); }
+  catch (_) { focusEditor(); $('corrected-text')?.select(); text('correction-status', 'Select the text and use your device Copy command.'); }
+};
+if ($('open-guide')) {
+  let seen = false; try { seen = window.localStorage?.getItem('quietbridge-guide-seen-v1') === 'yes'; } catch (_) {}
+  setGuide(!seen);
+  $('open-guide').onclick = () => { const open = $('first-use-guide').hidden; setGuide(open); if (open) $('guide-heading')?.focus(); };
+  $('guide-dismiss').onclick = () => { setGuide(false); $('open-guide').focus(); };
+  $('guide-type').onclick = () => { setGuide(false); focusEditor(); };
+}
+document.querySelectorAll('a[href]').forEach(link => link.addEventListener('click', event => {
+  persistEditor();
+  if ((browserCameraStream || state?.session_active) && !confirmDiscard('Leave this page? The camera will stop and the current recording will finish for review.')) event.preventDefault();
+}));
 if ($('test-submit')) $('test-submit').onclick = async () => {
   const exampleText = state.mode === 'signs' ? '' : $('test-text').value;
   const label = state.mode === 'lips' ? '' : $('test-label').value;
@@ -403,7 +495,7 @@ async function loadProfilesList() {
   if (!select) return;
   try {
     const res = await fetch('/api/profiles');
-    if (!res.ok) return;
+    if (!res.ok) throw new Error('Profile request failed');
     const data = await res.json();
     select.replaceChildren();
     (data.profiles || []).forEach(p => {
@@ -414,7 +506,7 @@ async function loadProfilesList() {
       select.appendChild(opt);
     });
     profilesLoaded = true;
-  } catch (_) {}
+  } catch (_) { text('profile-switch-error', 'Profiles could not be loaded. Return to your message to keep typing, then retry Settings when connected.'); }
 }
 
 async function handleProfileSwitch() {
@@ -427,6 +519,8 @@ async function handleProfileSwitch() {
     text('profile-switch-error', 'Stop the browser camera before switching profile.');
     return;
   }
+  if (hasCurrentMessage() && !confirmDiscard('Changing or reloading profiles clears the current message. Your unfinished typed edit stays in this tab. Continue?')) return;
+  persistEditor();
   text('profile-switch-error', '');
   text('profile-switch-status', 'Switching profile…');
   btn.disabled = true;

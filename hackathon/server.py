@@ -7,11 +7,37 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlencode
 import secrets
+import threading
 
 from .runtime import Runtime, ProfileSwitchConflict
 from .profiles import ProfileManager, profile_configuration
 
 UI = Path(__file__).with_name("ui")
+
+
+class _LazyLabEngine:
+    """Create the real tracking engine only for an explicit frame."""
+
+    def __init__(self, rehearsal=False):
+        self.rehearsal = rehearsal
+        self.engine = None
+
+    @property
+    def ready(self):
+        return self.engine is not None
+
+    def infer(self, frame, timestamp_ms):
+        if self.rehearsal:
+            raise RuntimeError("Camera tracking is unavailable in rehearsal mode")
+        if self.engine is None:
+            from .signs.lab import Engine
+            self.engine = Engine()
+        return self.engine.infer(frame, timestamp_ms)
+
+    def close(self):
+        if self.engine is not None:
+            self.engine.close()
+            self.engine = None
 
 
 def make_server(runtime, port=8765):
@@ -68,9 +94,14 @@ def make_server(runtime, port=8765):
                     else:
                         self._json(503, {"error": "No camera frame yet"})
                 elif path == "/record":
+                    try:
+                        lab = self.server.personalize_server()
+                    except (OSError, ValueError, RuntimeError) as exc:
+                        self._json(503, {"error": f"Personalize could not start: {exc}"})
+                        return
                     self.send_response(302)
                     return_to = f"http://127.0.0.1:{self.server.server_port}/"
-                    self.send_header("Location", "http://127.0.0.1:8766/?" + urlencode({"return_to": return_to}))
+                    self.send_header("Location", f"http://127.0.0.1:{lab.server_port}/?" + urlencode({"return_to": return_to}))
                     self.send_header("Cache-Control", "no-store")
                     self.send_header("Content-Length", "0")
                     self.end_headers()
@@ -197,9 +228,59 @@ def make_server(runtime, port=8765):
             except Exception as exc:
                 self._json(500, {"error": str(exc)})
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    server.daemon_threads = True
-    return server
+    class MainServer(ThreadingHTTPServer):
+        daemon_threads = True
+
+        def __init__(self, address):
+            super().__init__(address, Handler)
+            self._lab_lock = threading.Lock()
+            self._lab = None
+            self._lab_thread = None
+            self._closed = False
+
+        def personalize_server(self):
+            with self._lab_lock:
+                if self._closed:
+                    raise RuntimeError("Server is closing")
+                if self._lab is None:
+                    from .signs import lab as lab_module
+                    engine = _LazyLabEngine(rehearsal=runtime.rehearsal)
+                    manager = getattr(runtime, "profile_manager", None) or ProfileManager()
+                    lab = lab_module.create_server(
+                        engine=engine, port=0, profile_manager=manager,
+                        sign_model=getattr(runtime, "isolated_sign_model_path", None))
+                    if runtime.rehearsal:
+                        class RehearsalHandler(lab_module._Handler):
+                            def do_POST(self):
+                                if self.path in {"/api/frame", "/api/start", "/api/paired/start",
+                                                 "/api/mouth/preview", "/api/mouth/start",
+                                                 "/api/lips/enable", "/api/lips/start"}:
+                                    if self._check_post():
+                                        self._drain_body()
+                                        self._error(400, "Camera tracking is unavailable in rehearsal mode")
+                                    return
+                                super().do_POST()
+                        lab.RequestHandlerClass = RehearsalHandler
+                    thread = threading.Thread(target=lab.serve_forever,
+                                              kwargs={"poll_interval": 0.1}, daemon=True,
+                                              name="quietbridge-personalize")
+                    thread.start()
+                    self._lab, self._lab_thread = lab, thread
+                return self._lab
+
+        def server_close(self):
+            with self._lab_lock:
+                self._closed = True
+                lab, thread = self._lab, self._lab_thread
+                self._lab = self._lab_thread = None
+            if lab is not None:
+                lab.shutdown()
+                thread.join()
+                lab.server_close()
+                lab.engine.close()
+            super().server_close()
+
+    return MainServer(("127.0.0.1", port))
 
 
 def main():

@@ -52,7 +52,8 @@ test('return link is named Back to message (not Live Demo) and validates loopbac
         location: {
           search: queryString,
           href: `${origin}/lab.html${queryString}`,
-          origin
+          origin,
+          port: new URL(origin).port
         }
       },
       URL,
@@ -79,8 +80,10 @@ test('return link is named Back to message (not Live Demo) and validates loopbac
   assert.equal(evaluateReturnUrl('?return_to=http%3A%2F%2F127.0.0.1%3A8765%2F%3Ffoo%3Dbar'), 'http://127.0.0.1:8765/');
   assert.equal(evaluateReturnUrl('?return_to=http%3A%2F%2F127.0.0.1%3A8765%2F%23hash'), 'http://127.0.0.1:8765/');
 
-  // 5. Reject port 8766 (self lab loopback)
+  // Reject the lab's actual port, including an ephemeral port.
   assert.equal(evaluateReturnUrl('?return_to=http%3A%2F%2F127.0.0.1%3A8766%2F'), 'http://127.0.0.1:8765/');
+  assert.equal(evaluateReturnUrl('?return_to=http%3A%2F%2Flocalhost%3A43210%2F', 'http://127.0.0.1:43210'), 'http://127.0.0.1:8765/');
+  assert.equal(evaluateReturnUrl('?return_to=http%3A%2F%2Flocalhost%3A8766%2F', 'http://127.0.0.1:43210'), 'http://localhost:8766/');
 });
 
 test('first-time user with zero samples is guided to setup without auto-opening camera', () => {
