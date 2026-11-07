@@ -177,6 +177,26 @@ async function run(variant, coreOnly=false) {
     expect(await js(()=>!document.querySelector('#first-use-guide').hidden),'Space opens guide from keyboard',await js(()=>document.activeElement?.id));
     await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27}); await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
     expect(await js(()=>document.querySelector('#first-use-guide').hidden && document.activeElement?.id==='open-guide'),'Escape closes guide and restores focus',await js(()=>document.activeElement?.id));
+    currentCase='camera-permission-owner';
+    // Synthetic permission promises on the actual DOM, never a physical device.
+    // Capture requests are intercepted; the rehearsal backend is not changed.
+    await evaluate(`(()=>{
+      window.__permissionOwner={stopped:0,played:0,calls:[]};
+      Object.defineProperty(navigator.mediaDevices,'getUserMedia',{configurable:true,value:()=>new Promise(resolve=>{window.__grantCamera=()=>resolve({getTracks:()=>[{stop(){window.__permissionOwner.stopped++;}}]});})});
+      document.querySelector('#browser-camera').play=async()=>{window.__permissionOwner.played++;};
+      const original=window.fetch.bind(window);
+      window.fetch=(u,o)=>{if(String(u).endsWith('/api/action/camera_session')){window.__permissionOwner.calls.push(JSON.parse(o.body));return Promise.resolve({ok:true,json:async()=>state});}return original(u,o);};
+    })()`);
+    for(const boundary of ['pagehide','restart']) {
+      await evaluate(`(()=>{window.__grantCamera=null;render({...state,revision:state.revision+1,rehearsal:false,browser_camera:true,session_text:'',session_active:false,decision:{text:'',status:'unavailable',reason:'lip_only'},alternatives:[]});})()`);
+      await click('#browser-camera-button');await waitFor(()=>evaluate('!!window.__grantCamera'),'synthetic permission pending');
+      if(boundary==='pagehide') await evaluate("window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}))");
+      else await evaluate("render({...state,server_instance:'synthetic-restart-for-permission-check',revision:0})");
+      await evaluate('window.__grantCamera()');
+      await waitFor(()=>evaluate("!document.querySelector('#browser-camera-button').disabled"),'late permission settled');
+      const camera=await evaluate('({...window.__permissionOwner,attached:!!document.querySelector("#browser-camera").srcObject})');
+      expect(camera.stopped===(boundary==='pagehide'?1:2) && camera.played===0 && camera.calls.length===0 && !camera.attached,`late permission after ${boundary} releases tracks without capture`,camera);
+    }
     currentCase='lab-modal';
     const labStart=Date.now();
     try { await send('Page.navigate',{url:new URL('/record',origin).href}); }

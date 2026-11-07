@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 function screen(page = 'index.html', sessionValues = new Map(), localValues = new Map()) {
-  const elements = new Map(), timers = new Map();
+  const elements = new Map(), timers = new Map(), windowListeners = new Map();
   let timerId = 0;
   function element(tag = 'DIV') {
     const classes = new Set();
@@ -31,7 +31,7 @@ function screen(page = 'index.html', sessionValues = new Map(), localValues = ne
       createElement: element, addEventListener() {},
       querySelectorAll(selector) { return selector === '.alternative' ? elements.get('alternatives').children : []; },
     },
-    window: { addEventListener() {}, confirm: () => true,
+    window: { addEventListener(name, fn) { windowListeners.set(name, fn); }, confirm: () => true,
       sessionStorage: {getItem: key => sessionValues.has(key) ? sessionValues.get(key) : null, setItem: (key,value) => sessionValues.set(key,value), removeItem: key => sessionValues.delete(key)},
       localStorage: {getItem: key => localValues.get(key) || null, setItem: (key,value) => localValues.set(key,value)} },
     fetch: () => new Promise(() => {}),
@@ -52,7 +52,7 @@ function screen(page = 'index.html', sessionValues = new Map(), localValues = ne
     };
     vm.runInContext('render(sample)', context);
   }
-  return { context, elements, render, sessionValues, localValues, timers };
+  return { context, elements, render, sessionValues, localValues, timers, windowListeners };
 }
 
 test('reloading models targets the running profile and reports warmup truthfully', async () => {
@@ -245,6 +245,75 @@ test('server restart accepts the new identity and token without replaying stale 
   a.render({server_instance:'boot-b',token:'new-token',revision:2,decision:{text:'Current words',status:'accepted',reason:'corrected'}});
   a.render({server_instance:'boot-b',token:'new-token',revision:1,decision:{text:'Out of date',status:'accepted',reason:'corrected'}});
   assert.equal(a.elements.get('message').textContent,'Current words');
+});
+
+for (const boundary of ['pagehide', 'restart']) {
+  test(`camera permission granted after ${boundary} cannot start a session`, async () => {
+    const a=screen();a.render({server_instance:'before',token:'before-token'});
+    let grant, stopped=0;const calls=[];
+    const track={stop(){stopped++;},addEventListener(){}};
+    const stream={getTracks:()=>[track],getVideoTracks:()=>[track]};
+    a.context.navigator={mediaDevices:{getUserMedia:()=>new Promise(resolve=>{grant=resolve;})}};
+    a.elements.get('browser-camera').play=async()=>{};
+    a.context.fetch=async (url,options)=>{calls.push([url,JSON.parse(options.body)]);return{ok:true,json:async()=>({...a.context.sample,revision:2})};};
+    const starting=a.elements.get('browser-camera-button').onclick();
+    if(boundary==='pagehide')a.windowListeners.get('pagehide')({persisted:true});
+    else a.render({server_instance:'after',token:'after-token',revision:0});
+    grant(stream);await starting;
+    assert.equal(stopped,1,'late granted tracks are stopped');
+    assert.equal(calls.length,0,'no old permission continuation starts capture');
+    assert.equal(a.elements.get('browser-camera').srcObject,null);
+    assert.equal(a.elements.get('browser-camera-button').textContent,'Start camera');
+  });
+}
+
+test('camera playback completing after page exit cannot request capture', async () => {
+  const a=screen();a.render({server_instance:'boot',token:'token'});
+  let played,enteredPlay,stopped=0;const calls=[];
+  const playReady=new Promise(resolve=>{enteredPlay=resolve;});
+  const track={stop(){stopped++;},addEventListener(){}};
+  const stream={getTracks:()=>[track],getVideoTracks:()=>[track]};
+  a.context.navigator={mediaDevices:{getUserMedia:async()=>stream}};
+  a.elements.get('browser-camera').play=()=>{enteredPlay();return new Promise(resolve=>{played=resolve;});};
+  a.context.fetch=async(url,options)=>{calls.push(JSON.parse(options.body));return{ok:true,json:async()=>a.context.sample};};
+  const starting=a.elements.get('browser-camera-button').onclick();await playReady;
+  a.windowListeners.get('pagehide')({persisted:true});played();await starting;
+  assert.equal(stopped,1);
+  assert.equal(calls.some(body=>body.active===true),false);
+  assert.equal(calls.filter(body=>body.active===false).length,1,'best-effort exit notice only');
+});
+
+test('unchanged camera start and explicit finish each request once', async () => {
+  const a=screen();a.render({server_instance:'boot',token:'token'});
+  let stopped=0;const calls=[];
+  const track={stop(){stopped++;},addEventListener(){}};
+  const stream={getTracks:()=>[track],getVideoTracks:()=>[track]};
+  a.context.navigator={mediaDevices:{getUserMedia:async()=>stream}};
+  a.elements.get('browser-camera').play=async()=>{};
+  a.context.fetch=async(url,options)=>{const body=JSON.parse(options.body);calls.push(body);return{ok:true,json:async()=>({...a.context.sample,revision:a.context.sample.revision+1,session_active:body.active})};};
+  await a.elements.get('browser-camera-button').onclick();
+  assert.equal(a.elements.get('browser-camera').srcObject,stream);
+  assert.equal(a.elements.get('browser-camera-button').textContent,'Finish message');
+  await a.elements.get('browser-camera-button').onclick();
+  assert.equal(stopped,1);
+  assert.deepEqual(calls.map(body=>body.active),[true,false]);
+  assert.equal(a.elements.get('browser-camera').srcObject,null);
+});
+
+test('an old camera-start rejection cannot replace the new server restart notice', async () => {
+  const a=screen();a.render({server_instance:'before',token:'old-token'});
+  let rejectStart,started,stopped=0;const requestReady=new Promise(resolve=>{started=resolve;});
+  const track={stop(){stopped++;},addEventListener(){}};
+  const stream={getTracks:()=>[track],getVideoTracks:()=>[track]};
+  a.context.navigator={mediaDevices:{getUserMedia:async()=>stream}};
+  a.elements.get('browser-camera').play=async()=>{};
+  const requests=[];a.context.fetch=(url,options)=>{requests.push([url,options.headers['X-Lipflow-Token']]);started();return new Promise((resolve,reject)=>{rejectStart=reject;});};
+  const starting=a.elements.get('browser-camera-button').onclick();await requestReady;
+  a.render({server_instance:'after',token:'new-token',revision:0});
+  rejectStart(new Error('Old request failed'));await starting;
+  assert.match(a.elements.get('error').textContent,/restarted/);
+  assert.equal(stopped,1);
+  assert.deepEqual(requests,[['/api/action/camera_session','old-token']]);
 });
 
 test('a delayed camera-auth refresh cannot restore a retired server token', async () => {

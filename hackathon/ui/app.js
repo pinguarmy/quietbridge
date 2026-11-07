@@ -3,7 +3,7 @@ const text = (id, value) => { const el = $(id), next = String(value ?? ''); if (
 const hide = (id, value) => { if ($(id)) $(id).hidden = value; };
 let state = null, token = '', actionChain = Promise.resolve(), pointerHeld = false, keyHeld = false;
 let speaking = false, pendingActions = 0, renderedRevision = null, renderedAlternatives = '', renderedVocabulary = '', initialized = false, chosenText = null, connectionLost = false;
-let browserCameraStream = null, browserCameraStarting = false, browserCameraStopping = false, browserFrameTimer = null, browserFrameCanvas = document.createElement('canvas');
+let browserCameraStream = null, browserCameraStarting = false, browserCameraStopping = false, browserCameraGeneration = 0, browserFrameTimer = null, browserFrameCanvas = document.createElement('canvas');
 browserFrameCanvas.width = 960; browserFrameCanvas.height = 720;
 let editorDirty = false, editorProfile = null, editVersion = 0;
 const retiredInstances = new Set();
@@ -62,23 +62,28 @@ async function startBrowserCamera() {
   if (browserCameraStarting || browserCameraStopping || browserCameraStream) return;
   if (hasCurrentMessage() && !confirmDiscard('Starting the camera begins a new message and replaces the current words. Continue?')) return;
   browserCameraStarting = true;
+  const generation = browserCameraGeneration;
   const button = $('browser-camera-button');
   if (button) { button.disabled = true; button.textContent = 'Starting camera…'; }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({audio:false, video:{width:{ideal:960}, height:{ideal:720}, frameRate:{ideal:30}}});
-    if (!state?.browser_camera || state.rehearsal) { stream.getTracks().forEach(track => track.stop()); return; }
+    if (generation !== browserCameraGeneration || !state?.browser_camera || state.rehearsal) { stream.getTracks().forEach(track => track.stop()); return; }
     browserCameraStream = stream;
     $('browser-camera').srcObject = stream;
     browserCameraStream.getVideoTracks()[0]?.addEventListener('ended', () => { void stopCameraSession(); }, {once:true});
     await $('browser-camera').play();
+    if (generation !== browserCameraGeneration) return;
     if (!await requestAction('camera_session', {active:true})) {
+      if (generation !== browserCameraGeneration) return;
       const message = $('error')?.textContent || 'Could not start recognition.';
       stopBrowserCamera();
       await requestAction('camera_session', {active:false});
       text('error', message); return;
     }
+    if (generation !== browserCameraGeneration) return;
     text('error', ''); uploadBrowserFrames();
   } catch (e) {
+    if (generation !== browserCameraGeneration) return;
     const hadCamera = Boolean(browserCameraStream);
     stopBrowserCamera();
     if (hadCamera) await requestAction('camera_session', {active:false});
@@ -108,6 +113,7 @@ function endCameraSessionOnUnload() {
   }
 }
 function stopBrowserCamera() {
+  browserCameraGeneration++;
   if (browserFrameTimer) clearTimeout(browserFrameTimer);
   browserFrameTimer = null;
   if (browserCameraStream) browserCameraStream.getTracks().forEach(track => track.stop());
@@ -148,7 +154,10 @@ function requestAction(name, data = {}) {
       if (!render(result)) throw new Error('The request finished, but a newer result is already available. Review the current message.');
       text('error', ''); return true;
     } finally { clearTimeout(timer); }
-  }).catch(e => { text('error', `${e.message || 'Connection unavailable.'} Your edit is kept. Review the current message, or copy your typed text.`); return false; }).finally(() => { pendingActions--; updateMessage(); });
+  }).catch(e => {
+    if (!instance || instance === state?.server_instance) text('error', `${e.message || 'Connection unavailable.'} Your edit is kept. Review the current message, or copy your typed text.`);
+    return false;
+  }).finally(() => { pendingActions--; updateMessage(); });
   return actionChain;
 }
 
