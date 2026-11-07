@@ -160,7 +160,10 @@ async function run(variant, coreOnly=false) {
     currentCase='viewport-keyboard';
     for(const [width,height] of [[390,844],[640,900]]) {
       await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
-      const metrics=await send('Page.getLayoutMetrics'); const dims=await js(()=>({innerWidth,scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth}));
+      // Metrics can acknowledge the new viewport before media-query reflow.
+      // Measure only after the browser has presented the resized layout.
+      await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+      const metrics=await send('Page.getLayoutMetrics'); const dims=await js(()=>({innerWidth,scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth,overflow:[...document.querySelectorAll('main *')].map(e=>({id:e.id,tag:e.tagName,cls:e.className,right:e.getBoundingClientRect().right,width:e.getBoundingClientRect().width,scroll:e.scrollWidth})).filter(e=>e.right>document.documentElement.clientWidth+1).slice(0,15)}));
       expect(dims.innerWidth===width && dims.scrollWidth<=dims.clientWidth,`viewport ${width} without horizontal overflow`,{dims,metrics:metrics.cssLayoutViewport});
     }
     await evaluate("if (!document.querySelector('#first-use-guide').hidden) document.querySelector('#guide-dismiss').click(); document.querySelector('#open-guide').focus()");
