@@ -10,6 +10,18 @@ The evaluator that previously detected both opaque behavioral faults completed o
 
 The remaining work has two different kinds of evidence gap. Some software paths still lack evaluator-selected browser or storage integration evidence. Practical effectiveness separately requires consented target users, authorized physical camera/local speech, and independent labelled recognition sessions with established rights. More simulated runs or a higher model rating cannot supply the latter. Do not start another full review merely to replace an insufficient-evidence result; the stop rule below still applies.
 
+### Delivery status and next evidence
+
+| Part of the request | Current result | What would change the decision |
+| --- | --- | --- |
+| Criticize and replace inflated scoring | Completed: original claims withdrawn, evidence layers separated, unknowns and vetoes retained | A demonstrated flaw in this method, not an unwanted result |
+| Repair reproduced product/structure faults | Completed for the recorded findings, with bounded regressions and independent repair checks | A new reproducible defect on the published snapshot |
+| Regression, independent review and publication | Completed as engineering deliverables; the independent report is insufficient evidence, not a full pass | Matching independent evidence for the remaining mandatory software paths |
+| Establish every domain or the whole product above 9.5 | Not established; no replacement quality score assigned | Complete software evidence plus consented practical-effectiveness evidence, without averaging away unknowns |
+| Target-user, physical-device and recognition effectiveness | Not measured in this review | A willing participant and agreed tasks; separate permission for camera/audio; independent labelled samples with known rights |
+
+The next participant check can begin without camera, audible speech or saved recordings. Ask the person to type an intended message, correct a negation or number, reject an unwanted alternative, leave and return to an unfinished edit, and recover from an unavailable input. Observe the intended and delivered words, requested help, corrections, time and reported effort. This task list is a plan, not a completed study or a validated 9.5 cutoff. Do not invent a participant, use old private recordings, turn on hardware or gather training data to fill the gap. Obtaining those inputs is a separate decision from rerunning software tests.
+
 ## What went wrong
 
 A reviewer awarded 10 while another reproduced a wrong-message P1 on the same working tree. We disclosed the desired passing score and previous reviewers' results. We repeatedly coached missing journeys, then combined targeted retests with earlier scores. Much of the evidence was source, a VM, rehearsal or a substituted capture state. Those are useful tests, but they do not establish real-user usability, camera operation, speech quality or signer recognition. Baseline arithmetic errors further weakened confidence. None of the old scores is a comparable baseline for v2.
