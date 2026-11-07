@@ -30,6 +30,19 @@ jobs:
           if (-not (Test-Path $t)) { throw "shortcut target missing: $t" }
       - name: Tests (includes reading a real clip on the CPU)
         run: uv run pytest -q -rs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Browser contracts and deliberate-fault sensitivity (silent rehearsal)
+        shell: pwsh
+        run: |
+          $env:PYTHON_BIN = (Resolve-Path .venv/Scripts/python.exe).Path
+          $env:CHROME_BIN = Join-Path $env:ProgramFiles "Google/Chrome/Application/chrome.exe"
+          if (-not (Test-Path $env:CHROME_BIN)) { throw "Chrome missing; browser contracts were not checked" }
+          node scripts/check_web.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check_web.mjs --calibrate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: lipflow doctor (no camera on CI, so this only prints)
         shell: pwsh
         run: uv run lipflow doctor; exit 0

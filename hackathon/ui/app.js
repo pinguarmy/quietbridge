@@ -371,11 +371,13 @@ function updateMessage() {
 
 async function speakMessage() {
   if (!state || speaking || editorDirty || connectionLost || !chosenText) return;
-  const revision = state.revision, message = chosenText, needsConfirmation = state.decision.status === 'confirmation_needed' || message !== state.decision.text;
+  const revision = state.revision, message = chosenText, version = editVersion, profile = editorProfile;
+  const needsConfirmation = state.decision.status === 'confirmation_needed' || message !== state.decision.text;
   speaking = true; updateMessage();
   try {
     if (needsConfirmation && !await requestAction('confirm', {text:message, revision})) return;
-    if (state.revision !== revision || state.decision.status !== 'accepted' || state.decision.text !== message) {
+    if (editorDirty || editVersion !== version || editorProfile !== profile || chosenText !== message
+        || state.revision !== revision || state.decision.status !== 'accepted' || state.decision.text !== message) {
       text('error', 'The message changed. Please check it again.'); return;
     }
     if (await requestAction('speak', {revision, text:message})) {

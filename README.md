@@ -178,8 +178,13 @@ For capture-only checks, `uv run python -m hackathon.signs.capture_analysis <mou
 ```sh
 uv run pytest
 node --check hackathon/ui/app.js
-node --test hackathon/tests/test_ui_flow.cjs hackathon/signs/tests/test_lab_*.cjs
+node --test hackathon/tests/test_ui_flow.cjs hackathon/tests/test_cleanup_settings_ui.cjs hackathon/signs/tests/test_lab_*.cjs
+# Requires Node 24 and an installed Chrome/Chromium; no new npm package.
+node scripts/check_web.mjs
+node scripts/check_web.mjs --calibrate
 ```
+
+The browser checks launch their own headless Chrome, temporary profile and loopback rehearsal server. They use real DOM, native dialogs, selected keyboard events and real HTTP, with a silent speech recorder instead of audio. No physical camera, model workers or provider calls start. `CHROME_BIN` and `PYTHON_BIN` can select installed executables; on Windows use `.venv/Scripts/python.exe`. Each run logs source/served-script hashes and verifies the browser-loaded script. Calibration reruns the same assertions against known behavioral faults and must reject each at its designated check. This tests the suite's ability to catch those faults, not blind-reviewer skill or human usability. See [the review protocol](docs/review-protocol.md).
 
 Synthetic checks and fake backends establish integration behavior, not live recognition accuracy. Real use still requires new-session camera trials, paired lips/gesture evaluation, REST/unknown false-trigger measurements and audible speech checks. Do not tune on the final-test session.
 

@@ -103,6 +103,39 @@ test('conflicts require a choice and AI wording never replaces the selected mess
   assert.equal(elements.get('message').textContent, 'AI words');
 });
 
+test('editing during speech confirmation cancels dispatch until the newer edit is reviewed', async () => {
+  const a=screen();a.render({server_instance:'boot',token:'token',decision:{text:'I need water',status:'confirmation_needed',reason:'conflict'},alternatives:['I need water','No.']});
+  a.elements.get('alternatives').children[1].onclick();
+  let finish, confirming;
+  const requested=new Promise(resolve=>{confirming=resolve});const calls=[];
+  a.context.fetch=async(url,options)=>{
+    calls.push(url);
+    if(url.endsWith('/confirm')) {confirming();return new Promise(resolve=>{finish=resolve})}
+    return {ok:true,json:async()=>({...a.context.sample,decision:{text:'No.',status:'accepted',reason:'conflict'}})};
+  };
+  const speaking=a.elements.get('speak').onclick();await requested;
+  assert.equal(a.elements.get('corrected-text').disabled,false);
+  a.elements.get('corrected-text').value='Wait, I meant yes';a.elements.get('corrected-text').listeners.input();
+  finish({ok:true,json:async()=>({...a.context.sample,decision:{text:'No.',status:'accepted',reason:'conflict'}})});
+  await speaking;
+  assert.deepEqual(calls,['/api/action/confirm']);
+  assert.equal(a.elements.get('corrected-text').value,'Wait, I meant yes');
+  assert.equal(a.elements.get('speak').disabled,true);
+  assert.match(a.elements.get('error').textContent,/changed|edit/i);
+});
+
+test('unchanged explicit conflict confirmation still dispatches the chosen words once', async () => {
+  const a=screen();a.render({server_instance:'boot',token:'token',decision:{text:'I need water',status:'confirmation_needed',reason:'conflict'},alternatives:['I need water','No.']});
+  a.elements.get('alternatives').children[1].onclick();
+  const calls=[];
+  a.context.fetch=async(url,options)=>{
+    calls.push([url,JSON.parse(options.body)]);
+    return {ok:true,json:async()=>({...a.context.sample,decision:{text:'No.',status:'accepted',reason:'conflict'}})};
+  };
+  await a.elements.get('speak').onclick();
+  assert.deepEqual(calls,[['/api/action/confirm',{text:'No.',revision:1}],['/api/action/speak',{revision:1,text:'No.'}]]);
+});
+
 test('removed AI alternative is no longer selected after disable', () => {
   const { elements, render } = screen();
   const decision = { text: 'Please wait', status: 'confirmation_needed', reason: 'lip_only' };
