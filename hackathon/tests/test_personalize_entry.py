@@ -1,5 +1,7 @@
 """Owned Personalize entry and explicit new-message regression tests."""
 import json
+import subprocess
+import sys
 import threading
 from unittest.mock import Mock
 from urllib.error import HTTPError
@@ -109,6 +111,41 @@ def test_state_identity_is_stable_per_server_and_changes_after_restart(tmp_path)
         finally:
             server.shutdown(); server.server_close(); thread.join(); runtime.close()
     assert identities[0] != identities[1]
+
+
+def test_first_personalize_page_never_imports_capture_dependencies(tmp_path):
+    # A fresh process matters: another test may already have imported NumPy.
+    # Block native vision imports rather than relying on warm local timing.
+    program = '''
+import importlib.abc, json, sys, threading
+from pathlib import Path
+from urllib.request import urlopen
+class NoCaptureImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'cv2', 'numpy', 'mediapipe', 'torch'}:
+            raise AssertionError('Page opening imported capture dependency: ' + fullname)
+sys.meta_path.insert(0, NoCaptureImports())
+from hackathon.profiles import ProfileManager
+from hackathon.runtime import Runtime
+from hackathon.server import make_server
+manager=ProfileManager(Path(sys.argv[1]))
+runtime=Runtime(rehearsal=True, profile_manager=manager)
+server=make_server(runtime, 0)
+thread=threading.Thread(target=server.serve_forever, daemon=True);thread.start()
+try:
+    with urlopen(f'http://127.0.0.1:{server.server_port}/record', timeout=5) as response:
+        assert response.status == 200 and b'Personalize' in response.read()
+    with urlopen(f'http://127.0.0.1:{server._lab.server_port}/api/state', timeout=5) as response:
+        state=json.load(response)
+        assert state['capture_available'] is False
+    print('PASS real HTTP Personalize without native capture dependencies')
+finally:
+    server.shutdown();server.server_close();thread.join();runtime.close()
+'''
+    result = subprocess.run([sys.executable, '-c', program, str(tmp_path)],
+                            text=True, capture_output=True, timeout=15)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'PASS real HTTP Personalize' in result.stdout
 
 
 def test_lazy_engine_loads_only_on_infer_and_closes(monkeypatch):

@@ -23,9 +23,6 @@ from dataclasses import asdict, dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-import cv2
-import numpy as np
-
 #: Mirrors recognizer.SUPPORTED_LABELS without importing mediapipe at module load.
 GESTURE_SUPPORT = ["THUMB_UP", "THUMB_DOWN", "OPEN_PALM", "POINTING_UP"]
 
@@ -244,6 +241,8 @@ def _check_session_split(data_root: Path, split: str, session: str) -> None:
 
 def _save_sequence(server: _LabServer, rec: _Recording) -> Path:
     """Write the buffered sequence as one .npz and return its path."""
+    import numpy as np
+
     target_root = rec.data_root if rec.data_root is not None else server.data_root
     _check_session_split(target_root, rec.split, rec.session)
     trial_id = str(uuid.uuid4())
@@ -288,6 +287,8 @@ def _append_frame(server: _LabServer, rec: _Recording, result: FrameResult, time
     if time.monotonic() - rec.start_monotonic >= server.max_seconds:
         rec.limit_reached = True
         return
+    import numpy as np
+
     landmarks = np.full((2, 21, 3), np.nan, dtype=np.float32)
     present = np.zeros((2,), dtype=bool)
     handedness = np.asarray(["", ""], dtype="<U5")
@@ -539,6 +540,9 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._read_body(MAX_FRAME_BYTES)
         if body is None:
             return
+        import cv2
+        import numpy as np
+
         with self.server.lock:
             if self.server._closing:
                 self._error(503, "Recorder is closing. Return to your message.")
@@ -1118,6 +1122,7 @@ def main(argv=None):
             p = server.profile_manager.get_active_profile()
             server.data_root = p.sequences_dir
             server.mouth.set_root(p.mouths_dir)
+        import numpy as np
         warmup = np.zeros((64, 64, 3), dtype=np.uint8)
         engine.infer(warmup, server.next_timestamp_ms())
         url = f"http://127.0.0.1:{server.server_address[1]}/"

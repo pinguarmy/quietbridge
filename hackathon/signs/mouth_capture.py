@@ -16,8 +16,6 @@ import re
 import time
 import uuid
 
-import numpy as np
-
 DEFAULT_ROOT = os.path.expanduser("~/.local/share/quietbridge/mouths")
 SPLITS = ("train", "validation", "test")
 MAX_TEXT = 300
@@ -102,6 +100,8 @@ class MouthCapture:
 
     def _check_session_split(self, session: str, split: str):
         """A session id belongs to one split; scan saved npz metadata to enforce it."""
+        import numpy as np
+
         for other in SPLITS:
             folder = os.path.join(self.root, other)
             names = os.listdir(folder) if os.path.isdir(folder) else []
@@ -128,6 +128,7 @@ class MouthCapture:
             self._outer_lips = self._inner_lips = []
             return None
         import cv2
+        import numpy as np
         from lipflow.camera import face_crop
         rec = self._rec
         ts = timestamp_ms / 1000.0
@@ -160,6 +161,7 @@ class MouthCapture:
         if rec is None or meta is None:
             raise ValueError("no recording to stop")
         try:
+            import numpy as np
             from lipflow.dictation import clip_problem, rois_for
             problem = clip_problem(rec)
             if problem:
@@ -178,6 +180,8 @@ class MouthCapture:
         return self.snapshot()
 
     def _save(self, rec, rois, meta) -> str:
+        import numpy as np
+
         if isinstance(meta, dict):
             text = meta["text"]
             split = meta["split"]
