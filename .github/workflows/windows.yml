@@ -43,6 +43,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/check_web.mjs --calibrate
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check_web.mjs --keyboard-profile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: lipflow doctor (no camera on CI, so this only prints)
         shell: pwsh
         run: uv run lipflow doctor; exit 0

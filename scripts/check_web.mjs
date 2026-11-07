@@ -79,6 +79,57 @@ async function run(variant, coreOnly=false) {
     expect(executedHash===hash,'browser-loaded app.js equals served snapshot',{executedHash,hash});
     const browserVersion=await cdp.send('Browser.getVersion');
     console.log(JSON.stringify({variant,origin,snapshotID:snapshotId,identity:ready.identity,browser:browserVersion.product,evidence:'real DOM/HTTP; silent speech dispatch; some DOM-dispatched input; no physical capture or audible speech'}));
+    if(process.argv.includes('--keyboard-profile')) {
+      const key=async(name,code=name)=>{
+        const virtual={Tab:9,Enter:13}[code];
+        await send('Input.dispatchKeyEvent',{type:'keyDown',key:name,code,windowsVirtualKeyCode:virtual,...(code==='Enter'?{text:'\r'}:{})});
+        await send('Input.dispatchKeyEvent',{type:'keyUp',key:name,code,windowsVirtualKeyCode:virtual});
+      };
+      const reach=async predicate=>{
+        for(let i=0;i<50;i++) {
+          const focused=await js(()=>({id:document.activeElement?.id,tag:document.activeElement?.tagName,text:document.activeElement?.textContent?.trim(),href:document.activeElement?.getAttribute('href')}));
+          if(predicate(focused)) return;
+          await key('Tab');
+        }
+        fail('keyboard can reach the named control',await js(()=>document.activeElement?.outerHTML));
+      };
+      currentCase='keyboard-typed-message';
+      const intended='Could you close the door?';
+      await reach(x=>x.id==='corrected-text');await send('Input.insertText',{text:intended});
+      await reach(x=>x.id==='save-correction');await key('Enter');
+      await waitFor(async()=> (await state()).decision.text===intended && !(await visible()).speakDisabled,'keyboard applies intended message');
+      expect((await snap()).speech_calls.length===0,'applying by keyboard does not speak',await snap());
+      await reach(x=>x.id==='speak');await key('Enter');
+      await waitFor(async()=> (await snap()).speech_calls.length===1,'keyboard requests explicit silent dispatch');
+      expect((await snap()).speech_calls[0]===intended,'keyboard dispatch matches typed text',await snap());
+      currentCase='keyboard-draft-return';
+      // Append an edit instead of relying on platform-specific Select All.
+      await reach(x=>x.id==='corrected-text');await send('Input.insertText',{text:' I need a quiet minute.'});
+      const draft=(await visible()).editor;
+      expect(draft!==intended && draft.includes('I need a quiet minute.'),'keyboard created a newer draft',draft);
+      await reach(x=>x.tag==='A' && x.href==='/settings');await key('Enter');
+      await waitFor(()=>evaluate("location.pathname==='/settings'"),'keyboard opens Settings');
+      await reach(x=>x.tag==='A' && x.text==='Back to your message');await key('Enter');
+      await waitFor(async()=>{const v=await visible();return v.editor===draft && v.speakDisabled;},'keyboard return preserves unapplied draft');
+      console.log('PASS keyboard typing/apply/explicit silent dispatch and draft navigation (CDP keys/text; no DOM focus or click)');
+      currentCase='profile-draft-boundary';
+      // Profile controls below are DOM-dispatched, not keyboard evidence.
+      const settings=async()=>{await click('a[href="/settings"]');await waitFor(()=>evaluate("location.pathname==='/settings' && !!document.querySelector('#profile-select')"),'profile Settings');await waitFor(()=>evaluate("[...document.querySelector('#profile-select').options].some(x=>x.value==='other')"),'profile options ready');};
+      const choose=async id=>{await evaluate(`document.querySelector('#profile-select').value=${JSON.stringify(id)}`);await click('#profile-switch-btn');};
+      const back=async id=>{await click('a[href="/"]');await waitFor(()=>evaluate(`location.pathname==='/' && !!document.querySelector('#corrected-text') && typeof state!=='undefined' && state?.profile_id===${JSON.stringify(id)}`),'return to rendered profile message');};
+      await settings();await choose('other');await dialog(false);
+      expect((await state()).profile_id==='default','declined profile switch leaves active profile unchanged',await state());
+      await choose('other');await dialog(true);await waitFor(async()=>(await state()).profile_id==='other','other profile selected');
+      await back('other');await waitFor(async()=> (await visible()).editor==='','other profile does not inherit default draft');
+      await edit('Notes belonging only to the other profile');
+      await settings();await choose('default');await waitFor(async()=>(await state()).profile_id==='default','default profile selected');
+      await back('default');await waitFor(async()=>{const v=await visible();return v.editor===draft && v.speakDisabled;},'default draft restored as unapplied');
+      await settings();await choose('other');await waitFor(async()=>(await state()).profile_id==='other','other profile reselected');
+      await back('other');await waitFor(async()=>{const v=await visible();return v.editor==='Notes belonging only to the other profile' && v.speakDisabled;},'other draft independently restored');
+      expect((await snap()).speech_calls.length===1,'navigation and profile changes never dispatch speech',await snap());
+      console.log('PASS profile draft isolation and declined switch (DOM-dispatched profile controls; real HTTP and storage)');
+      return;
+    }
     currentCase='typed-speech';
     await waitFor(async()=> (await visible()).editor !== undefined && (await state()).token && await js(()=>typeof state !== 'undefined' && !!state),'client initial render');
     await edit('Please bring water'); await waitFor(async()=>!(await visible()).saveDisabled,'typed apply enabled'); await click('#save-correction');
