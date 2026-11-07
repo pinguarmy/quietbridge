@@ -132,6 +132,12 @@ async function run(variant, coreOnly=false) {
     await evaluate('window.fetch=window.__originalFetch');
     console.log(`PASS core journeys variant=${variant}`);
     if(coreOnly) return;
+    currentCase='empty-draft-navigation';
+    await edit('');
+    await click('a[href="/settings"]');await waitFor(()=>evaluate("location.pathname==='/settings'"),'Settings for empty draft');
+    await send('Page.navigate',{url:origin});
+    await waitFor(async()=>{try{return (await visible()).editor==='' && (await visible()).speakDisabled && await js(()=>!!document.querySelector('#draft-status')?.textContent);}catch{return false;}},'intentionally empty draft remains unapplied after navigation');
+    await edit('Newer edit while request pending');
     currentCase='pending-new-message';
     // Delay one actual fetch before it reaches HTTP; release sends the original request.
     await evaluate(`(()=>{const original=window.fetch.bind(window);window.__originalFetch=original;window.__release=null;window.fetch=(u,o)=>{if(String(u).endsWith('/api/action/new_message')) return new Promise((resolve,reject)=>{window.__release=()=>original(u,o).then(resolve,reject);o.signal?.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true});});return original(u,o);};})()`);

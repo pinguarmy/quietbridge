@@ -9,11 +9,11 @@ let editorDirty = false, editorProfile = null, editVersion = 0;
 const retiredInstances = new Set();
 const ACTION_TIMEOUT_MS = 15000;
 const draftKey = profile => 'quietbridge-unsent-v1:' + (profile || 'default');
-function storageRead(key) { try { return window.sessionStorage?.getItem(key) || ''; } catch (_) { return ''; } }
-function storageWrite(key, value) { try { if (value) window.sessionStorage?.setItem(key, value); else window.sessionStorage?.removeItem(key); } catch (_) {} }
+function storageRead(key) { try { return window.sessionStorage?.getItem(key) ?? null; } catch (_) { return null; } }
+function storageWrite(key, value) { try { if (value !== null) window.sessionStorage?.setItem(key, value); else window.sessionStorage?.removeItem(key); } catch (_) {} }
 function persistEditor() {
   if (!$('corrected-text') || !state) return;
-  storageWrite(draftKey(editorProfile || state.profile_id), editorDirty ? $('corrected-text').value : '');
+  storageWrite(draftKey(editorProfile || state.profile_id), editorDirty ? $('corrected-text').value : null);
 }
 function editMessage() {
   editVersion++;
@@ -259,9 +259,9 @@ function render(s) {
       if (editorProfile !== (s.profile_id || 'default')) {
         editorProfile = s.profile_id || 'default';
         const saved = storageRead(draftKey(editorProfile));
-        editorDirty = Boolean(saved) && saved !== (d.text || '');
-        $('corrected-text').value = saved || d.text || '';
-        if (saved && !editorDirty) storageWrite(draftKey(editorProfile), '');
+        editorDirty = saved !== null && saved !== (d.text || '');
+        $('corrected-text').value = saved ?? d.text ?? '';
+        if (saved !== null && !editorDirty) storageWrite(draftKey(editorProfile), null);
       } else if (!editorDirty) $('corrected-text').value = d.text || '';
       text('draft-status', editorDirty ? 'Your unfinished edit is preserved. Use it explicitly, or start a new message to discard it.' : '');
     }
@@ -499,7 +499,7 @@ if ($('new-message')) $('new-message').onclick = async () => {
   const clearingVersion = editVersion, clearingProfile = editorProfile;
   if (await requestAction('new_message', {revision:state.revision})) {
     if (editVersion === clearingVersion && editorProfile === clearingProfile) {
-      editorDirty = false; storageWrite(draftKey(editorProfile), '');
+      editorDirty = false; storageWrite(draftKey(editorProfile), null);
       $('corrected-text').value = ''; text('draft-status', '');
     } else {
       persistEditor(); text('draft-status', 'New message started. Your newer unfinished edit is kept; choose Use this message to apply it.');

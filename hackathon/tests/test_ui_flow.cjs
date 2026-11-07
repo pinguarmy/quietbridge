@@ -32,7 +32,7 @@ function screen(page = 'index.html', sessionValues = new Map(), localValues = ne
       querySelectorAll(selector) { return selector === '.alternative' ? elements.get('alternatives').children : []; },
     },
     window: { addEventListener() {}, confirm: () => true,
-      sessionStorage: {getItem: key => sessionValues.get(key) || null, setItem: (key,value) => sessionValues.set(key,value), removeItem: key => sessionValues.delete(key)},
+      sessionStorage: {getItem: key => sessionValues.has(key) ? sessionValues.get(key) : null, setItem: (key,value) => sessionValues.set(key,value), removeItem: key => sessionValues.delete(key)},
       localStorage: {getItem: key => localValues.get(key) || null, setItem: (key,value) => localValues.set(key,value)} },
     fetch: () => new Promise(() => {}),
     setTimeout(fn, ms) { const id=++timerId; timers.set(id,{fn,ms});return id; },
@@ -192,6 +192,19 @@ test('unfinished editor survives new revisions and a fresh page in the same tab'
   const b = screen('index.html', storage); b.render({profile_id:'alice',decision:{text:'Backend words',status:'accepted',reason:'lip_only'}});
   assert.equal(b.elements.get('corrected-text').value,'My unfinished words');
   assert.equal(b.elements.get('speak').disabled,true);
+});
+
+test('an intentionally emptied draft survives navigation and remains unapplied', () => {
+  const storage=new Map();
+  const a=screen('index.html',storage);a.render({profile_id:'alice',decision:{text:'Recognized words',status:'accepted',reason:'corrected'}});
+  a.elements.get('corrected-text').value='';a.elements.get('corrected-text').listeners.input();
+  assert.equal(a.elements.get('speak').disabled,true);
+  const b=screen('index.html',storage);b.render({profile_id:'alice',decision:{text:'Recognized words',status:'accepted',reason:'corrected'}});
+  assert.equal(b.elements.get('corrected-text').value,'');
+  assert.equal(b.elements.get('speak').disabled,true);
+  assert.match(b.elements.get('draft-status').textContent,/preserved/);
+  b.elements.get('corrected-text').value='Recognized words';b.elements.get('corrected-text').listeners.input();
+  assert.equal(storage.size,0);
 });
 
 test('record control toggles with one activation, without sustained hold', async () => {

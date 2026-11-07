@@ -230,6 +230,7 @@ def test_mouth_routes_dispatch_and_refuse_overlapping_gestures(conn, server):
         def __init__(self):
             self.recording = False
             self.args = None
+            self.root = server.mouth.root
         def start(self, text, split, session):
             self.args = (text, split, session)
             self.recording = True
@@ -685,6 +686,41 @@ def test_paired_session_split_isolation(conn, server, monkeypatch):
     res, err = _paired_start(conn, server, split="test", session="sess_leak_guard")
     assert res.status == 400
     assert "split leakage" in err["error"]
+
+
+@pytest.mark.parametrize('explicit_profile', [False, True])
+def test_standalone_inputs_share_profile_session_split(conn, server, monkeypatch, explicit_profile):
+    server.mouth._tracker_factory = FakeTracker
+    monkeypatch.setattr('lipflow.dictation.clip_problem', lambda rec: None)
+    monkeypatch.setattr('lipflow.dictation.rois_for', lambda rec: np.zeros((20,96,96), dtype=np.uint8))
+    profile = server.profile_manager.get_active_profile()
+    extra = {'profile':profile.id} if explicit_profile else {}
+
+    def start(path, split, session):
+        body = {'label':'HELLO', 'text':'hello', 'split':split, 'session':session, **extra}
+        return _json(conn, server, 'POST', path, body=json.dumps(body),
+                     headers={'Content-Type':'application/json'})
+
+    response, _ = start('/api/start', 'train', 'gesture_session')
+    assert response.status == 200
+    assert _post_frame(conn, server)[0].status == 200
+    assert _json(conn, server, 'POST', '/api/stop', body='{}')[0].status == 200
+    response, error = start('/api/mouth/start', 'test', 'gesture_session')
+    assert response.status == 400 and 'split leakage' in error['error']
+    assert server.mouth.snapshot()['recording'] is False
+    # Reusing a session for another input in the SAME split remains valid.
+    assert start('/api/mouth/start', 'train', 'gesture_session')[0].status == 200
+    _json(conn, server, 'POST', '/api/mouth/discard', body='{}')
+
+    assert start('/api/mouth/start', 'validation', 'mouth_session')[0].status == 200
+    assert _post_frame(conn, server)[0].status == 200
+    stopped = _json(conn, server, 'POST', '/api/mouth/stop', body='{}')
+    assert stopped[0].status == 200 and stopped[1]['mouth']['saved_count'] == 1
+    response, error = start('/api/start', 'train', 'mouth_session')
+    assert response.status == 400 and 'split leakage' in error['error']
+    assert server.recording is None
+    assert start('/api/start', 'validation', 'mouth_session')[0].status == 200
+    _json(conn, server, 'POST', '/api/discard', body='{}')
 
 
 def test_paired_stop_failure_preserves_diagnostics(conn, server, monkeypatch):

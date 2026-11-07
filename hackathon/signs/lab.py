@@ -229,14 +229,8 @@ def _valid_session(session) -> bool:
 
 
 def _check_session_split(data_root: Path, split: str, session: str) -> None:
-    for other in ("train", "validation", "test"):
-        if other == split:
-            continue
-        other_dir = data_root / other
-        if other_dir.is_dir() and any(other_dir.glob(f"{session}_*.npz")):
-            raise ValueError(
-                f"session {session!r} already has sequences in {other}; refusing split leakage"
-            )
+    from hackathon.profiles import check_session_split
+    check_session_split(data_root, split, session)
 
 
 def _save_sequence(server: _LabServer, rec: _Recording) -> Path:
@@ -609,10 +603,17 @@ class _Handler(BaseHTTPRequestHandler):
                         raise ValueError("paired recording in progress; stop or discard first")
                     if self.server.recording is not None:
                         raise ValueError("Finish the gesture trial before recording lips")
+                    sequences_root = self.server.data_root
                     if data.get("profile"):
                         prof = self.server.profile_manager.get_profile(data["profile"])
                         self.server.mouth.set_root(prof.mouths_dir)
-                    self.server.mouth.start(data.get("text", ""), data.get("split", ""), data.get("session", ""))
+                        sequences_root = prof.sequences_dir
+                    # A recording session owns one split across inputs, using
+                    # their actual roots, including standalone --data-root.
+                    session, split = data.get("session", ""), data.get("split", "")
+                    if isinstance(session, str) and _valid_session(session) and split in {"train", "validation", "test"}:
+                        _check_session_split(sequences_root, split, session)
+                    self.server.mouth.start(data.get("text", ""), split, session)
                 elif action == "stop":
                     if self.server.paired_recording is not None:
                         raise ValueError("paired recording in progress; use /api/paired/stop")
@@ -905,15 +906,18 @@ class _Handler(BaseHTTPRequestHandler):
                 self._error(409, "already recording; stop or discard first")
                 return
             target_root = self.server.data_root
+            mouths_root = Path(self.server.mouth.root)
             if profile_id:
                 try:
                     prof = self.server.profile_manager.get_profile(profile_id)
                     target_root = prof.sequences_dir
+                    mouths_root = prof.mouths_dir
                 except Exception as error:
                     self._error(400, str(error))
                     return
             try:
                 _check_session_split(target_root, split, session)
+                _check_session_split(mouths_root, split, session)
             except ValueError as error:
                 self._error(400, str(error))
                 return
