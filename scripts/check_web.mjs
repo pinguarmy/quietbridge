@@ -169,7 +169,14 @@ async function run(variant, coreOnly=false) {
     await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27}); await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
     expect(await js(()=>document.querySelector('#first-use-guide').hidden && document.activeElement?.id==='open-guide'),'Escape closes guide and restores focus',await js(()=>document.activeElement?.id));
     currentCase='lab-modal';
-    await send('Page.navigate',{url:new URL('/record',origin).href});
+    const labStart=Date.now();
+    try { await send('Page.navigate',{url:new URL('/record',origin).href}); }
+    catch(error) {
+      console.error(`Personalize navigation failed after ${Date.now()-labStart}ms; collecting owned fixture thread stacks`);
+      await protocol.command('diagnostics');
+      throw error;
+    }
+    console.log(`Personalize navigation headers received after ${Date.now()-labStart}ms`);
     await waitFor(async()=>{try{return await js(()=>!!document.querySelector('#btnNewProfile'));}catch{return false;}},'owned lab loaded',10000);
     await click('#btnNewProfile');
     expect(await js(()=>!document.querySelector('#newProfileDialog').hidden && document.activeElement?.id==='newProfileName'),'lab dialog opens with focus',await js(()=>document.activeElement?.id));

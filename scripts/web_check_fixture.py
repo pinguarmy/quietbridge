@@ -6,6 +6,7 @@ all temporary data. Fault variants calibrate the test, not product capability.
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import hashlib
 import json
 from pathlib import Path
@@ -147,6 +148,9 @@ def main():
                     emit({'id': request_id, 'ok': True, **fixture.snapshot()})
                 elif operation == 'restart':
                     emit({'id': request_id, 'ok': True, **fixture.restart()})
+                elif operation == 'diagnostics':
+                    faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+                    emit({'id': request_id, 'ok': True})
                 elif operation == 'stop':
                     emit({'id': request_id, 'ok': True})
                     break
