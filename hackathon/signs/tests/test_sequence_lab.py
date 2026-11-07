@@ -720,3 +720,71 @@ def test_lab_html_contains_paired_ui(conn, server):
     assert 'id="pairedPromptSelect"' in raw_html
     assert "Paired data collection only" in raw_html or "no recognition" in raw_html.lower()
     assert "[hidden]{display:none!important}" in raw_html
+
+
+def test_shutdown_waits_for_active_frame_before_closing_resources(tmp_path):
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    close_done = threading.Event()
+    closes = []
+
+    class GatedEngine(FakeEngine):
+        def infer(self, frame_rgb, timestamp_ms):
+            entered.set()
+            assert release.wait(3)
+            result = super().infer(frame_rgb, timestamp_ms)
+            finished.set()
+            return result
+
+    engine = GatedEngine()
+    srv = create_server(engine=engine, port=0, data_root=tmp_path / 'seq')
+    real_close = srv.mouth.close
+    srv.mouth.close = lambda: (closes.append(finished.is_set()), real_close())
+    serving = threading.Thread(target=srv.serve_forever, daemon=True)
+    serving.start()
+    responses = []
+
+    def send_frame():
+        conn = http.client.HTTPConnection('127.0.0.1', srv.server_port, timeout=4)
+        try:
+            response, _ = _request(conn, srv, 'POST', '/api/frame', body=_jpeg(),
+                                   headers={'Content-Type':'image/jpeg'})
+            responses.append(response.status)
+        finally:
+            conn.close()
+
+    frame_thread = threading.Thread(target=send_frame)
+    frame_thread.start()
+    assert entered.wait(2)
+    srv.shutdown()
+
+    def close_server():
+        srv.server_close()
+        engine.close()
+        close_done.set()
+
+    closing = threading.Thread(target=close_server)
+    closing.start()
+    try:
+        assert not close_done.wait(0.05), 'resources closed before active frame completed'
+        assert not engine.closed
+        assert closes == []
+        # An existing HTTP/1.1 connection must not start a new recording while
+        # shutdown is waiting for the active frame to leave the resource lock.
+        class RejectedRequest:
+            server = srv
+            headers = {'Content-Length': '0'}
+            def _check_host(self): return True
+            def _drain_body(self): pass
+            def _error(self, status, message): self.status = status
+        request = RejectedRequest()
+        assert not lab._Handler._check_post(request)
+        assert request.status == 503
+    finally:
+        release.set()
+        closing.join(timeout=4)
+        frame_thread.join(timeout=4)
+        serving.join(timeout=4)
+    assert close_done.is_set()
+    assert closes == [True]
+    assert engine.closed
+    assert responses == [200]

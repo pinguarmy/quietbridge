@@ -176,6 +176,7 @@ class _LabServer(ThreadingHTTPServer):
         self.max_frames = max_frames
         self.max_seconds = max_seconds
         self.lock = threading.Lock()
+        self._closing = False
         self.recording: _Recording | None = None
         self.paired_recording: dict | None = None
         self.saved_count = 0
@@ -201,10 +202,14 @@ class _LabServer(ThreadingHTTPServer):
             self.mouth.set_root(active_p.mouths_dir)
 
     def server_close(self):
-        self.recording = None
-        self.paired_recording = None
-        self.lips.close()
-        self.mouth.close()
+        # Frame handlers own the engine/tracker under this lock. Stop admission
+        # before waiting, then release resources only after active inference ends.
+        self._closing = True
+        with self.lock:
+            self.recording = None
+            self.paired_recording = None
+            self.lips.close()
+            self.mouth.close()
         super().server_close()
 
     def next_timestamp_ms(self) -> int:
@@ -343,6 +348,10 @@ class _Handler(BaseHTTPRequestHandler):
     def _check_post(self) -> bool:
         """Host + optional same-origin Origin + token for every POST."""
         if not self._check_host():
+            return False
+        if self.server._closing:
+            self._drain_body()
+            self._error(503, "Recorder is closing. Return to your message.")
             return False
         origin = self.headers.get("Origin")
         if origin is not None:
@@ -531,6 +540,9 @@ class _Handler(BaseHTTPRequestHandler):
         if body is None:
             return
         with self.server.lock:
+            if self.server._closing:
+                self._error(503, "Recorder is closing. Return to your message.")
+                return
             timestamp_ms = self.server.next_timestamp_ms()
             decoded = cv2.imdecode(np.frombuffer(body, dtype=np.uint8), cv2.IMREAD_COLOR)
             if decoded is None:

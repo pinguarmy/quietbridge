@@ -1,5 +1,7 @@
 # QuietBridge onboarding and everyday-use review
 
+Historical record only. The three final 10/10 scores below did not establish whole-product quality. A subsequent audit found target-score exposure, coached retests, coarse anchors and mismatched evidence layers. Use [review protocol v2](review-protocol.md) for the current method and conclusions; keep these observations to show what changed, not as a release endorsement.
+
 ## Frozen rubric, 2026-11-04
 
 Scope: the shipped local web communication page, Settings and Personalize, including first use, a returning user, typed fallback and explicit isolated-sign capability. This is an engineering usability review, not a clinical accessibility study or a recognition-accuracy benchmark. Scores cannot establish recognition quality for a new signer. Real-user validation and model/data rights remain separate release constraints.

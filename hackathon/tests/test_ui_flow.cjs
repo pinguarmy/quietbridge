@@ -5,7 +5,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 function screen(page = 'index.html', sessionValues = new Map(), localValues = new Map()) {
-  const elements = new Map();
+  const elements = new Map(), timers = new Map();
+  let timerId = 0;
   function element(tag = 'DIV') {
     const classes = new Set();
     return {
@@ -33,8 +34,10 @@ function screen(page = 'index.html', sessionValues = new Map(), localValues = ne
     window: { addEventListener() {}, confirm: () => true,
       sessionStorage: {getItem: key => sessionValues.get(key) || null, setItem: (key,value) => sessionValues.set(key,value), removeItem: key => sessionValues.delete(key)},
       localStorage: {getItem: key => localValues.get(key) || null, setItem: (key,value) => localValues.set(key,value)} },
-    fetch: () => new Promise(() => {}), setTimeout() {}, clearTimeout() {},
-    Date, Promise, console,
+    fetch: () => new Promise(() => {}),
+    setTimeout(fn, ms) { const id=++timerId; timers.set(id,{fn,ms});return id; },
+    clearTimeout(id) { timers.delete(id); },
+    Date, Promise, console, AbortController,
     Option: function (label, value) { return { textContent: label, value }; },
   };
   vm.createContext(context);
@@ -49,7 +52,7 @@ function screen(page = 'index.html', sessionValues = new Map(), localValues = ne
     };
     vm.runInContext('render(sample)', context);
   }
-  return { context, elements, render, sessionValues, localValues };
+  return { context, elements, render, sessionValues, localValues, timers };
 }
 
 test('reloading models targets the running profile and reports warmup truthfully', async () => {
@@ -179,6 +182,85 @@ test('guide is dismissible and reopenable without changing message state', () =>
   assert.equal(a.elements.get('first-use-guide').hidden,false);
   assert.equal(a.elements.get('guide-heading').focused,true);
   assert.equal(a.elements.get('message').textContent,'Your words will appear here.');
+});
+
+test('server restart accepts the new identity and token without replaying stale speech', async () => {
+  const a=screen();a.render({server_instance:'boot-a',token:'old-token',revision:8,decision:{text:'Old accepted words',status:'accepted',reason:'corrected'}});
+  a.elements.get('corrected-text').value='Unfinished after restart';a.elements.get('corrected-text').listeners.input();
+  a.render({server_instance:'boot-b',token:'new-token',revision:0});
+  assert.equal(a.elements.get('message').textContent,'Your words will appear here.');
+  assert.equal(a.elements.get('corrected-text').value,'Unfinished after restart');
+  assert.equal(a.elements.get('speak').disabled,true);
+  assert.match(a.elements.get('error').textContent,/restarted/);
+  assert.equal(vm.runInContext('token',a.context),'new-token');
+  a.render({server_instance:'boot-a',token:'old-token',revision:9,decision:{text:'Late old result',status:'accepted',reason:'corrected'}});
+  assert.equal(vm.runInContext('token',a.context),'new-token');
+  assert.equal(a.elements.get('message').textContent,'Your words will appear here.');
+  a.render({server_instance:'boot-b',token:'new-token',revision:2,decision:{text:'Current words',status:'accepted',reason:'corrected'}});
+  a.render({server_instance:'boot-b',token:'new-token',revision:1,decision:{text:'Out of date',status:'accepted',reason:'corrected'}});
+  assert.equal(a.elements.get('message').textContent,'Current words');
+});
+
+test('a delayed camera-auth refresh cannot restore a retired server token', async () => {
+  const a=screen();a.render({server_instance:'old',token:'old-token',revision:5});
+  const old={...a.context.sample};let finish, reached;
+  const refreshing=new Promise(resolve=>{reached=resolve});
+  a.context.fetch=async url=>url==='/api/frame'?{status:401}:new Promise(resolve=>{finish=resolve;reached()});
+  a.elements.get('browser-camera').videoWidth=10;
+  vm.runInContext("browserCameraStream={getTracks:()=>[{stop(){}}]};browserFrameCanvas.getContext=()=>({drawImage(){}});browserFrameCanvas.toBlob=cb=>cb({});",a.context);
+  const upload=vm.runInContext('uploadBrowserFrames()',a.context);await refreshing;
+  a.render({server_instance:'new',token:'new-token',revision:0});
+  finish({ok:true,json:async()=>old});await upload;
+  assert.equal(vm.runInContext('state.server_instance',a.context),'new');
+  assert.equal(vm.runInContext('token',a.context),'new-token');
+});
+
+test('new message completion preserves words typed after confirmation', async () => {
+  const a=screen();a.render({profile_id:'alice',decision:{text:'Previous',status:'accepted',reason:'corrected'}});
+  let finish;
+  a.context.fetch=()=>new Promise(resolve=>{finish=resolve});
+  const clearing=a.elements.get('new-message').onclick();
+  await Promise.resolve();
+  a.elements.get('corrected-text').value='Typed while waiting';a.elements.get('corrected-text').listeners.input();
+  finish({ok:true,json:async()=>({...a.context.sample,revision:2,decision:{text:'',status:'unavailable',reason:'lip_only'}})});
+  await clearing;
+  assert.equal(a.elements.get('corrected-text').value,'Typed while waiting');
+  assert.equal(a.sessionValues.get('quietbridge-unsent-v1:alice'),'Typed while waiting');
+  assert.equal(a.elements.get('speak').disabled,true);
+  assert.match(a.elements.get('draft-status').textContent,/newer unfinished edit is kept/);
+});
+
+test('hung action times out once, accepts fresh polling and releases the action queue', async () => {
+  const a=screen();a.render({server_instance:'boot',token:'token',revision:1,decision:{text:'Old words',status:'accepted',reason:'corrected'}});
+  a.elements.get('corrected-text').value='New words';a.elements.get('corrected-text').listeners.input();
+  let signal, calls=0;
+  a.context.fetch=async(url,options)=>{calls++;signal=options.signal;return new Promise(()=>{})};
+  const applying=a.elements.get('save-correction').onclick();await Promise.resolve();
+  assert.equal(a.elements.get('save-correction').disabled,true);
+  a.context.fetch=async()=>({ok:true,json:async()=>({...a.context.sample,revision:4,decision:{text:'Fresh server words',status:'accepted',reason:'corrected'}})});
+  await vm.runInContext('poll()',a.context);
+  assert.equal(a.elements.get('message').textContent,'Fresh server words');
+  const timeout=[...a.timers.values()].find(t=>t.ms===15000);assert.ok(timeout);timeout.fn();await applying;
+  assert.equal(signal.aborted,true);assert.equal(calls,1);
+  assert.equal(a.elements.get('corrected-text').value,'New words');
+  assert.match(a.elements.get('error').textContent,/result is uncertain/);
+  assert.equal(vm.runInContext('pendingActions',a.context),0);
+  a.context.fetch=async(url,options)=>({ok:true,json:async()=>({...a.context.sample,revision:5,decision:{text:JSON.parse(options.body).text,status:'accepted',reason:'corrected'}})});
+  await a.elements.get('save-correction').onclick();
+  assert.equal(a.elements.get('message').textContent,'New words');
+});
+
+test('a late older action response cannot clear an edit after a newer result arrives', async () => {
+  const a=screen();a.render({server_instance:'boot',token:'token',revision:1,decision:{text:'Previous',status:'accepted',reason:'corrected'}});
+  a.elements.get('corrected-text').value='Unfinished draft';a.elements.get('corrected-text').listeners.input();
+  let finish;a.context.fetch=()=>new Promise(resolve=>{finish=resolve});
+  const clearing=a.elements.get('new-message').onclick();await Promise.resolve();
+  a.render({server_instance:'boot',token:'token',revision:3,decision:{text:'Newer incoming words',status:'accepted',reason:'corrected'}});
+  finish({ok:true,json:async()=>({...a.context.sample,revision:2,decision:{text:'',status:'unavailable',reason:'lip_only'}})});await clearing;
+  assert.equal(a.elements.get('corrected-text').value,'Unfinished draft');
+  assert.equal(a.elements.get('message').textContent,'Newer incoming words');
+  assert.equal(a.elements.get('speak').disabled,true);
+  assert.match(a.elements.get('error').textContent,/newer result/);
 });
 
 test('explicit new message sends current revision and clears unfinished editor only on success', async () => {

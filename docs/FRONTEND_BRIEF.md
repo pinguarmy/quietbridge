@@ -6,7 +6,7 @@ A quiet communication desk. The message is the focal point, with one clear captu
 - Metaphor and signature: a message sheet beside a viewfinder, with a small capture/review/speak step rail.
 - Reference and stack: native accessibility utility clarity; existing HTML, local CSS and vanilla JavaScript. No new UI dependency or remote fonts.
 - Palette and type: cool off-white, navy ink, restrained teal actions; system sans-serif controls and generous message text.
-- Layout: camera beside message on desktop; capture then message on mobile. Mouth zoom and technical details use disclosures.
+- Layout: message before camera in the DOM and visual order at every width. Mouth zoom and technical details use disclosures.
 - Storyboard: start camera, build a draft, stop, review or edit, then speak. Errors preserve the message. Personalization explains independent recording sessions in plain language.
 - Motion and copy: short state transitions, reduced-motion support, concrete instructions. No claims of measured accuracy.
 - Avoid: gradients, blur, decorative illustrations, button walls, fake confidence, training jargon on the daily page.
@@ -26,7 +26,7 @@ Pass A changes hierarchy. Pass B checks rendered desktop/mobile spacing, keyboar
 - Copy and motion: concrete short instructions matched to actual backend and camera state. No decorative motion or accuracy promises.
 - Accessibility and privacy: a non-hold capture option, keyboard/focus flow, labelled controls, no auto camera/speech/learning, explicit sensitive-data consent and useful error recovery.
 - Avoid: compulsory wizard, diagnostic wall, jargon-led profile creation, fake ready states, dead cross-port links and ratings substituted for user evidence.
-- Success: the frozen UX rubric in ux-review.md is independently scored by three model reviewers, with reproducible journeys and no serious unresolved defects. Real signer accuracy and user study are separate, unverified work.
+- Success: critical journeys have reproducible behavior and no serious unresolved defects. The v1 model scores are historical, not product-quality measurements. Apply review-protocol.md, with independent counterexamples and separate real-user/recognition evidence.
 
 ## Paired standard-sign check, 2026-11-04
 

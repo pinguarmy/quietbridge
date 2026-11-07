@@ -5,7 +5,9 @@ let state = null, token = '', actionChain = Promise.resolve(), pointerHeld = fal
 let speaking = false, pendingActions = 0, renderedRevision = null, renderedAlternatives = '', renderedVocabulary = '', initialized = false, chosenText = null, connectionLost = false;
 let browserCameraStream = null, browserCameraStarting = false, browserCameraStopping = false, browserFrameTimer = null, browserFrameCanvas = document.createElement('canvas');
 browserFrameCanvas.width = 960; browserFrameCanvas.height = 720;
-let editorDirty = false, editorProfile = null;
+let editorDirty = false, editorProfile = null, editVersion = 0;
+const retiredInstances = new Set();
+const ACTION_TIMEOUT_MS = 15000;
 const draftKey = profile => 'quietbridge-unsent-v1:' + (profile || 'default');
 function storageRead(key) { try { return window.sessionStorage?.getItem(key) || ''; } catch (_) { return ''; } }
 function storageWrite(key, value) { try { if (value) window.sessionStorage?.setItem(key, value); else window.sessionStorage?.removeItem(key); } catch (_) {} }
@@ -14,6 +16,7 @@ function persistEditor() {
   storageWrite(draftKey(editorProfile || state.profile_id), editorDirty ? $('corrected-text').value : '');
 }
 function editMessage() {
+  editVersion++;
   editorDirty = $('corrected-text').value !== (state?.decision?.text || '');
   persistEditor(); updateMessage();
   text('draft-status', editorDirty ? 'Unfinished edit kept in this tab. Choose Use this message before speaking it.' : '');
@@ -46,7 +49,7 @@ async function uploadBrowserFrames() {
           const fresh = await fetch('/api/state');
           if (fresh.ok) {
             const next = await fresh.json();
-            if (next.token) { token = next.token; render(next); }
+            if (next.token) render(next);
             else text('error', 'Browser camera upload was rejected and no fresh token was provided. Refresh QuietBridge.');
           } else text('error', 'Browser camera upload was rejected. Refresh QuietBridge before trying again.');
         } else if (!response.ok) text('error', `Browser camera upload failed (${response.status}).`);
@@ -117,20 +120,49 @@ const handsCanvas = $('hands-overlay'), handsDraw = handsCanvas?.getContext('2d'
 const handEdges = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 let latestTracking = null, trackingAt = 0, crop = null;
 
+// One owner for mutating message requests. A timeout never retries an action:
+// the server may have committed it, so poll and review before trying again.
 function requestAction(name, data = {}) {
-  pendingActions++;
+  const instance = state?.server_instance;
+  pendingActions++; updateMessage();
   actionChain = actionChain.then(async () => {
-    const res = await fetch('/api/action/' + name, {method:'POST', headers:{'Content-Type':'application/json', 'X-Lipflow-Token':token}, body:JSON.stringify(data)});
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.error || 'Please try again.');
-    render(result); text('error', ''); return true;
-  }).catch(e => { text('error', `${e.message || 'Connection unavailable.'} Your edit is kept. Try again when connected, or copy your typed text.`); return false; }).finally(() => { pendingActions--; updateMessage(); });
+    if (instance && instance !== state?.server_instance) throw new Error('QuietBridge restarted. Review the current message before trying again.');
+    const controller = new AbortController();
+    let timer;
+    try {
+      const timedOut = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error('The request timed out. Its result is uncertain; check the current message before retrying.'));
+        }, ACTION_TIMEOUT_MS);
+      });
+      const request = (async () => {
+        const res = await fetch('/api/action/' + name, {method:'POST', signal:controller.signal,
+          headers:{'Content-Type':'application/json', 'X-Lipflow-Token':token}, body:JSON.stringify(data)});
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error || 'Please try again.');
+        return result;
+      })();
+      const result = await Promise.race([request, timedOut]);
+      if (instance && instance !== state?.server_instance) throw new Error('QuietBridge restarted. Review the current message before trying again.');
+      if (!render(result)) throw new Error('The request finished, but a newer result is already available. Review the current message.');
+      text('error', ''); return true;
+    } finally { clearTimeout(timer); }
+  }).catch(e => { text('error', `${e.message || 'Connection unavailable.'} Your edit is kept. Review the current message, or copy your typed text.`); return false; }).finally(() => { pendingActions--; updateMessage(); });
   return actionChain;
 }
 
 function render(s) {
-  if (state && s.revision < state.revision) return;
+  if (retiredInstances.has(s.server_instance)) return false;
+  const restarted = state?.server_instance && s.server_instance && state.server_instance !== s.server_instance;
+  if (state && !restarted && s.revision < state.revision) return false;
+  if (restarted) {
+    persistEditor(); stopBrowserCamera();
+    retiredInstances.add(state.server_instance);
+    renderedRevision = null; chosenText = null;
+  }
   state = s; if (s.token) token = s.token;
+  if (restarted) text('error', 'QuietBridge restarted. The camera is off. Your unfinished edit is kept; review it before using or speaking a message.');
   renderCapabilities(s);
   hide('rehearsal-banner', !s.rehearsal); hide('preview', !s.rehearsal);
   text('camera-status', s.camera); text('lip-status', s.lips); text('hand-status', s.signs);
@@ -250,7 +282,7 @@ function render(s) {
         button.onclick = () => {
           if (speaking) return;
           if (editorDirty && !confirmDiscard('Use these selected words instead of your unfinished edit? The unfinished edit will be replaced.')) return;
-          chosenText = candidate;
+          editVersion++; chosenText = candidate;
           if ($('corrected-text')) $('corrected-text').value = candidate;
           editorDirty = false; persistEditor();
           if ($('learn-correction')) $('learn-correction').checked = false;
@@ -291,6 +323,7 @@ function render(s) {
     });
     initialized = true;
   }
+  return true;
 }
 
 function updateMessage() {
@@ -395,7 +428,7 @@ async function poll() {
   try {
     const response = await fetch('/api/state'); if (!response.ok) throw new Error();
     if (connectionLost) {text('error', ''); connectionLost = false;}
-    const result = await response.json(); if (!pendingActions) render(result);
+    const result = await response.json(); render(result);
   } catch (_) { connectionLost = true; persistEditor(); text('error', 'Connection lost. Reconnecting automatically. Your edit is kept in this tab; you can still type or copy it.'); if ($('speak')) $('speak').disabled = true; if ($('record')) $('record').disabled = true; if ($('save-correction')) $('save-correction').disabled = true; }
   setTimeout(poll, 180);
 }
@@ -461,10 +494,16 @@ if ($('save-correction')) $('save-correction').onclick = async () => {
 if ($('new-message')) $('new-message').onclick = async () => {
   if (!state || $('new-message').disabled) return;
   if (hasCurrentMessage() && !confirmDiscard('Start a new message? The current words and unfinished edit will be cleared.')) return;
+  const clearingVersion = editVersion, clearingProfile = editorProfile;
   if (await requestAction('new_message', {revision:state.revision})) {
-    editorDirty = false; storageWrite(draftKey(editorProfile), '');
-    $('corrected-text').value = ''; $('learn-correction').checked = false;
-    text('draft-status', ''); updateMessage(); focusEditor();
+    if (editVersion === clearingVersion && editorProfile === clearingProfile) {
+      editorDirty = false; storageWrite(draftKey(editorProfile), '');
+      $('corrected-text').value = ''; text('draft-status', '');
+    } else {
+      persistEditor(); text('draft-status', 'New message started. Your newer unfinished edit is kept; choose Use this message to apply it.');
+    }
+    $('learn-correction').checked = false;
+    updateMessage(); focusEditor();
   }
 };
 if ($('copy-message')) $('copy-message').onclick = async () => {

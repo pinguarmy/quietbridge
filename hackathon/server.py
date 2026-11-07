@@ -42,6 +42,10 @@ class _LazyLabEngine:
 
 def make_server(runtime, port=8765):
     token = secrets.token_urlsafe(32)
+    server_instance = secrets.token_urlsafe(16)
+
+    def state_payload():
+        return {**runtime.snapshot(), "token": token, "server_instance": server_instance}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -73,7 +77,7 @@ def make_server(runtime, port=8765):
             path = self.path.split("?", 1)[0]
             try:
                 if path == "/api/state":
-                    self._json(200, {**runtime.snapshot(), "token": token})
+                    self._json(200, state_payload())
                 elif path == "/api/cleanup/config":
                     self._json(200, runtime.cleanup_config())
                 elif path == "/api/profiles":
@@ -145,7 +149,7 @@ def make_server(runtime, port=8765):
                     self._json(200, runtime.test_cleanup())
                 else:
                     runtime.action(self.path.removeprefix("/api/action/"), data)
-                    self._json(200, runtime.snapshot())
+                    self._json(200, state_payload())
             except (ValueError, TypeError, RuntimeError, OSError) as exc:
                 self._json(400, {"error": str(exc)})
             except (BrokenPipeError, ConnectionResetError):
@@ -216,8 +220,7 @@ def make_server(runtime, port=8765):
                 payload["active_profile"] = profile.id
                 payload["profile"] = profile.to_dict(include_stats=True)
                 payload["ok"] = True
-                payload.update(runtime.snapshot())
-                payload["token"] = token
+                payload.update(state_payload())
                 self._json(200, payload)
             except ProfileSwitchConflict as exc:
                 self._json(409, {"error": str(exc)})

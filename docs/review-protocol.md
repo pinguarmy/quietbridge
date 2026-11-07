@@ -1,0 +1,91 @@
+# QuietBridge review protocol v2
+
+Status: v2 frozen on 2026-11-07 after an independent method audit, before the next product implementation. This supersedes the release conclusions of the [v1 review](ux-review.md), not its historical observations. The user asked whether its three 10/10 scores were inflated. They were: the method did not justify a whole-product score.
+
+## What went wrong
+
+A reviewer awarded 10 while another reproduced a wrong-message P1 on the same working tree. We disclosed the desired passing score and previous reviewers' results. We repeatedly coached missing journeys, then combined targeted retests with earlier scores. Much of the evidence was source, a VM, rehearsal or a substituted capture state. Those are useful tests, but they do not establish real-user usability, camera operation, speech quality or signer recognition. Baseline arithmetic errors further weakened confidence. None of the old scores is a comparable baseline for v2.
+
+## Three separate conclusions
+
+1. **Engineering assurance:** the bounded software contracts below. Models may review these. A passing automated test supports only the layer it actually executes.
+2. **Practical effectiveness:** fresh target users, physical capture and local speech, independent-session recognition and correction burden. This is currently unvalidated. No model review or public-video smoke earns these points.
+3. **Review validity:** whether the evidence actually matches the revision, claim, execution layer and result. This is a check on the report, not another flattering product score.
+
+Do not average these together. Report practical effectiveness as unmeasured until appropriate consented evidence exists. Thus an engineering score above 9.5 cannot imply that the whole product exceeds 9.5 or is ready for assistive reliance.
+
+## Frozen engineering claims
+
+| Domain | Weight | Contract and mandatory counterexample |
+| --- | ---: | --- |
+| Intended message | 20 | Visible selection, applied text and explicit speech request agree. Conflict, edit during a pending action, stale revision and late suggestion cannot silently replace intent or speak. |
+| Continuity | 15 | Unsaved edits survive ordinary navigation, incoming results and failed actions. A successful older request must not erase a newer edit. Profile boundaries remain explicit. |
+| Capture and service ownership | 15 | Start/finish/cancel/unload have bounded ownership and visible state. Failed setup and concurrent frame/service shutdown do not orphan tracks or another user's service. |
+| Privacy and data integrity | 15 | No unsolicited speech, camera, learning or external text send. Capture consent, discard, split separation, safe paths and saved/loaded identity match actual writes. |
+| Accessible operation | 10 | Critical typing, selection, capture and return journeys work with keyboard and visible feedback. Test real DOM focus and narrow layout; a srcdoc width is not actual browser zoom or screen-reader proof. |
+| First-use recovery | 10 | A fresh page can produce a reviewed typed message without setup; missing permission/model/service gives an actionable path, not a false ready state. |
+| Structure and testability | 10 | Message transitions and resource ownership have one clear owner. A regression can be tested through public behavior without rewriting production source or duplicating its logic. No refactor for file length alone. |
+| Reproducibility | 5 | The report identifies a frozen code snapshot, actual commands/results and a durable reproducer for each serious finding. Arithmetic and evidence types are independently checked. |
+
+Each domain receives an anchored level, not points for the number of tests:
+
+- 0: critical contract broken, or no evidence.
+- 1: design/source reasoning only.
+- 2: isolated behavior exercised, but relevant integration or negative path missing.
+- 3: relevant real integration plus counterexamples pass; important coverage remains absent or the reproducer is not independently repeatable.
+- 4: every mandatory sub-contract and its listed negative path has matching direct integration evidence, independent reproduction and an evaluator-selected counterexample on the same snapshot. A missing path, unreplicated result, contradictory result or mismatched evidence layer forbids level 4. Unresolved serious defects receive a veto, regardless of total. Unknown remains a separate result, never a presumed pass.
+
+The primary result is pass / fail / unknown for each mandatory sub-contract, its evidence layer, and the domain's pass / fail / insufficient-evidence decision. Levels describe evidence strength, not experience quality. Do not promote them to another whole-product score. If a numerical summary is requested, sum(weight × level / 4) / 10 only as a contract-assurance diagnostic and publish all unknowns and vetoes beside it. It cannot answer whether users rate the product above 9.5. A fixture may prove a UI-state contract only if the report limits that claim; it cannot earn physical-camera or actual-zoom validation. The honest answer to the requested whole-product >9.5 target is unestablished until consented user and recognition evidence exists, not another artificial 10.
+
+## Review procedure and stop rule
+
+- Freeze the protocol before fixes. Change it only for a demonstrated validity defect, create a new version and rescore; never change anchors to rescue a score.
+- The implementer publishes changed scope, safety restrictions and runnable entry points, not desired ratings, other reviewers' scores, prescribed successful outputs or a script of every interaction.
+- Reviewers select at least one previously undisclosed, plausible counterexample per relevant domain. Keep those test inputs private until results are submitted, then preserve useful reproducers in the normal tests. Do not fabricate secrecy from the implementer of this protocol.
+- Calibration must reject two runnable historical bad behaviors: wrong conflict text and lost unsaved edits. A separate evaluator freezes expected outcomes and serves behavioral bad variants without identifying their defect to the reviewer. Keep whether the reviewer detects the violation and cites actual behavior. Either missed defect invalidates that review's signoff; a passing regression test alone does not prove the reviewer detected it. These two cases calibrate safety and continuity only, not every domain. Calibration mutations must change behavior, not merely test that a source string exists. Record misses and initial reports, rather than discarding them.
+- Separate implementation from evaluation. Every report gives finding, input, actual result, expected contract, severity, source snapshot and evidence layer. Source-only, VM, real HTTP, browser DOM, physical device and target-user evidence are named separately.
+- A changed contract invalidates its earlier score. Targeted retests show a fix, not a new full review. Final signoff requires one independently selected full engineering pass on the final code snapshot. Keep initial results and review count; no cherry-picking the highest result.
+- P0/P1 is a veto. Unknown is not success. Disagreement is resolved by reproducing the disputed journey, not majority vote. The author never substitutes their score for a missing reviewer.
+- Stop a review pass when its bounded planned journeys finish. Do not keep prompting the same reviewer until it raises a score. After fixes, allow one new independent full pass; additional iterations need a new concrete defect, not a disappointing number.
+
+## Current execution record
+
+Baseline: `248539f`. Independent method audit and product/structure counterexample reviews began before implementation. No physical capture, audible speech, paid API, training or private-data use is authorized by this review. Model identities are exact catalog routes; Kimi K3 is not a verified Kimi 3.1.
+
+No v2 product-quality scores have been assigned. The following observations are not replacement scores. Current full local regression after the final token/shutdown fixes: 586 Python tests passed, 11 skipped, 34 subtests passed; the combined Node UI/preferences/lab command ran 41 tests with zero failures. These counts describe software checks, not users or independent recognition trials.
+
+### Reproduced defects and bounded structural changes
+
+- A new server starts message revision at zero, while the page rejected every lower revision before accepting its new token. An open tab could keep an old accepted message and fail every action after restart. State responses now have a per-server identity separate from message revision. The UI accepts a fresh server, stops browser tracks, retains unsent edits and rejects retired-server responses. The real HTTP test checks identity stability/change, token rejection and a correction without speech.
+- New message could erase words typed after its discard confirmation while the request was pending. Local edit generations now protect newer edits, including choosing an alternative. Older responses rejected by revision ordering cannot be treated as successful cleanup.
+- One hung action blocked both subsequent actions and all polling updates. Message mutations now have one bounded queue with a 15-second deadline, abort and no automatic retry. Polling is no longer gated by the queue. Timeout copy states that the server outcome is uncertain.
+- A delayed AI-preferences load overwrote newer inputs; a successful save erased a newer key and its unsaved warning. The preferences controller tracks edit generations and distinguishes saved older entries from unsaved newer ones. The tests execute its shipped script unchanged rather than editing its source to expose readiness.
+
+These changes address observed ownership/order defects without replacing the frontend, adding dependencies, or refactoring files simply for length. One structure reviewer used the wrong Python interpreter, edited a read-only file and produced an irrelevant compatibility change. The Lead rejected that review and restored only its unauthorized edits; it is not counted as validation.
+
+### Calibration validity
+
+A separate evaluator prepared three opaque behavioral variants with independent data roots and normal server security: a control and two known bad behaviors. The first parallel browser pass was invalid: one reviewer omitted the assigned bridge session and reused others' tabs; another reviewed the wrong assigned ports. The Lead also detected its own restart tab on an unrelated calibration URL. Those observations are explicitly excluded from independent product/calibration evidence. The retry is a serial rerun after this environmental failure, not a repeat to improve a disappointing score. URL and tab ownership must be verified before interaction. No reviewer result will be accepted from the contaminated pass.
+
+The revealed answer key identifies control cedar, wrong-selection maple and edit-loss willow. The orchestration returned one report detecting both faults, one shallow pass report and one report missing the wrong-selection fault and leaving edit-loss unknown. Subsequent provenance replies contradicted assigned model/port identities and referred to another report's ports. Therefore even the apparent two-fault detection cannot be accepted as a clean, independently attributed calibration pass. The entire calibration is inconclusive, not successful. It did not produce three reliable independent reviewers. Keep these failures instead of selecting the favorable report. An attempted fresh Opus review failed before returning a result; it is not a pass. A fresh bounded Terra engineering review reported continuity **fail** for a newly reproduced delayed-auth-refresh race and the other seven domains **unknown**, with explicit missing integration paths. It did not use a browser or complete calibration, so it cannot sign off the whole protocol. We retain that result rather than ask it to raise its score. The Lead reproduced the race, removed the token assignment outside the state guard and added an unchanged-script regression. Separately, real HTTP with a gated fake engine showed recorder shutdown closing its tracker/engine while frame inference remained active. Recorder closure now stops POST admission and waits on the existing frame resource lock before cleanup; a gated HTTP regression checks the ordering. These targeted fixes do not retroactively turn the independent report into a full pass. The same independent reviewer reran its original token repro and the gated HTTP shutdown regression; both passed, with the original domain unknowns retained. The Lead's separate serial actual-browser check used the revised app at a verified origin, applied a typed message, left a newer draft and restarted the isolated real HTTP service on the same port. The page accepted the new instance and revision zero, removed the old displayed decision, preserved the exact draft, blocked speech and successfully applied the draft using the new token. `last_spoken` stayed empty. This check supersedes the earlier misrouted attempt, not the independent review. A second actual-browser check stalled only one correction request, confirmed fresh real HTTP state still appeared, waited for the real 15-second deadline, observed exactly one request/no retry and the preserved draft, then restored fetch and successfully applied the draft. `last_spoken` stayed empty.
+
+### Current decision
+
+The reproduced software defects are fixed and their targeted regressions pass, including independent VM/HTTP fix checks. The engineering review remains **insufficient evidence**, not >9.5 and not a clean full-protocol signoff.
+
+| Domain | Current conclusion | What remains unknown |
+| --- | --- | --- |
+| Intended message | Selected VM/runtime and MockSpeaker contracts pass | Full independent real UI/HTTP review of every mandatory negative path |
+| Continuity | Original failures fixed; independent targeted checks and Lead serial browser restart/timeout checks pass | One calibrated independent full pass of final snapshot |
+| Capture/service ownership | Gated HTTP shutdown order passes; capture remains fake-engine evidence | Physical capture and the complete browser permission/track lifecycle |
+| Privacy/data integrity | Existing consent/security/split/correction tests pass at their stated layers | Complete independently selected UI-to-write/send integration |
+| Accessible operation | Previous focus/layout observations are historical only | Fresh final keyboard, true narrow viewport/zoom, assistive technology and target-user operation |
+| First-use recovery | Lead's fresh typed-message/restart/timeout journeys pass in rehearsal | Independent full first-use and failure journeys with actual devices |
+| Structure/testability | The observed order/ownership failures have bounded owners and regressions | A whole-system architecture-quality score; this was not established |
+| Reproducibility | Regressions, commands and review failures retained | Reliable reviewer calibration and final independent attribution |
+
+The independent pre-fix report's continuity fail and seven unknowns remain in the record; targeted repair evidence above is not a replacement numerical score. No numerical average is assigned to unknown domains. The original three model ratings are withdrawn as whole-product claims; calibration failures are retained. We will publish bounded fixes and this correction without presenting them as product certification.
+
+The next evaluation should use an isolated browser per reviewer or serial verified tab ownership, a reproducible blind behavioral calibration with durable per-build results, and one full frozen-snapshot pass after implementation. It must not replay a favorable report under another model's identity. If browser or model tooling cannot establish provenance, mark the review invalid, not the application passed.
+
+The required practical-effectiveness evidence is still absent: consented target-user first-use task success and help burden, physical capture/speech and recovery, and independent-session paired recognition including negation/name/number errors, REST/unknown false emissions, correction burden and latency. Existing public clips and fake backends do not substitute. Therefore the request that the entire product score above 9.5 is not yet established.

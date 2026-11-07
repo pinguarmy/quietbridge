@@ -4,8 +4,8 @@
   if (!form) return;
 
   let token = '';
-  let busy = false, dirty = false;
-  form.addEventListener('input', () => { dirty = true; });
+  let busy = false, dirty = false, editVersion = 0;
+  form.addEventListener('input', () => { dirty = true; editVersion++; });
   window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
   const status = message => { $('cleanup-settings-status').textContent = message; };
   const error = message => { $('cleanup-settings-error').textContent = message; };
@@ -23,6 +23,7 @@
       const response = await fetch('/api/cleanup/config');
       if (!response.ok) throw new Error();
       const config = await response.json();
+      if (dirty) { status('Settings loaded. Your newer entries are unsaved and have not been replaced.'); return; }
       $('cleanup-base-url').value = config.base_url || '';
       $('cleanup-model').value = config.model || 'gpt-6-luna';
       $('cleanup-tier').value = config.service_tier || 'default';
@@ -37,7 +38,7 @@
     event.preventDefault();
     if (busy) return;
     setBusy(true); error(''); status('Saving…');
-    const key = $('cleanup-api-key').value;
+    const key = $('cleanup-api-key').value, savingVersion = editVersion;
     try {
       const response = await fetch('/api/cleanup/config', {
         method: 'POST',
@@ -46,10 +47,13 @@
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Could not save preferences');
-      $('cleanup-api-key').placeholder = result.configured ? 'Key saved — leave blank to keep it' : 'Paste your OpenAI API key';
-      status(result.configured ? 'Saved. API key is configured; leave the password field blank unless replacing it.' : 'Settings saved. No API key saved yet.');
-      $('cleanup-api-key').value = '';
-      dirty = false;
+      $('cleanup-api-key').placeholder = result.configured ? 'Key held in memory; leave blank to keep it' : 'Paste your provider API key';
+      if (editVersion === savingVersion) {
+        $('cleanup-api-key').value = ''; dirty = false;
+        status(result.configured ? 'Saved in memory until the server restarts. Leave the key blank unless replacing it.' : 'Settings saved. No API key saved yet.');
+      } else {
+        status('Earlier entries saved. Your newer changes are still unsaved; choose Save preferences to use them.');
+      }
     } catch (failure) {
       error(`${failure.message}. Your entries are still here. Correct them and try again.`); status('');
     } finally {

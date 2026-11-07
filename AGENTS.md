@@ -15,6 +15,8 @@ The product lead coordinates architecture and shared files. Delegated work must 
 - Display text first and speak only after the user's action. Conflicts and uncertain inputs require confirmation. Never invent a sentence from UNKNOWN. User-edited corrections create a new revision and never speak automatically; only an explicit learning choice writes them to the profile's correction store.
 - First use must permit typing without camera, training or a mandatory wizard. Preserve unfinished edits through navigation and incoming results. Explicit recording uses an accessible start/finish toggle; do not require sustained holds or reorder live mobile controls. Personalize is an owned, on-demand loopback page, not a prerequisite second manual process.
 - The core path works offline. Optional API suggestions remain asynchronous and revision-bound.
+- Server identity and message revision are separate. A restart accepts fresh state without replaying an old action. Bounded action requests never retry an uncertain mutation automatically; polling must remain live. Successful older requests must not clear newer edits.
+- Review reports distinguish software contracts from real-user/recognition effectiveness. Unknown evidence is not a pass. Do not coach reviewers toward a score or replace final independent review with accumulated targeted retests; use docs/review-protocol.md.
 
 ## Recognition architecture
 

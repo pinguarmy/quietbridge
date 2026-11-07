@@ -78,6 +78,39 @@ def test_owned_lab_http_profile_return_security_and_close(tmp_path, monkeypatch)
         urlopen(base + '/api/state', timeout=1)
 
 
+def test_state_identity_is_stable_per_server_and_changes_after_restart(tmp_path):
+    manager = ProfileManager(root_dir=tmp_path)
+    identities = []
+    old_token = None
+    for _ in range(2):
+        runtime = Runtime(rehearsal=True, vocabulary={}, profile_manager=manager)
+        server = make_server(runtime, 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f'http://127.0.0.1:{server.server_port}'
+        try:
+            with urlopen(base + '/api/state', timeout=3) as response:
+                initial = json.load(response)
+            identities.append(initial['server_instance'])
+            assert initial['revision'] == 0
+            if old_token:
+                with pytest.raises(HTTPError) as error:
+                    urlopen(Request(base + '/api/action/new_message', data=b'{"revision":0}', headers={
+                        'Content-Type': 'application/json', 'X-Lipflow-Token': old_token}), timeout=3)
+                assert error.value.code == 403
+            with urlopen(Request(base + '/api/action/correct', data=b'{"revision":0,"text":"Typed message","learn":false}', headers={
+                'Content-Type': 'application/json', 'X-Lipflow-Token': initial['token']}), timeout=3) as response:
+                applied = json.load(response)
+            assert applied['server_instance'] == initial['server_instance']
+            assert applied['token'] == initial['token']
+            assert applied['decision']['text'] == 'Typed message'
+            assert applied['last_spoken'] == ''
+            old_token = initial['token']
+        finally:
+            server.shutdown(); server.server_close(); thread.join(); runtime.close()
+    assert identities[0] != identities[1]
+
+
 def test_lazy_engine_loads_only_on_infer_and_closes(monkeypatch):
     from hackathon.signs import lab
     actual = Mock()
