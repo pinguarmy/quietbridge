@@ -27,7 +27,7 @@ The personal motion input contains two sets of 21 hand landmarks and presence ma
 
 Independent onboarding reviews exposed message/profile edit loss, a separate-server Personalize prerequisite, sustained-hold recording, missing New message, unclear active input and mobile live reordering. The current pass preserves unfinished text through navigation and incoming results, makes typing visible, adds a reopenable short guide and revision-checked New message, uses a single-press capture toggle, and keeps message/camera order fixed. Personalize opens an owned on-demand loopback recorder with lazy tracking. Form edits survive add/remove, profile creation is name-first with keyboard focus, and local training capture has explicit consent and camera-off control.
 
-The frozen criteria, independent scores, fixes and remaining verification limits are in [the usability review](ux-review.md). These changes improve engineering usability; they do not measure recognition accuracy or replace testing with intended users.
+The current criteria, withdrawn historical score claims, fixes and remaining evidence gaps are in [the revised review protocol](review-protocol.md). The [earlier usability review](ux-review.md) is historical. These changes improve bounded software behavior; they do not measure recognition accuracy or replace testing with intended users.
 
 ## Paired standard-sign capture and evaluation, 2026-11-04
 
@@ -119,7 +119,7 @@ Personalization: choose a few useful phrases → record practice → record a se
 
 Model saving was also misleading: promotion changed files while the running reader kept old weights. Personalize now says Save for main app, and Settings exposes Reload current models through the existing idle-only profile reload. The UI reports warmup and failure instead of claiming loading already succeeded. Explicit startup paths continue to override profile files. Reload clears the draft.
 
-Two limitations remain in setup: the app and recording lab are separate local server processes, and training still needs independent recording sessions. Hiding those requirements would make the UI simpler on paper but the product less reliable. A single launcher and validated recording guidance are the next UX tasks, ahead of adding more model controls.
+The main app now owns an on-demand recording lab in the same process, on its own loopback port. Personalize no longer requires a second command. Training still requires independent recording sessions, and real-user capture guidance remains unvalidated. The separate lab command is an optional developer entry point, not a first-use prerequisite.
 
 ## What would establish an accuracy improvement
 

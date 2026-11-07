@@ -29,11 +29,12 @@ a result established by passing software tests.
 
 ## The experience
 
-1. Open directly into the communication screen.
-2. Gesture, or hold the button and mouth a short message. For combined input,
-   hold first, then gesture and mouth the words.
-3. Review the proposed message. If inputs conflict, choose the intended meaning.
-4. Press Confirm & speak, or Speak for an already accepted fixed phrase.
+1. Open directly into the communication screen. Typing needs no camera or training.
+2. Type a message, or explicitly start the camera. For a bounded lip/gesture window,
+   press Start recording once, make the expression, then press Finish recording.
+3. Choose Finish message to turn the camera off. Review or edit the words; if inputs
+   conflict, choose the intended meaning. Apply typed edits without automatic speech.
+4. Press Confirm & speak when confirmation is needed, or Speak for an accepted message.
 
 Keep input settings, supported vocabulary and diagnostics on the separate Settings
 page. Show readiness honestly. Do not automatically speak, hide uncertainty or
