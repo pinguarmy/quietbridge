@@ -10,6 +10,10 @@ The evaluator that previously detected both opaque behavioral faults completed o
 
 The remaining work has two different kinds of evidence gap. Some software paths still lack evaluator-selected browser or storage integration evidence. Practical effectiveness separately requires consented target users, authorized physical camera/local speech, and independent labelled recognition sessions with established rights. More simulated runs or a higher model rating cannot supply the latter. Do not start another full review merely to replace an insufficient-evidence result; the stop rule below still applies.
 
+### Participant availability, 2026-11-08
+
+The user confirmed there is currently no participant or suitable sample for practical-effectiveness validation. No target-user task, physical-camera trial, audible-speech trial or new recognition study has therefore been performed. The whole-product >9.5 target remains unestablished, and the software-domain unknowns above remain unchanged. Further automatic scoring cannot remove this external evidence gap. Resume practical validation only when a willing participant or suitable independent labelled samples are available and the test scope and permissions are explicitly agreed. This does not authorize using old private data or enabling hardware.
+
 ### Delivery status and next evidence
 
 | Part of the request | Current result | What would change the decision |
