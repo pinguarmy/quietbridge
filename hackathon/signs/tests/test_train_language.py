@@ -323,16 +323,38 @@ def test_train_lm_refuses_to_overwrite_existing_output_path(tmp_path):
         train_lm.train(output_path=existing)
 
 
+class _FakeTok:
+    """Stands in for the SentencePiece tokenizer asset (models/lm/unigram5000.model).
+
+    These tests check train()'s validation, split and save contracts, not
+    tokenisation; the real asset is a local download checked by `lipflow doctor`.
+    """
+
+    def __init__(self, token_list):
+        self.size = len(token_list)
+
+    def __call__(self, s):
+        return [1 + (sum(map(ord, word)) % (self.size - 2)) for word in s.split()]
+
+
+@pytest.fixture()
+def fake_tokenizer(monkeypatch):
+    monkeypatch.setattr(train_lm, "Tok", _FakeTok)
+
+
+@pytest.mark.usefixtures("fake_tokenizer")
 def test_train_lm_raises_on_empty_phrases():
     with pytest.raises(ValueError, match="No valid training sentences"):
         train_lm.train(phrases=[], validation_phrases=["HELLO HOW ARE YOU"])
 
 
+@pytest.mark.usefixtures("fake_tokenizer")
 def test_train_lm_raises_on_empty_validation_phrases():
     with pytest.raises(ValueError, match="No valid validation sentences"):
         train_lm.train(phrases=["HELLO HOW ARE YOU"], validation_phrases=[])
 
 
+@pytest.mark.usefixtures("fake_tokenizer")
 def test_train_lm_validation_split_separation(tmp_path, monkeypatch):
     """Verify that when validation_phrases is passed, val and tr are kept separate and not randomly split."""
     train_phrases = ["FIRST TRAINING PHRASE", "SECOND TRAINING PHRASE"]
@@ -376,6 +398,7 @@ def test_train_lm_validation_split_separation(tmp_path, monkeypatch):
     assert out_file.is_file()
 
 
+@pytest.mark.usefixtures("fake_tokenizer")
 def test_train_lm_forgets_guard_rejects_saving(tmp_path, monkeypatch):
     """Verify that general sample regression prevents saving."""
     class FakeLM(torch.nn.Module):
@@ -420,6 +443,7 @@ def test_train_lm_forgets_guard_rejects_saving(tmp_path, monkeypatch):
     assert not out_file.exists()
 
 
+@pytest.mark.usefixtures("fake_tokenizer")
 def test_train_lm_default_preserves_old_signature_and_missing_phrases_error(tmp_path, monkeypatch):
     monkeypatch.setattr("lipflow.train_lm.PHRASES", str(tmp_path / "nonexistent_phrases.txt"))
     with pytest.raises(FileNotFoundError, match="No phrases yet. Run `lipflow import-wispr` first."):

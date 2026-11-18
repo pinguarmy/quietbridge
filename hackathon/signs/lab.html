@@ -5,373 +5,238 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Personalize · QuietBridge</title>
 <style>
+/* Tokens match the main app (hackathon/ui/style.css). */
 :root{
-  --bg:#f8fafc;
+  color-scheme:light;
+  --ink:#182d39;
+  --muted:#536773;
+  --accent:#086b68;
+  --accent-dark:#07524f;
+  --accent-fill:#086b68;
+  --accent-fill-hover:#07524f;
+  --on-accent:#ffffff;
+  --paper:#f3f6f8;
   --surface:#ffffff;
-  --ink:#0f172a;
-  --ink-secondary:#334155;
-  --ink-muted:#64748b;
-  --border:#e2e8f0;
-  --border-subtle:#edf2f7;
-  --teal:#086b68;
-  --teal-hover:#0f766e;
-  --teal-active:#115e59;
-  --teal-soft:#f0fdfa;
-  --teal-border:#ccfbf1;
-  --danger:#b91c1c;
-  --danger-soft:#fef2f2;
-  --danger-border:#fecaca;
+  --line:#d8e1e7;
+  --field-line:#a8bbc5;
+  --soft:#e8eff2;
+  --hover:#f1f8f7;
+  --danger:#a73831;
+  --danger-soft:#fbeeed;
+  --focus:#168d99;
+  --scrim:rgba(16,25,30,.5);
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   --font-mono:ui-monospace,SFMono-Regular,Consolas,Menlo,monospace;
 }
+@media(prefers-color-scheme:dark){
+  :root{
+    color-scheme:dark;
+    --ink:#e7eef2;
+    --muted:#a5b6c0;
+    --accent:#5cc9c0;
+    --accent-dark:#5cc9c0;
+    --accent-fill:#0f7f7a;
+    --accent-fill-hover:#0b6d69;
+    --paper:#10191e;
+    --surface:#18252d;
+    --line:#2c3c46;
+    --field-line:#4f6672;
+    --soft:#21313a;
+    --hover:#1d2f37;
+    --danger:#ff9d94;
+    --danger-soft:#3a2424;
+    --focus:#5cc9c0;
+    --scrim:rgba(0,0,0,.6);
+  }
+}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
-html,body{
-  margin:0;
-  padding:0;
-  background:var(--bg);
-  color:var(--ink);
-  font-family:var(--font);
-  font-size:15px;
-  line-height:1.5;
-  -webkit-font-smoothing:antialiased;
-  max-width:100%;
-  overflow-x:hidden;
-}
-main{max-width:1160px;padding:20px 16px;margin:auto;width:100%}
-header{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding-bottom:16px;
-  border-bottom:1px solid var(--border);
-  flex-wrap:wrap;
-  gap:12px;
-}
-.brand{display:flex;align-items:center;gap:12px}
-.brand strong{font-size:20px;letter-spacing:-.4px;color:var(--ink)}
-.brand-link,.return-link{
-  color:var(--teal);
-  text-decoration:none;
-  font-size:14px;
-  font-weight:600;
-  display:inline-flex;
-  align-items:center;
-  gap:4px;
-  padding:4px 8px;
-  border-radius:6px;
-}
-.brand-link:hover,.return-link:hover{background:var(--teal-soft);text-decoration:none}
-.profile-bar{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  background:var(--surface);
-  border:1px solid var(--border);
-  padding:4px 10px;
-  border-radius:8px;
-}
-.profile-bar label{font-size:13px;font-weight:600;color:var(--ink-secondary)}
-.profile-bar select{
-  font:inherit;
-  font-size:14px;
-  min-height:44px;
-  padding:4px 8px;
-  border-radius:6px;
-  border:1px solid var(--border);
-  background:var(--surface);
-  color:var(--ink);
-}
-.profile-bar button{
-  min-height:44px;
-  padding:4px 12px;
-  font-size:13px;
-  border-radius:6px;
-  background:var(--teal-soft);
-  color:var(--teal-hover);
-  border:1px solid var(--teal-border);
-}
-.profile-bar button:hover{background:#e6fffa}
-.tabs{display:flex;gap:8px}
-.tabs button{
-  min-height:44px;
-  padding:8px 16px;
-  border:1px solid var(--border);
-  background:var(--surface);
-  color:var(--ink-secondary);
-  font-size:14px;
-  border-radius:8px;
-  font-weight:600;
-  cursor:pointer;
-}
-.tabs button.selected{
-  background:var(--teal);
-  color:#fff;
-  border-color:var(--teal);
-}
-.stepper{
-  display:flex;
-  gap:6px;
-  margin:18px 0 16px;
-  background:var(--surface);
-  border:1px solid var(--border);
-  padding:6px;
-  border-radius:10px;
-  overflow-x:auto;
-  -webkit-overflow-scrolling:touch;
-}
-.step-btn{
-  flex:1;
-  min-height:44px;
-  padding:8px 12px;
-  border:0;
-  border-radius:6px;
-  background:transparent;
-  color:var(--ink-secondary);
-  font-size:14px;
-  font-weight:600;
-  cursor:pointer;
-  white-space:nowrap;
-  text-align:center;
-}
-.step-btn.selected{
-  background:var(--teal);
-  color:#fff;
-}
-.step-btn.completed{color:var(--teal-hover)}
-h1{font-size:26px;letter-spacing:-.5px;margin:12px 0 6px;color:var(--ink)}
-.intro{color:var(--ink-muted);margin:0 0 16px;font-size:14px}
+html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);font:15px/1.55 var(--font);-webkit-font-smoothing:antialiased;max-width:100%;overflow-x:hidden}
+main{max-width:1184px;padding:26px 36px;margin:auto;width:100%}
+a{color:var(--accent);text-underline-offset:4px}
+button,input,select,textarea{font:inherit}
+code{font-family:var(--font-mono);font-size:13px;overflow-wrap:anywhere}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
-.stage-banner{
-  background:var(--surface);
-  border:1px solid var(--border);
-  padding:12px 16px;
-  border-radius:10px;
-  margin-bottom:18px;
-  font-size:14px;
-}
-.stage-summary{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  flex-wrap:wrap;
-  gap:10px;
-}
+/* Header: wordmark + plain text links, as in the main app. */
+header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-bottom:18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.wordmark{color:var(--ink);font-size:23px;font-weight:750;letter-spacing:-.9px;text-decoration:none;display:inline-flex;align-items:center;gap:10px;min-height:44px}
+.bridge-mark{width:23px;height:14px;border:3px solid var(--accent);border-bottom:0;border-radius:14px 14px 0 0;display:inline-block}
+.page-name{font-size:14px;color:var(--muted);font-weight:600;letter-spacing:0;margin-left:2px}
+.header-links{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+.header-links a{display:inline-flex;align-items:center;min-height:44px;color:var(--muted);text-decoration:none;font-size:14px}
+.header-links a:hover{color:var(--accent);text-decoration:underline}
+
+.toolbar{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:18px 0 0}
+.profile-bar{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}
+.profile-bar label,.tabs-label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+.profile-field{display:grid;min-width:0}
+.profile-bar select{min-width:200px;max-width:100%}
+.mode-group{display:grid}
+.tabs{display:flex;gap:7px;flex-wrap:wrap}
+.tabs button{font-size:14px;padding:8px 16px}
+.tabs button.selected,.tabs button.selected:hover:not(:disabled){background:var(--ink);border-color:var(--ink);color:var(--paper)}
+
+/* Stage navigation */
+.stepper{display:flex;gap:6px;margin:18px 0 16px;background:var(--surface);border:1px solid var(--line);padding:6px;border-radius:10px}
+.step-btn{flex:1 1 0;min-width:0;min-height:44px;padding:8px 10px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--ink);font-size:14px;font-weight:600;text-align:center;line-height:1.3;white-space:normal}
+.step-btn:hover:not(:disabled){background:var(--hover);border-color:var(--line)}
+.step-btn.selected,.step-btn.selected:hover:not(:disabled){background:var(--accent-fill);border-color:var(--accent-fill);color:var(--on-accent)}
+h1{font-size:clamp(26px,3vw,34px);font-weight:620;letter-spacing:-1px;line-height:1.2;margin:14px 0 8px;color:var(--ink)}
+.intro{color:var(--muted);margin:0 0 16px;font-size:15px;max-width:76ch}
+
+.stage-banner{background:var(--surface);border:1px solid var(--line);padding:10px 16px;border-radius:10px;margin-bottom:18px;font-size:14px}
+.stage-summary{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
 .stage-summary strong{font-size:15px;color:var(--ink)}
-.status-pill{
-  font-size:12px;
-  font-weight:600;
-  padding:3px 10px;
-  border-radius:12px;
-  background:var(--teal-soft);
-  color:var(--teal-hover);
-  border:1px solid var(--teal-border);
-}
-.advanced-details{
-  margin-top:10px;
-  border-top:1px solid var(--border);
-  padding-top:10px;
-}
-.advanced-details summary{
-  cursor:pointer;
-  font-size:13px;
-  color:var(--ink-muted);
-  user-select:none;
-}
-.advanced-details summary:hover{color:var(--ink)}
-.advanced-content{margin-top:10px;display:grid;gap:8px}
+.status-pill{font-size:13px;font-weight:600;padding:3px 10px;border-radius:12px;background:var(--soft);color:var(--accent);border:1px solid var(--line)}
+.status-pill.alert{color:var(--danger);border-color:var(--danger)}
+.advanced-details{margin-top:6px;border-top:1px solid var(--line)}
+summary{min-height:44px;padding:11px 0;cursor:pointer;font-size:14px;color:var(--muted)}
+summary:hover{color:var(--ink)}
+.advanced-content{margin:4px 0 8px;display:grid;gap:8px}
+.session-tag{display:flex;align-items:center;gap:8px;font-size:14px;background:var(--paper);padding:6px 10px;border-radius:6px;border:1px solid var(--line);flex-wrap:wrap}
+.session-tag .split-info{color:var(--muted);font-size:13px}
+.session-tag button{font-size:14px}
 
-.session-tag{
-  display:inline-flex;
-  align-items:center;
-  gap:8px;
-  font-family:var(--font-mono);
-  font-size:13px;
-  background:var(--bg);
-  padding:6px 10px;
-  border-radius:6px;
-  border:1px solid var(--border);
-  flex-wrap:wrap;
-}
-.session-tag .split-info{color:var(--ink-muted);font-size:12px}
-.session-tag button{
-  min-height:44px;
-  padding:4px 12px;
-  font-size:13px;
-  border-radius:6px;
-  background:var(--teal);
-  color:#fff;
-  border:0;
-  cursor:pointer;
-}
-
-.layout{display:grid;grid-template-columns:1.25fr 1fr;gap:20px}
-@media(max-width:820px){
-  .layout{grid-template-columns:1fr}
-}
+.layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:24px}
+@media(max-width:820px){.layout{grid-template-columns:1fr}}
 .previews{display:grid;gap:14px}
-.preview-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px}
-.preview-title{font-size:12px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:8px}
-.camera{position:relative;aspect-ratio:4/3;background:#e2e8f0;border-radius:8px;overflow:hidden;display:grid;place-items:center}
+.preview-card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}
+.preview-title{font-size:13px;font-weight:650;color:var(--muted);margin-bottom:8px}
+.camera{position:relative;aspect-ratio:4/3;background:var(--soft);border-radius:8px;overflow:hidden;display:grid;place-items:center}
 video,canvas{position:absolute;inset:0;width:100%;height:100%}
 video{object-fit:fill;transform:scaleX(-1)}
 canvas{pointer-events:none}
-#placeholder{max-width:260px;text-align:center;color:var(--ink-muted);line-height:1.5;font-size:14px;padding:12px}
-.badge{position:absolute;bottom:10px;left:10px;background:#ffffffea;padding:4px 8px;border-radius:6px;font-size:12px;font-weight:600;color:var(--ink)}
-.fps-bar{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  background:var(--bg);
-  border:1px solid var(--border);
-  border-radius:6px;
-  padding:6px 10px;
-  font-size:12px;
-  color:var(--ink-secondary);
-  flex-wrap:wrap;
-}
+#placeholder{max-width:260px;text-align:center;color:var(--muted);line-height:1.5;font-size:14px;padding:12px}
+.badge{position:absolute;bottom:10px;left:10px;background:var(--surface);padding:4px 8px;border-radius:6px;font-size:13px;font-weight:600;color:var(--ink)}
+.fps-bar{display:flex;align-items:center;gap:8px;background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:13px;color:var(--muted);flex-wrap:wrap}
 .fps-bar strong{color:var(--ink)}
-.fps-note{font-size:11px;color:var(--ink-muted)}
-.mouth-view{position:relative;aspect-ratio:1.6;background:#e2e8f0;border-radius:8px;overflow:hidden;display:grid;place-items:center}
+.fps-note{font-size:13px;color:var(--muted)}
+.mouth-view{position:relative;aspect-ratio:1.6;background:var(--soft);border-radius:8px;overflow:hidden;display:grid;place-items:center}
 .mouth-view canvas{width:100%;height:100%}
-#mouthPlaceholder{color:var(--ink-muted);font-size:13px;padding:12px;text-align:center}
-.mouth-status{display:block;margin-top:6px;font-size:12px;color:var(--ink-muted)}
-.privacy{color:var(--ink-muted);font-size:12px;line-height:1.5;margin:4px 0}
+#mouthPlaceholder{color:var(--muted);font-size:14px;padding:12px;text-align:center}
+.mouth-status{display:block;margin-top:6px;font-size:13px;color:var(--muted)}
+.privacy{color:var(--muted);font-size:13px;line-height:1.5;margin:6px 0}
 
-.lesson{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;display:flex;flex-direction:column;min-height:440px}
-.kicker{font-size:12px;color:var(--teal-hover);font-weight:700;letter-spacing:.8px;text-transform:uppercase}
+.lesson{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:22px;display:flex;flex-direction:column;min-height:440px;min-width:0}
+.kicker{font-size:13px;color:var(--accent);font-weight:650;letter-spacing:.04em}
 .pose{font-size:48px;margin:6px 0 2px}
-.meaning{font-size:24px;font-weight:700;margin:0 0 4px;color:var(--ink)}
-.concept{font-size:14px;color:var(--teal-hover);font-weight:600;margin:0 0 8px}
+.meaning{font-size:24px;font-weight:650;margin:0 0 4px;color:var(--ink);overflow-wrap:anywhere}
+.concept{font-size:15px;color:var(--accent);font-weight:600;margin:0 0 8px}
 .instruction{font-size:15px;line-height:1.5;margin:0 0 8px;color:var(--ink)}
-.hint{color:var(--ink-muted);line-height:1.5;font-size:13px;margin:0 0 12px}
-.mouth-prompt{
-  background:var(--teal-soft);
-  border-left:4px solid var(--teal);
-  padding:12px 14px;
-  border-radius:6px;
-  font-size:17px;
-  font-weight:600;
-  line-height:1.4;
-  margin:10px 0;
-  color:var(--ink);
-}
-.small{font-size:12px;color:var(--ink-muted);margin:4px 0 10px}
-#status{
-  margin-top:auto;
-  padding:10px 12px;
-  border-radius:8px;
-  background:var(--bg);
-  border:1px solid var(--border);
-  font-size:13px;
-  min-height:42px;
-  display:flex;
-  align-items:center;
-  color:var(--ink);
-}
-#status.error{background:var(--danger-soft);border-color:var(--danger-border);color:var(--danger)}
+.hint{color:var(--muted);line-height:1.5;font-size:14px;margin:0 0 12px}
+.mouth-prompt{background:var(--soft);border-left:4px solid var(--accent);padding:12px 14px;border-radius:6px;font-size:18px;font-weight:600;line-height:1.4;margin:10px 0;color:var(--ink);overflow-wrap:anywhere}
+.small{font-size:13px;color:var(--muted);margin:4px 0 10px}
+.meter{font-size:13px;color:var(--muted);margin:0 0 6px;min-height:1.5em;font-variant-numeric:tabular-nums}
+#status{margin-top:auto;padding:10px 12px;border-radius:8px;background:var(--paper);border:1px solid var(--line);font-size:14px;min-height:44px;display:flex;align-items:center;color:var(--ink);overflow-wrap:anywhere}
+#status.error{background:var(--danger-soft);border-color:var(--danger);color:var(--danger)}
+.consent{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin:12px 0 0;min-height:44px;line-height:1.45}
+input[type="checkbox"]{width:20px;height:20px;min-height:20px;margin:2px 0 0;accent-color:var(--accent-fill);flex:0 0 auto}
 .btn-group{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
 
-button{
-  font:inherit;
-  border:0;
-  border-radius:8px;
-  padding:10px 18px;
-  background:var(--teal);
-  color:#fff;
-  font-weight:600;
-  font-size:15px;
-  cursor:pointer;
-  min-height:44px;
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-}
-button:hover{background:var(--teal-hover)}
-button:active{background:var(--teal-active)}
-button:disabled{opacity:.45;cursor:not-allowed}
-button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
-  outline:2px solid var(--teal);
-  outline-offset:2px;
-}
-.btn-secondary{
-  background:var(--surface);
-  color:var(--ink-secondary);
-  border:1px solid var(--border);
-}
-.btn-secondary:hover{background:var(--bg)}
-.btn-subtle{
-  background:var(--teal-soft);
-  color:var(--teal-hover);
-  border:1px solid var(--teal-border);
-}
-.btn-subtle:hover{background:#e6fffa}
+button{border:1px solid var(--line);border-radius:8px;padding:10px 18px;background:var(--surface);color:var(--ink);font-weight:600;font-size:15px;cursor:pointer;min-height:46px;display:inline-flex;align-items:center;justify-content:center;text-align:center}
+button:hover:not(:disabled){border-color:var(--accent);background:var(--hover)}
+button:disabled{opacity:.48;cursor:not-allowed}
+:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,a:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
+.btn-primary,#record,#btnSaveProfile,#btnConfirmNewProfile,#btnAdvanceStage,#trainMotion,#trainVisual,#trainLanguage,#promoteModel,#evaluateRecognition{background:var(--accent-fill);border-color:var(--accent-fill);color:var(--on-accent)}
+.btn-primary:hover:not(:disabled),#record:hover:not(:disabled),#btnSaveProfile:hover:not(:disabled),#btnConfirmNewProfile:hover:not(:disabled),#btnAdvanceStage:hover:not(:disabled),#trainMotion:hover:not(:disabled),#trainVisual:hover:not(:disabled),#trainLanguage:hover:not(:disabled),#promoteModel:hover:not(:disabled),#evaluateRecognition:hover:not(:disabled){background:var(--accent-fill-hover);border-color:var(--accent-fill-hover)}
+.btn-secondary,.btn-subtle{background:var(--surface);color:var(--ink);border:1px solid var(--line)}
+input[type="text"],select,textarea{background:var(--surface);border:1px solid var(--field-line);border-radius:6px;padding:9px 12px;min-height:46px;color:var(--ink);max-width:100%}
 
 #record{flex:2}
-#record.active{background:var(--danger)}
-#record.active:hover{background:#991b1b}
-#discard{flex:1;background:var(--surface);color:var(--danger);border:1px solid var(--danger-border);min-height:44px}
-#discard:hover{background:var(--danger-soft)}
-#discard:disabled{opacity:.35}
+#record.active,#record.active:hover:not(:disabled){background:var(--danger-soft);border-color:var(--danger);color:var(--danger)}
+#discard{flex:1;color:var(--danger)}
+#discard:hover:not(:disabled){border-color:var(--danger);background:var(--danger-soft)}
 
-.progress{display:flex;align-items:center;justify-content:space-between;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:13px;color:var(--ink-muted)}
-.progress button{min-height:44px;padding:8px 16px;font-size:14px}
-.advance-box{margin-top:12px;padding:12px 14px;background:var(--teal-soft);border:1px solid var(--teal-border);border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.advance-box span{font-size:13px;color:var(--teal-hover);font-weight:600}
-.advance-box button{min-height:44px;padding:8px 16px;font-size:14px}
+.progress{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:14px;color:var(--muted)}
+.progress button{flex:0 0 auto;font-size:14px}
+.advance-box{margin-top:12px;padding:12px 14px;background:var(--soft);border-left:3px solid var(--accent);border-radius:6px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.advance-box span{font-size:14px;color:var(--ink)}
+.advance-box button{font-size:14px}
 
-.setup-panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:22px;margin-top:14px}
-.setup-panel h2{font-size:20px;margin:0 0 10px;color:var(--ink)}
-.setup-onboarding{
-  background:var(--teal-soft);
-  border:1px solid var(--teal-border);
-  border-radius:8px;
-  padding:14px 16px;
-  margin-bottom:18px;
-}
-.setup-onboarding h3{margin:0 0 4px;font-size:16px;color:var(--teal-hover)}
-.setup-onboarding p{margin:0;font-size:13px;color:var(--ink-secondary)}
-.setup-section{margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)}
-.section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.setup-panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:24px 26px;margin-top:14px}
+.setup-panel h2{font-size:20px;font-weight:650;margin:0 0 10px;color:var(--ink)}
+.setup-onboarding{background:var(--paper);border-left:3px solid var(--accent);border-radius:6px;padding:14px 16px;margin-bottom:18px}
+.setup-onboarding h3{margin:0 0 4px;font-size:16px;color:var(--ink)}
+.setup-onboarding p{margin:0;font-size:14px;color:var(--muted)}
+.setup-section{margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--line)}
+.section-header{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}
 .section-header h3{margin:0;font-size:16px}
-.table-scroll{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:10px 0;border:1px solid var(--border);border-radius:8px}
-.setup-table{width:100%;border-collapse:collapse;font-size:13px;min-width:640px}
-.setup-table th,.setup-table td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--border-subtle)}
-.setup-table th{background:var(--bg);color:var(--ink-muted);font-weight:600;font-size:12px;text-transform:uppercase}
-.setup-table input,.setup-table textarea{width:100%;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;min-height:44px}
-.setup-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:16px;position:sticky;bottom:0;background:var(--surface);padding:14px 0;border-top:1px solid var(--border)}
+.table-scroll{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:10px 0;border:1px solid var(--line);border-radius:8px}
+.setup-table{width:100%;border-collapse:collapse;font-size:14px}
+.setup-table th,.setup-table td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line)}
+.setup-table tr:last-child td{border-bottom:0}
+.setup-table th{background:var(--paper);color:var(--muted);font-weight:600;font-size:13px}
+.setup-table input,.setup-table textarea{width:100%;font-size:14px}
+.setup-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:16px;position:sticky;bottom:0;background:var(--surface);padding:14px 0;border-top:1px solid var(--line)}
 #gestureTable,#promptTable{min-width:0;table-layout:fixed}
 #gestureTable td{padding:0;border:0}
-.gesture-definition{border-bottom:1px solid var(--border)}
-.gesture-definition>summary{min-height:58px;cursor:pointer;padding:15px 12px;font-weight:600;display:list-item;list-style-position:inside;color:var(--ink)}
-.gesture-meaning{font-size:12px;color:var(--ink-muted);font-weight:400;float:right;max-width:64%;overflow-wrap:anywhere}
+.gesture-definition{border-bottom:1px solid var(--line)}
+#gestureTbody tr:last-child .gesture-definition{border-bottom:0}
+.gesture-definition>summary{min-height:58px;padding:15px 12px;font-weight:600;font-size:15px;display:list-item;list-style-position:inside;color:var(--ink)}
+.gesture-meaning{font-size:14px;color:var(--muted);font-weight:400;float:right;max-width:64%;overflow-wrap:anywhere}
 .gesture-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:12px}
-.gesture-fields label{display:grid;gap:6px;font-size:12px;color:var(--ink-secondary)}
-.gesture-fields small{color:var(--ink-muted);font-size:11px}
+.gesture-fields label{display:grid;gap:6px;font-size:14px;color:var(--ink)}
+.gesture-fields small{color:var(--muted);font-size:13px}
 .gesture-instruction{grid-column:1/-1}
-.gesture-advanced{margin:0 12px}.gesture-advanced>summary{min-height:44px;padding:10px 0;cursor:pointer;font-size:12px;color:var(--ink-muted)}
-button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-height:44px;padding:8px;margin:0 8px 8px}
-#promptTable th:last-child{width:86px}#promptTable td{padding:7px}#promptTable input{width:100%}
-@media(max-width:600px){.gesture-fields{grid-template-columns:1fr}.gesture-meaning{float:none;display:block;max-width:none;padding-left:14px}.gesture-definition>summary{padding:12px}.setup-actions{justify-content:stretch}.setup-actions>button{flex:1}.setup-panel{padding:16px}}
+.gesture-advanced{margin:0 12px}
+.gesture-advanced>summary{font-size:14px}
+button.btn-remove{background:transparent;border-color:transparent;color:var(--danger);font-size:14px;padding:8px 10px;margin:0 8px 8px}
+button.btn-remove:hover:not(:disabled){background:var(--danger-soft);border-color:var(--danger)}
+#promptTable th:last-child{width:104px}#promptTable td{padding:7px}#promptTable td:last-child button{margin:0}
+@media(max-width:600px){.gesture-fields{grid-template-columns:1fr}.gesture-meaning{float:none;display:block;max-width:none;padding-left:16px}.gesture-definition>summary{padding:12px}.setup-actions{justify-content:stretch}.setup-actions>button{flex:1}.setup-panel{padding:16px}}
 
-.dialog-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.45);display:grid;place-items:center;z-index:99;padding:16px}
-.dialog{background:var(--surface);border-radius:12px;padding:22px;width:100%;max-width:440px;box-shadow:0 12px 30px rgba(0,0,0,.15);border:1px solid var(--border)}
+.dialog-backdrop{position:fixed;inset:0;background:var(--scrim);display:grid;place-items:center;z-index:99;padding:16px}
+.dialog{background:var(--surface);border-radius:10px;padding:22px;width:100%;max-width:440px;box-shadow:0 12px 30px rgba(0,0,0,.2);border:1px solid var(--line)}
 .dialog h3{margin:0 0 14px;font-size:18px;color:var(--ink)}
+.dialog p{font-size:14px;color:var(--muted);margin:0 0 14px}
 .form-field{margin-bottom:14px}
-.form-field label{display:block;font-size:13px;font-weight:600;margin-bottom:4px;color:var(--ink-secondary)}
-.form-field input,.form-field select{width:100%;font:inherit;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;min-height:44px;background:var(--surface);color:var(--ink)}
-.dialog-buttons{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
-.dialog-buttons button{min-height:44px;padding:8px 16px;font-size:14px}
-.dialog-buttons .btn-cancel{background:var(--surface);color:var(--ink-secondary);border:1px solid var(--border)}
+.form-field label{display:block;font-size:14px;font-weight:600;margin-bottom:4px;color:var(--ink)}
+.form-field input,.form-field select{width:100%}
+.dialog-buttons{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;flex-wrap:wrap}
 
-.paired-box{background:var(--teal-soft);border:1px solid var(--teal-border);border-radius:8px;padding:12px;margin:10px 0}
-.paired-box label{display:block;font-size:12px;font-weight:700;color:var(--teal-hover);text-transform:uppercase;margin:8px 0 4px}
-.paired-box select{width:100%;font:inherit;font-size:14px;min-height:44px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink)}
-.paired-note{font-size:12px;color:var(--teal-hover);line-height:1.4;margin-bottom:6px}
-#videoConsentBox{margin:12px 0;padding:12px;background:var(--surface);border-left:3px solid var(--teal)}
-#videoConsentBox label{display:flex;align-items:center;gap:10px;min-height:44px;text-transform:none;font-size:14px;line-height:1.45}
-#videoConsent{width:20px;height:20px;flex-shrink:0;accent-color:var(--teal)}
+.paired-box{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:10px 0}
+.paired-box label{display:block;font-size:14px;font-weight:600;color:var(--ink);margin:10px 0 4px}
+.paired-box select{width:100%}
+.paired-note{font-size:14px;color:var(--muted);line-height:1.45;margin:0 0 6px}
+.paired-note strong{color:var(--ink)}
+#videoConsentBox{margin:12px 0;padding:12px;background:var(--surface);border-left:3px solid var(--accent)}
+#videoConsentBox label{display:flex;align-items:flex-start;gap:10px;min-height:44px;font-weight:400;line-height:1.45}
 
+.model-states{display:grid;gap:6px;margin:0 0 14px;padding:12px 14px;background:var(--paper);border-left:3px solid var(--accent);border-radius:6px;font-size:14px;color:var(--muted)}
+.model-states strong{color:var(--ink)}
+#modelStatus{font-size:14px;margin:8px 0;overflow-wrap:anywhere}
+#modelStatus.error,#modelError{color:var(--danger)}
+#modelError{font-size:14px;margin:8px 0;padding:10px 12px;background:var(--danger-soft);border-left:3px solid var(--danger);border-radius:6px;overflow-wrap:anywhere}
+#modelError:empty{display:none}
+#modelSaveNotice{font-size:14px}
+#modelSaveNotice:empty{display:none}
+#candidateSummary{font-size:14px;color:var(--ink);overflow-wrap:anywhere}
+#comparisonMetrics{font-size:14px;overflow-wrap:anywhere}
+.gate-pass{color:var(--accent);font-weight:700}.gate-fail{color:var(--danger);font-weight:700}
+#modelReport{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:12px;font-size:13px;max-height:420px;overflow:auto}
+
+@media(max-width:760px){
+  main{padding:18px 16px}
+  header{gap:6px;padding-bottom:12px}
+  .header-links{gap:16px}
+  .wordmark{font-size:20px}
+  .toolbar{display:grid;grid-template-columns:1fr;gap:12px}
+  .profile-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end}
+  .profile-bar select{min-width:0;width:100%}
+  .tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+  .tabs button{padding:8px 6px}
+  .lesson{padding:18px}
+}
+@media(max-width:600px){
+  /* Two-column grid keeps all five stages visible without sideways scrolling. */
+  .stepper{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .stepper .step-btn:last-child{grid-column:1/-1}
+}
+@media(max-width:380px){
+  .bridge-mark{display:none}
+}
+@media(prefers-reduced-motion:no-preference){button,a{transition:background-color 120ms ease,border-color 120ms ease,color 120ms ease}}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{
     animation-duration:0.01ms!important;
@@ -384,23 +249,32 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
 <body>
 <main>
 <header>
-  <div class="brand">
-    <strong>QuietBridge</strong>
+  <a id="brandLink" class="wordmark" href="http://127.0.0.1:8765/">QuietBridge<span class="bridge-mark" aria-hidden="true"></span><span class="page-name">Personalize</span></a>
+  <nav class="header-links" aria-label="Main navigation">
     <a id="returnLink" class="return-link" href="http://127.0.0.1:8765/">Back to message</a>
-  </div>
-  <div class="profile-bar" aria-label="Profile selector">
-    <label for="profileSelect">Profile:</label>
-    <select id="profileSelect" aria-label="Active profile"></select>
-    <button id="btnNewProfile" type="button">+ New Profile</button>
-  </div>
-  <nav class="tabs" aria-label="Recording type">
-    <button id="gesturesTab" class="selected" type="button">Gestures</button>
-    <button id="lipsTab" type="button">Lips</button>
-    <button id="pairedTab" type="button">Paired</button>
+    <a id="settingsLink" href="http://127.0.0.1:8765/settings">Settings</a>
   </nav>
 </header>
 
-<nav class="stepper" aria-label="Guided workflow stages">
+<div class="toolbar">
+  <div class="profile-bar">
+    <div class="profile-field">
+      <label for="profileSelect">Profile</label>
+      <select id="profileSelect"></select>
+    </div>
+    <button id="btnNewProfile" type="button">New profile</button>
+  </div>
+  <div id="modeGroup" class="mode-group" role="group" aria-labelledby="modeLabel">
+    <span id="modeLabel" class="tabs-label">What to practise</span>
+    <div class="tabs">
+      <button id="gesturesTab" class="selected" type="button" aria-pressed="true">Gestures</button>
+      <button id="lipsTab" type="button" aria-pressed="false">Lips</button>
+      <button id="pairedTab" type="button" aria-pressed="false">Both together</button>
+    </div>
+  </div>
+</div>
+
+<nav class="stepper" aria-label="Personalize steps">
   <button id="stepSetup" class="step-btn" data-stage="setup" type="button">1. Choose phrases</button>
   <button id="stepTrain" class="step-btn selected" data-stage="train" type="button">2. Practice</button>
   <button id="stepValidation" class="step-btn" data-stage="validation" type="button">3. Check on another occasion</button>
@@ -416,13 +290,13 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
     <span class="status-pill" id="recordingStatePill">Ready</span>
   </div>
   <details id="advancedSettings" class="advanced-details">
-    <summary>Session &amp; technical details</summary>
+    <summary>Session and technical details</summary>
     <div class="advanced-content">
       <div class="session-tag">
         <span>Session:</span>
         <code id="sessionLabel">s1</code>
-        <span class="split-info">Split: <strong id="stageSplit">train</strong></span>
-        <button id="btnNewSession" type="button" title="Generate fresh session id for this stage">New Session</button>
+        <span class="split-info">Data set: <strong id="stageSplit">train</strong></span>
+        <button id="btnNewSession" type="button">Start a new session</button>
       </div>
       <div class="fps-bar" id="fpsBar">
         <span>Target: <strong>25 fps</strong></span>
@@ -433,21 +307,21 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
         <span>·</span>
         <span>Received: <strong id="receivedFrames">0 frames</strong></span>
       </div>
-      <div class="fps-note">Target 25 fps capture pacing; measured fps reflects serial upload rate without buffering backlog.</div>
-      <p class="privacy">Live guides use one camera. Coordinates and mouth crops are the default. Standard-sign checks can also save local video after explicit consent. Split data stays isolated per profile.</p>
+      <div class="fps-note">Frames are sent about 25 times a second. The measured rate shows how many actually arrived; missing frames are not filled in.</div>
+      <p class="privacy">Start a new session whenever you sit down again on a different occasion. A session belongs to one step only, so practice tries never mix with checks. Hand positions and mouth close-ups are saved by default; standard-sign checks can also save local video, only after you agree for that try.</p>
     </div>
   </details>
 </div>
 
 <h1 id="title">Practice your phrases. Record one try.</h1>
-<p id="intro" class="intro">Per-profile custom gesture sequences and lip clips. Data remains local on this Mac.</p>
-<p id="captureUnavailable" class="hint" role="status" hidden>Preview only. Camera recording is unavailable here. Return to the main app to type, or restart without --rehearsal for local recording.</p>
+<p id="intro" class="intro">Each try saves your hand positions for this profile only. Recordings stay on this computer.</p>
+<p id="captureUnavailable" class="hint" hidden>Preview only: QuietBridge was started in preview mode, so nothing can be recorded here. You can still edit your phrases and review models, or go back and type a message.</p>
 
 <div id="recordingLayout" class="layout">
   <section>
     <div class="previews">
       <div class="preview-card">
-        <div class="preview-title">Hands · full view</div>
+        <div class="preview-title">Hands: full view</div>
         <div class="camera">
           <video id="video" autoplay muted playsinline></video>
           <canvas id="overlay" width="640" height="480"></canvas>
@@ -456,33 +330,33 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
         </div>
       </div>
       <div class="preview-card">
-        <div class="preview-title">Lips · zoom preview</div>
+        <div class="preview-title">Lips: close-up</div>
         <div class="mouth-view">
           <canvas id="mouthPreview" width="320" height="200"></canvas>
-          <div id="mouthPlaceholder">Zoomed mouth appears after starting camera.</div>
+          <div id="mouthPlaceholder">A close-up of your mouth appears once the camera is on.</div>
         </div>
         <span id="mouthTracking" class="mouth-status">Face not detected</span>
       </div>
     </div>
-    <p class="privacy">Personal gestures save coordinates; lip clips save mouth crops. A standard-sign check also saves face, body and hand video only with your explicit consent below. No audio, cloud or auto-training.</p>
+    <p class="privacy">Gesture tries save hand positions, not video. Lip tries save small close-ups of your mouth. A standard-sign check also saves face, body and hand video, but only when you agree for that try. No sound is recorded, nothing is uploaded and nothing trains automatically.</p>
   </section>
 
   <section class="lesson" aria-label="Current recording lesson">
     <div id="round" class="kicker">Stage 2 · Practice</div>
     <div id="pairedBox" class="paired-box" hidden>
-      <div class="paired-note">
-        <strong>Paired Multimodal Collection:</strong> Synchronous gesture + silent lip recording. Saves paired dataset samples; no recognition or transcription claimed.
-      </div>
-      <label for="pairedCaptureKind">What are you checking?</label>
-      <select id="pairedCaptureKind"><option value="personal">Personal gesture + lips · coordinates and mouth crops</option><option value="video" disabled>Standard sign + lips · local video</option></select>
+      <p class="paired-note">
+        <strong>Gesture and lips together.</strong> Make the gesture while silently mouthing the phrase. This saves practice samples only; it does not recognize or transcribe anything.
+      </p>
+      <label for="pairedCaptureKind">What are you recording?</label>
+      <select id="pairedCaptureKind"><option value="personal">Personal gesture with lips (hand positions and mouth close-ups)</option><option value="video" disabled>Standard sign with lips (local video)</option></select>
       <p id="pairedSignModel" class="paired-note">No standard-sign model configured for this recorder.</p>
       <div id="videoConsentBox" hidden>
-        <p class="paired-note">Saves your face, upper body and both hands as a local 256 × 256 video sequence, alongside mouth crops. Record one sign, at most 240 frames or 10 seconds. No audio or uploads. Discard writes nothing.</p>
+        <p class="paired-note">Saves your face, upper body and both hands as a small local video (256 × 256), alongside mouth close-ups. Record one sign, at most 240 frames or 10 seconds. No sound and no uploads. Discard saves nothing.</p>
         <label for="videoConsent"><input id="videoConsent" type="checkbox"> I agree to save this trial's video locally.</label>
       </div>
-      <label for="pairedGestureSelect">Gesture, sign or negative example:</label>
+      <label for="pairedGestureSelect">Gesture or sign (or rest, for “no gesture”)</label>
       <select id="pairedGestureSelect"></select>
-      <label for="pairedPromptSelect">Intended Lip Prompt:</label>
+      <label for="pairedPromptSelect">Phrase to mouth</label>
       <select id="pairedPromptSelect"></select>
     </div>
     <div id="pose" class="pose" aria-hidden="true">✋</div>
@@ -491,21 +365,22 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
     <p id="instruction" class="instruction"></p>
     <p id="hint" class="hint"></p>
     <div id="mouthPrompt" class="mouth-prompt" hidden></div>
-    <p id="mouthNote" class="small" hidden>Mouth these words silently at a natural pace. Face camera. Saved mouth crops only; no microphone.</p>
-    <p id="trackingNote" class="small">Tracking only · not a transcript or trained recognizer</p>
-    <div id="status" role="status" aria-live="polite">Ready. Press Start recording when framed.</div>
-    <label><input id="localConsent" type="checkbox"> I agree to save samples locally: gesture coordinates and mouth crops. Full video requires separate consent.</label>
+    <p id="mouthNote" class="small" hidden>Mouth these words silently at a natural pace, facing the camera. Only mouth close-ups are saved; the microphone is not used.</p>
+    <p id="trackingNote" class="small">The guide shows tracking only. It is not a transcript or a trained recognizer.</p>
+    <p id="recordingMeter" class="meter"></p>
+    <div id="status" role="status" aria-live="polite">Ready. Press Start recording when you are in view.</div>
+    <label class="consent"><input id="localConsent" type="checkbox"> <span>I agree to save my practice tries on this computer (hand positions and mouth close-ups). Saving video needs separate agreement.</span></label>
     <div class="btn-group">
       <button id="record" type="button" disabled>Connecting…</button>
       <button id="discard" type="button" disabled>Discard</button>
       <button id="cameraOff" type="button" class="btn-secondary" disabled>Turn camera off</button>
     </div>
     <div class="progress">
-      <span id="progress">0 / 5 recordings</span>
+      <span id="progress">0 of 5 tries</span>
       <button id="next" type="button">Next →</button>
     </div>
     <div id="advanceBox" class="advance-box" hidden>
-      <span id="advanceMsg">Round completed!</span>
+      <span id="advanceMsg">Suggested number of tries reached.</span>
       <button id="btnAdvanceStage" type="button">Continue to next stage →</button>
     </div>
   </section>
@@ -514,7 +389,7 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
 <div id="setupLayout" class="setup-panel" hidden>
   <div id="setupOnboarding" class="setup-onboarding">
     <h3>1. Choose your personal phrases</h3>
-    <p>Personal training is optional. Review or add phrases if you want to practice, or return to your message without training.</p>
+    <p>Personal training is optional. You can type messages without it. Review or add phrases if you want to practise, or go back to your message.</p>
   </div>
   <h2>Your phrases and gestures</h2>
   <p class="intro">Start with a few useful phrases. Open a gesture to change what it means and how you make it. These are personal movements, not a BSL or ASL course.</p>
@@ -530,7 +405,7 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
   <div class="setup-section">
     <div class="section-header">
       <h3>Your gestures</h3>
-      <button id="btnAddGesture" type="button" class="btn-subtle">+ Add Gesture</button>
+      <button id="btnAddGesture" type="button" class="btn-subtle">Add a gesture</button>
     </div>
     <div class="table-scroll">
       <table class="setup-table gesture-editor" id="gestureTable" aria-label="Personal gesture definitions">
@@ -541,15 +416,15 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
 
   <div class="setup-section">
     <div class="section-header">
-      <h3>Phrases to practice silently</h3>
-      <button id="btnAddPrompt" type="button" class="btn-subtle">+ Add Prompt</button>
+      <h3>Phrases to mouth silently</h3>
+      <button id="btnAddPrompt" type="button" class="btn-subtle">Add a phrase</button>
     </div>
     <div class="table-scroll">
-      <table class="setup-table" id="promptTable">
+      <table class="setup-table" id="promptTable" aria-label="Phrases to mouth silently">
         <thead>
           <tr>
-            <th>Prompt text</th>
-            <th style="width:86px;">Action</th>
+            <th scope="col">Phrase</th>
+            <th scope="col"><span class="sr-only">Remove</span></th>
           </tr>
         </thead>
         <tbody id="promptTbody"></tbody>
@@ -558,48 +433,53 @@ button.btn-remove{background:transparent;color:var(--danger);font-size:12px;min-
   </div>
 
   <div class="setup-actions">
-    <button id="btnSaveProfile" type="button">Save and start practicing</button>
-    <button id="btnExitSetup" type="button" class="btn-secondary">Back to Practice</button>
+    <button id="btnExitSetup" type="button" class="btn-secondary">Skip to practice</button>
+    <button id="btnSaveProfile" type="button">Save and start practising</button>
   </div>
 </div>
 
 <section id="modelsLayout" class="setup-panel" aria-labelledby="modelsTitle" hidden>
-  <h2 id="modelsTitle">Activate personal models</h2>
-  <p class="intro">Create a personal model from your recordings. Review its checks before saving it for the main app. Training alone does not activate it.</p>
-  <p class="privacy">Recording samples or completing training does not establish recognition accuracy. Keep practice, validation and final-test sessions separate.</p>
-  <p class="privacy">Saving a model here changes this profile's files, not a running recognizer. In the main app, stop the camera and choose Settings → Reload current models. Explicit startup paths still take priority.</p>
-  <p id="modelSaveNotice" role="status" aria-live="polite"></p>
-  <div class="form-field"><label for="modelKind">Model type</label><select id="modelKind"><option value="motion">Motion</option><option value="lips">Visual lip</option><option value="language">Language</option></select></div>
+  <h2 id="modelsTitle">Train, review and save</h2>
+  <div class="model-states">
+    <span><strong>1. Candidate:</strong> training makes a new candidate beside your profile. It is not used by anything yet.</span>
+    <span><strong>2. Saved for this profile:</strong> after you review its report, “Save for main app” makes it this profile’s saved model. The previous one is kept so you can restore it.</span>
+    <span><strong>3. Active in the running app:</strong> only after you stop the camera in the main app and choose Settings → Reload current models. Models chosen when the app was started still take priority.</span>
+  </div>
+  <p class="privacy">Recording tries or finishing training does not show how accurately anything is recognized. Keep practice, “another occasion” and final-check sessions separate.</p>
+  <p id="modelSaveNotice" role="status"></p>
+  <div class="form-field"><label for="modelKind">Model type</label><select id="modelKind"><option value="motion">Gestures (motion)</option><option value="lips">Lip reading (visual)</option><option value="language">Word suggestions (language)</option></select></div>
   <div class="form-field"><label for="candidateSelect">Candidate</label><select id="candidateSelect"></select></div>
-  <div id="modelStatus" role="status" aria-live="polite">Loading model status…</div>
-  <p id="candidateSummary" aria-live="polite"></p>
-  <div class="btn-group" style="flex-wrap:wrap">
-    <button id="trainMotion" type="button">Train motion</button>
-    <button id="trainVisual" type="button" hidden>Train visual lip</button>
-    <button id="trainLanguage" type="button" hidden>Train language</button>
+  <div id="modelStatus" role="status">Loading model status…</div>
+  <div id="modelError" role="alert"></div>
+  <p id="candidateSummary"></p>
+  <div class="btn-group">
+    <button id="trainMotion" type="button">Train a gesture candidate</button>
+    <button id="trainVisual" type="button" hidden>Train a lip-reading candidate</button>
+    <button id="trainLanguage" type="button" hidden>Train a word-suggestion candidate</button>
     <button id="refreshModels" type="button" class="btn-secondary">Refresh status</button>
   </div>
-  <div class="btn-group" style="flex-wrap:wrap">
+  <div class="btn-group">
     <button id="viewReport" type="button" class="btn-secondary">View report</button>
     <button id="evaluateRecognition" type="button">Evaluate recognition</button>
     <button id="promoteModel" type="button">Save for main app</button>
     <button id="rollbackModel" type="button" class="btn-secondary">Restore previous model</button>
   </div>
   <div id="comparisonMetrics" style="margin-top:8px;" hidden></div>
-  <pre id="modelReport" style="white-space:pre-wrap;overflow-wrap:anywhere" hidden></pre>
+  <pre id="modelReport" style="white-space:pre-wrap;overflow-wrap:anywhere" tabindex="0" aria-label="Candidate report" hidden></pre>
 </section>
 
 <div id="newProfileDialog" class="dialog-backdrop" hidden>
-  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
-    <h3 id="dialogTitle">Create New Profile</h3>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle" aria-describedby="dialogDesc">
+    <h3 id="dialogTitle">Create a new profile</h3>
+    <p id="dialogDesc">A profile keeps one person’s phrases, recordings and models separate from everyone else’s.</p>
     <div class="form-field"><label for="newProfileName">Your name</label>
       <input type="text" id="newProfileName" maxlength="64" autocomplete="name"></div>
-    <details><summary>Advanced: profile identifier</summary>
-      <div class="form-field"><label for="newProfileId">Optional identifier</label>
-      <input type="text" id="newProfileId" maxlength="64" placeholder="Generated automatically if blank"></div></details>
+    <details><summary>Advanced: folder name</summary>
+      <div class="form-field"><label for="newProfileId">Optional folder name (letters, numbers, - and _)</label>
+      <input type="text" id="newProfileId" maxlength="64" placeholder="Chosen automatically if blank"></div></details>
     <div class="dialog-buttons">
       <button id="btnCancelNewProfile" class="btn-cancel" type="button">Cancel</button>
-      <button id="btnConfirmNewProfile" type="button">Create Profile</button>
+      <button id="btnConfirmNewProfile" type="button">Create profile</button>
     </div>
   </div>
 </div>
@@ -670,6 +550,8 @@ function getSafeReturnUrl(){
 const retLink=$('returnLink');
 if(retLink){
   retLink.href=getSafeReturnUrl();
+  $('brandLink').href=retLink.href;
+  $('settingsLink').href=new URL('settings',retLink.href).href;
 }
 
 function getFreshSessionId(profileId,stageMode,split){
@@ -745,13 +627,13 @@ function hasRecordedSamples(profileId){
 const edges=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 
 function note(text,error=false){
-  $('status').textContent=text;
-  $('status').className=error?'error':'';
+  const status=$('status'),cls=error?'error':'';
+  // Rewriting identical text would make screen readers announce it again.
+  if(status.textContent!==text||status.className!==cls){status.textContent=text;status.className=cls;}
   const pill=$('recordingStatePill');
   if(pill){
-    if(error){pill.textContent='Issue';pill.style.borderColor='var(--danger-border)';pill.style.color='var(--danger)';}
-    else if(recording){pill.textContent='Recording…';pill.style.borderColor='var(--danger-border)';pill.style.color='var(--danger)';}
-    else{pill.textContent='Ready';pill.style.borderColor='';pill.style.color='';}
+    pill.textContent=error?'Needs attention':recording?'Recording…':'Ready';
+    pill.classList.toggle('alert',Boolean(error||recording));
   }
 }
 
@@ -792,26 +674,27 @@ function updateStageBanner(){
 }
 
 function render(){
-  $('stepSetup').classList.toggle('selected',currentStage==='setup');
-  $('stepTrain').classList.toggle('selected',currentStage==='train');
-  $('stepValidation').classList.toggle('selected',currentStage==='validation');
-  $('stepTest').classList.toggle('selected',currentStage==='test');
-  $('stepModels').classList.toggle('selected',currentStage==='models');
+  for(const [id,stage] of [['stepSetup','setup'],['stepTrain','train'],['stepValidation','validation'],['stepTest','test'],['stepModels','models']]){
+    $(id).classList.toggle('selected',currentStage===stage);
+    if(currentStage===stage)$(id).setAttribute('aria-current','step'); else $(id).removeAttribute('aria-current');
+  }
   $('modelsLayout').hidden=currentStage!=='models';
+  // Gestures / Lips / Both apply to recording steps only.
+  $('modeGroup').hidden=currentStage==='setup'||currentStage==='models';
 
   if(currentStage==='models'){
     $('recordingLayout').hidden=true;
     $('setupLayout').hidden=true;
     $('stageBanner').hidden=true;
-    $('title').textContent='Activate personal models';
-    $('intro').textContent='Candidates belong to the selected profile.';
+    $('title').textContent='Activate a personal model';
+    $('intro').textContent=`Models here belong to ${activeProfile?.name||'the selected profile'} only. Nothing changes in the running app until you reload its models.`;
     renderModels();
     return;
   }
 
   if(currentStage==='setup'){
     $('title').textContent='Make room for your everyday words.';
-    $('intro').textContent='Choose what you want to say. Nothing is recorded until you start practicing.';
+    $('intro').textContent='Choose what you want to say. Nothing is recorded until you start practising.';
     $('recordingLayout').hidden=true;
     $('setupLayout').hidden=false;
     renderSetupView();
@@ -824,40 +707,42 @@ function render(){
 
   const isLip=mode==='lips';
   const isPaired=mode==='paired';
-  $('gesturesTab').classList.toggle('selected',mode==='gestures');
-  $('lipsTab').classList.toggle('selected',isLip);
-  $('pairedTab').classList.toggle('selected',isPaired);
+  for(const [id,on] of [['gesturesTab',mode==='gestures'],['lipsTab',isLip],['pairedTab',isPaired]]){
+    $(id).classList.toggle('selected',on);
+    $(id).setAttribute('aria-pressed',String(on));
+  }
 
-  if(isPaired){
-    $('title').textContent=videoRequested()?'Check one standard sign with its words.':'Record paired gesture + lip trial.';
-    $('intro').textContent=videoRequested()?'Save a consented local video and mouth crops for lips-only, signs-only and combined evaluation. No automatic training or recognition score.':'Synchronized recording of hand landmarks and silent mouth crops. Paired data collection only, no recognition or transcription claimed.';
-  }else if(isLip){
-    $('title').textContent='Mouth the prompt. Record one try.';
-    $('intro').textContent='Practice custom lip phrases silently for the face tracker.';
+  const what=isPaired?(videoRequested()?'one standard sign with its words':'a gesture while mouthing a phrase'):(isLip?'your silent phrase':'your gesture');
+  if(currentStage==='validation'){
+    $('title').textContent=`Check ${what} on another occasion.`;
+  }else if(currentStage==='test'){
+    $('title').textContent=`Final check: ${what}.`;
   }else{
-    if(currentStage==='validation'){
-      $('title').textContent='Check gesture on another occasion.';
-      $('intro').textContent='Independent validation session. Test gesture consistency across sessions.';
-    }else if(currentStage==='test'){
-      $('title').textContent='Final check for gesture.';
-      $('intro').textContent='Independent final test session before activating your personal model.';
-    }else{
-      $('title').textContent='Practice your gesture. Record one try.';
-      $('intro').textContent='Per-profile custom gesture sequences and lip clips. Data remains local on this Mac.';
-    }
+    $('title').textContent=isPaired?(videoRequested()?'Check one standard sign with its words.':'Make a gesture while mouthing a phrase.'):(isLip?'Mouth the phrase silently. Record one try.':'Practise your gesture. Record one try.');
+  }
+  const stageIntro={
+    validation:'Record this on a different occasion from your practice, such as another day or sitting. These tries are kept apart from practice and used to check a model, not to train it.',
+    test:'A separate final sitting, kept apart from practice and checks. Use it for the final check before you activate a model; do not use it to adjust anything.'
+  }[currentStage];
+  if(isPaired){
+    $('intro').textContent=stageIntro||(videoRequested()?'Saves a local video, with your agreement, plus mouth close-ups, to compare lips only, signs only and both. No automatic training or recognition score.':'Records hand positions and mouth close-ups at the same time. This collects practice samples only; it does not recognize or transcribe anything.');
+  }else if(isLip){
+    $('intro').textContent=stageIntro||'Mouth each phrase without sound. Only close-ups of your mouth are saved; no microphone is used. Recordings stay on this computer.';
+  }else{
+    $('intro').textContent=stageIntro||'Each try saves your hand positions for this profile only. Recordings stay on this computer.';
   }
 
   $('pairedBox').hidden=!isPaired;
   $('pairedCaptureKind').querySelector('[value="video"]').disabled=!signModelInfo;
   $('videoConsentBox').hidden=!videoRequested();
-  $('pairedSignModel').textContent=signModelInfo?`${signModelInfo.language.toUpperCase()} · ${signModelInfo.sha256.slice(0,12)} · configured concepts, not a recognition score.`:'No standard-sign model configured. Start this recorder with --sign-model to enable video checks.';
+  $('pairedSignModel').textContent=signModelInfo?`Standard-sign model: ${signModelInfo.language.toUpperCase()} (${signModelInfo.sha256.slice(0,12)}). It lists the signs you can record; it gives no recognition score here.`:'Standard-sign video checks are off because no standard-sign model was set up when QuietBridge started.';
   $('mouthPrompt').hidden=!isLip&&!isPaired;
   $('mouthNote').hidden=!isLip&&!isPaired;
-  $('mouthNote').textContent=videoRequested()?'Mouth the sentence while signing. Full-frame video and mouth crops are saved only after consent and Finish & save. No microphone.':'Mouth these words silently at a natural pace. Face camera. Saved mouth crops only; no microphone.';
-  $('trackingNote').hidden=false;
+  $('mouthNote').textContent=videoRequested()?'Mouth the sentence while signing. The full video and mouth close-ups are saved only after you agree and choose Finish & save. The microphone is not used.':'Mouth these words silently at a natural pace, facing the camera. Only mouth close-ups are saved; the microphone is not used.';
+  $('trackingNote').hidden=isPaired; // the paired box already says this
   $('trackingNote').textContent=isPaired
-    ?'Paired data collection only · No recognition or transcription claimed'
-    :(isLip?'Silent mouth tracking only · not a transcript or trained recognizer':'Tracking only · not a transcript or trained recognizer');
+    ?'This collects practice samples only. It does not recognize or transcribe anything.'
+    :(isLip?'The guide shows mouth tracking only. It is not a transcript or a trained recognizer.':'The guide shows tracking only. It is not a transcript or a trained recognizer.');
 
   $('pose').hidden=isLip;
   $('meaning').hidden=isLip;
@@ -871,9 +756,9 @@ function render(){
   const targetCount=STAGE_TARGETS[currentStage]?.[mode]||3;
 
   const stageLabels={
-    train:'Stage 2 · Practice',
-    validation:'Stage 3 · Check on another occasion',
-    test:'Stage 4 · Final check'
+    train:'Step 2 · Practice',
+    validation:'Step 3 · Another occasion',
+    test:'Step 4 · Final check'
   };
 
   if(isPaired){
@@ -887,13 +772,13 @@ function render(){
     gestures.forEach(g=>{
       const opt=document.createElement('option');
       opt.value=g.label;
-      opt.textContent=`${g.emoji||'✋'} ${g.display_name||g.label} (${g.label})`;
+      opt.textContent=`${g.emoji||'✋'} ${g.display_name||g.label}`;
       gSel.appendChild(opt);
     });
     if(!gestures.some(g=>g.label==='REST')){
       const opt=document.createElement('option');
       opt.value='REST';
-      opt.textContent='Rest (REST negative class)';
+      opt.textContent='😌 Rest (no gesture)';
       gSel.appendChild(opt);
     }
     pSel.innerHTML='';
@@ -917,40 +802,40 @@ function render(){
     const selectedLabel=gSel.value;
     const g=gestures.find(x=>x.label===selectedLabel)||{label:'REST',emoji:'✋',display_name:'Rest',concept:'Rest / negative class',description:'Relax into a loose half-fist, or lower your hands.',hint:'Record ordinary relaxed moments as the negative class.'};
     $('pose').textContent=g.emoji||'✋';
-    $('meaning').textContent=g.display_name?`${g.display_name} (${g.label})`:g.label;
-    $('concept').textContent=g.concept?`Concept: ${g.concept}`:'';
+    $('meaning').textContent=g.display_name||g.label;
+    $('concept').textContent=g.concept?`Means: ${g.concept}`:'';
     $('instruction').textContent=g.description||g.text||'';
     $('hint').textContent=g.hint||'';
 
-    $('mouthPrompt').textContent=pSel.value||'No prompt configured';
-    $('round').textContent=`${stageLabels[currentStage]||currentStage} · Paired`;
+    $('mouthPrompt').textContent=pSel.value||'No phrase set up yet';
+    $('round').textContent=`${stageLabels[currentStage]||currentStage} · Both together`;
     while(prog.counts.length<=prog.index)prog.counts.push(0);
-    $('progress').textContent=`${prog.counts[prog.index]||0} / ${targetCount} paired recordings`;
+    $('progress').textContent=`${prog.counts[prog.index]||0} of ${targetCount} tries for this pair`;
     $('next').textContent='Next pair →';
   }else if(isLip){
     const prompts=activeProfile.lip_prompts||[];
     if(prog.index>=prompts.length)prog.index=0;
     while(prog.counts.length<prompts.length)prog.counts.push(0);
-    $('mouthPrompt').textContent=prompts[prog.index]||'No prompt configured';
+    $('mouthPrompt').textContent=prompts[prog.index]||'No phrase set up yet';
     $('round').textContent=`${stageLabels[currentStage]||currentStage} · Lips`;
-    $('progress').textContent=`${prog.counts[prog.index]||0} / ${targetCount} recordings`;
-    $('next').textContent='Next prompt →';
+    $('progress').textContent=`${prog.counts[prog.index]||0} of ${targetCount} tries for this phrase`;
+    $('next').textContent='Next phrase →';
   }else{
     const gestures=activeProfile.gestures||[];
     if(prog.index>=gestures.length)prog.index=0;
     while(prog.counts.length<gestures.length)prog.counts.push(0);
     const g=gestures[prog.index]||{label:'REST',emoji:'✋',text:'Relax',hint:''};
     $('pose').textContent=g.emoji||'✋';
-    $('meaning').textContent=g.display_name?`${g.display_name} (${g.label})`:g.label;
-    $('concept').textContent=g.concept?`Concept: ${g.concept}`:'';
+    $('meaning').textContent=g.display_name||g.label;
+    $('concept').textContent=g.concept?`Means: ${g.concept}`:'';
     $('instruction').textContent=g.description||g.text||'';
     $('hint').textContent=g.hint||'';
     $('round').textContent=`${stageLabels[currentStage]||currentStage} · Gestures`;
-    $('progress').textContent=`${prog.counts[prog.index]||0} / ${targetCount} recordings`;
+    $('progress').textContent=`${prog.counts[prog.index]||0} of ${targetCount} tries for this gesture`;
     $('next').textContent='Next gesture →';
   }
 
-  $('progress').textContent+=' (browser guide count, not model validation)';
+  $('progress').textContent+=' (a practice count, not a recognition result)';
   // Check if current stage is completed for this modality
   checkStageCompletion();
   controls();
@@ -969,13 +854,13 @@ function checkStageCompletion(){
   if(allMet){
     $('advanceBox').hidden=false;
     if(currentStage==='train'){
-      $('advanceMsg').textContent='Browser guide target reached. Record a separate validation session; this does not validate a model.';
+      $('advanceMsg').textContent='You have reached the suggested number of tries. Next, record again on another occasion. This count does not check a model.';
       $('btnAdvanceStage').textContent='Continue to Check on another occasion →';
     }else if(currentStage==='validation'){
-      $('advanceMsg').textContent='Browser guide target reached. Record a separate final-test session; this is not a model result.';
+      $('advanceMsg').textContent='You have reached the suggested number of tries. Next, record a separate final check on another occasion. This is not a model result.';
       $('btnAdvanceStage').textContent='Continue to Final check →';
     }else if(currentStage==='test'){
-      $('advanceMsg').textContent='Browser guide target reached. Review model reports before activation.';
+      $('advanceMsg').textContent='You have reached the suggested number of tries. Review model reports before you activate anything.';
       $('btnAdvanceStage').textContent='Continue to Activate →';
     }else{
       $('advanceMsg').textContent='Setup completed.';
@@ -1141,22 +1026,17 @@ async function sendFrame(){
     frames=mode==='lips'?(d.mouth?.frames||0):(d.recorded_frames||0);
 
     if(recording){
+      // Updated every frame, so it is deliberately not a live region.
       const seconds=((Date.now()-started)/1000).toFixed(1);
-      if(mode==='gestures'){
-        note(`${seconds}s · ${frames} frames · Coordinates recorded. Finish & save when done.`);
-      }else if(mode==='lips'){
-        note(`${seconds}s · ${frames} mouth frames. Speak silently at a natural pace; finish when done.`);
-      }else{
-        note(`${seconds}s · ${frames} frames · Synchronized pair recorded. Paired data collection only.`);
-      }
+      $('recordingMeter').textContent=`Recording: ${seconds} s · ${frames} ${mode==='lips'?'mouth frames':'frames'} received`;
     }
     if(d.mouth?.limit_reached||d.limit_reached){
-      note(activeVideoCapture?'Video limit reached. Discard this trial and record a shorter sign.':'Trial limit reached. Press Finish & save.',true);
+      note(activeVideoCapture?'Video limit reached. Discard this try and record a shorter sign.':'Time limit for one try reached. Press Finish & save.',true);
     }
   }catch(e){
     stopCamera();
     $('tracking').textContent='Camera off';
-    note(`${e.message} Camera is off.${recording?' Discard or save the current trial before retrying.':''}`,true);
+    note(`${e.message} Camera is off.${recording?' Discard or save the current try before trying again.':''}`,true);
     controls();
   }finally{
     inflight=false;
@@ -1214,7 +1094,7 @@ $('btnNewSession').onclick=()=>{
   const split=currentStage==='validation'?'validation':(currentStage==='test'?'test':'train');
   const fresh=renewActiveSession(activeProfile.id,mode,split);
   $('sessionLabel').textContent=fresh;
-  note(`New independent session created: ${fresh}`);
+  note('New session started. Use a new session each time you record on a different occasion.');
 };
 
 function advanceItem(){
@@ -1238,7 +1118,7 @@ $('gesturesTab').onclick=()=>{
   if(recording||working)return;
   if(currentStage==='setup')collectSetupFields();
   mode='gestures';
-  note('Ready. Press Start recording when framed.');
+  note('Ready. Press Start recording when you are in view.');
   render();
 };
 
@@ -1246,7 +1126,7 @@ $('lipsTab').onclick=()=>{
   if(recording||working)return;
   if(currentStage==='setup')collectSetupFields();
   mode='lips';
-  note('Ready. Mouth the displayed words silently.');
+  note('Ready. You will mouth the phrase shown, without sound.');
   render();
 };
 
@@ -1254,7 +1134,7 @@ $('pairedTab').onclick=()=>{
   if(recording||working)return;
   if(currentStage==='setup')collectSetupFields();
   mode='paired';
-  note('Ready. Select gesture & intended prompt, then Start recording.');
+  note('Ready. Choose a gesture and a phrase, then Start recording.');
   render();
 };
 
@@ -1282,7 +1162,7 @@ $('record').onclick=async()=>{
   try{
     if(!recording){
       if(!activeProfile?.id)throw Error('Choose a profile first.');
-      if(!$('localConsent').checked)throw Error('Agree to save local training samples before recording.');
+      if(!$('localConsent').checked)throw Error('To record, first tick the box agreeing to save practice tries on this computer.');
       const selected=getProgressData(activeProfile.id,currentStage,mode);
       if(mode==='gestures'&&!activeProfile.gestures?.[selected.index]?.label)throw Error('Choose a configured gesture first.');
       if(mode==='lips'&&!activeProfile.lip_prompts?.[selected.index]?.trim())throw Error('Choose a configured prompt first.');
@@ -1328,14 +1208,14 @@ $('record').onclick=async()=>{
       started=Date.now();
       recordingStartTime=Date.now();
       if(mode==='lips'){
-        note('Recording. Mouth these words silently at a natural pace.');
+        note('Recording. Mouth these words silently at a natural pace, then choose Finish & save.');
       }else if(mode==='gestures'){
-        note('Recording. Pause still for 0.5s, do the gesture once, return to REST for 0.5s.');
+        note('Recording. Keep still for half a second, make the gesture once, then rest for half a second. Then choose Finish & save.');
       }else{
-        note(activeVideoCapture?'Recording local video. Perform one sign with the selected silent sentence. Finish before 10 seconds.':'Recording paired trial. Perform gesture and mouth prompt silently. Paired collection only.');
+        note(activeVideoCapture?'Recording local video. Make one sign while silently mouthing the phrase. Finish within 10 seconds.':'Recording. Make the gesture while silently mouthing the phrase, then choose Finish & save.');
       }
     }else{
-      if(!frames)throw Error('No frames received yet. Wait for live camera guide, then save.');
+      if(!frames)throw Error('Nothing has been captured yet. Wait until the camera view shows tracking, then save.');
       if(mode==='gestures'){
         await action('stop');
       }else if(mode==='lips'){
@@ -1351,11 +1231,11 @@ $('record').onclick=async()=>{
       saveProgressData(activeProfile.id,currentStage,mode,prog);
 
       if(mode==='lips'){
-        note('Mouth crops saved on this Mac. Take a pause before next prompt.');
+        note('Saved: mouth close-ups, on this computer. Take a short pause before the next try.');
       }else if(mode==='gestures'){
-        note('Coordinates saved on this Mac. Take a pause before next gesture.');
+        note('Saved: hand positions, on this computer. Take a short pause before the next try.');
       }else{
-        note(activeVideoCapture?'Video, hand coordinates and mouth crops saved locally. Consent resets for the next trial.':'Paired trial saved: hand coordinates + mouth crops. Paired data capture only.');
+        note(activeVideoCapture?'Saved locally: video, hand positions and mouth close-ups. Agreement resets for the next try.':'Saved: hand positions and mouth close-ups, on this computer. This is a practice sample only.');
         $('videoConsent').checked=false;
         activeVideoCapture=false;
       }
@@ -1393,7 +1273,7 @@ $('discard').onclick=async()=>{
     stopCamera();
     activeVideoCapture=false;
     $('videoConsent').checked=false;
-    note('Trial discarded without saving.');
+    note('Try discarded. Nothing was saved.');
     render();
   }catch(e){
     note(e.message,true);
@@ -1405,6 +1285,7 @@ $('discard').onclick=async()=>{
 
 function stopCamera(){
   clearInterval(loop); loop=null;
+  $('recordingMeter').textContent='';
   stream?.getTracks().forEach(t=>t.stop());
   stream=null; video.srcObject=null;
   $('placeholder').hidden=false;
@@ -1412,7 +1293,7 @@ function stopCamera(){
   draw.clearRect(0,0,640,480);
   clearMouth('Camera off');
 }
-$('cameraOff').onclick=()=>{if(!working){stopCamera();if(recording)note('Camera off. Discard this trial or save any frames already received.',true);controls();}};
+$('cameraOff').onclick=()=>{if(!working){stopCamera();if(recording)note('Camera off. Discard this try, or save what was already captured.',true);controls();}};
 
 // Model operations use the active profile on the server.
 function modelControls(){
@@ -1439,7 +1320,7 @@ function renderModels(){
   select.replaceChildren();
   const candidates=(modelData?.candidates||[]).filter(c=>c.kind===kind);
   if(!candidates.length){
-    const option=document.createElement('option'); option.value=''; option.textContent='No candidates'; select.appendChild(option);
+    const option=document.createElement('option'); option.value=''; option.textContent='No trained candidates yet'; select.appendChild(option);
   }
   candidates.forEach(c=>{
     const option=document.createElement('option'); option.value=c.id;
@@ -1455,7 +1336,11 @@ function renderModels(){
   });
   if(candidates.some(c=>c.id===previous))select.value=previous;
   const active=modelData?.active?.[kind];
-  $('modelStatus').textContent=modelData?`Profile: ${activeProfile.id} | Saved ${kind} model: ${active||'none'} | Jobs: ${JSON.stringify(modelData.jobs||[])}`:'Model status not loaded.';
+  const kindName=$('modelKind').selectedOptions?.[0]?.textContent||kind;
+  const jobs=(modelData?.jobs||[]).map(j=>`${j.eval_status==='running'?'checking':'training'} ${j.kind} candidate ${j.id}`);
+  $('modelStatus').textContent=modelData
+    ?`Profile: ${activeProfile.name||activeProfile.id}. Saved ${kindName} model for this profile: ${active?active.split(/[\\/]/).pop():'none saved'}. ${jobs.length?`In progress: ${jobs.join('; ')}.`:'Nothing is training right now.'}`
+    :'Model status not loaded.';
   $('modelReport').hidden=true;
   renderCandidateSummary();
   modelControls();
@@ -1487,11 +1372,11 @@ function renderCandidateSummary(){
       const gateStr=c.comparison_passed?'Passed':'Not passed; check report identity and metrics';
       details.push(`Recognition: ${stockStr} vs ${candStr} [Gate: ${gateStr}]`);
     }else{
-      details.push('Recognition: Not evaluated (required for promotion)');
+      details.push('Recognition: not checked yet (required before saving)');
     }
   }
 
-  details.push(c.promotable?'Eligible for promotion':'Not eligible for promotion');
+  details.push(c.promotable?'Can be saved for the main app':'Cannot be saved for the main app; see its report');
   $('candidateSummary').textContent=details.filter(Boolean).join(' | ');
 
   if($('comparisonMetrics')){
@@ -1499,7 +1384,7 @@ function renderCandidateSummary(){
       const stock=c.comparison.variants.stock?.metrics;
       const cand=c.comparison.variants.candidate?.metrics;
       const fmtWer=v=>v!=null?(v*100).toFixed(1)+'%':'N/A';
-      $('comparisonMetrics').innerHTML=`<strong>Recognition Evaluation:</strong> Stock WER: <code>${fmtWer(stock?.wer)}</code> (target: <code>${fmtWer(stock?.target_wer)}</code>) | Candidate WER: <code>${fmtWer(cand?.wer)}</code> (target: <code>${fmtWer(cand?.target_wer)}</code>) &mdash; <span style="font-weight:bold;color:${c.comparison_passed?'#0d9488':'#cf222e'}">${c.comparison_passed?'&check; Gate Passed':'&cross; Gate Failed'}</span>`;
+      $('comparisonMetrics').innerHTML=`<strong>Recognition check:</strong> Stock WER: <code>${fmtWer(stock?.wer)}</code> (target: <code>${fmtWer(stock?.target_wer)}</code>) | Candidate WER: <code>${fmtWer(cand?.wer)}</code> (target: <code>${fmtWer(cand?.target_wer)}</code>) &mdash; <span class="${c.comparison_passed?'gate-pass':'gate-fail'}">${c.comparison_passed?'&check; Check passed':'&cross; Check not passed'}</span>`;
       $('comparisonMetrics').hidden=false;
     }else{
       $('comparisonMetrics').hidden=true;
@@ -1507,11 +1392,25 @@ function renderCandidateSummary(){
   }
 }
 
+// Server errors are terse; add the next step a person can take.
+function modelErrorHelp(message){
+  const hints=[
+    [/Independent train and validation recordings are required/i,'Record at least one Practice session and one “Check on another occasion” session for this model type, then train again.'],
+    [/already running/i,'Wait for it to finish, then choose Refresh status.'],
+    [/not eligible for promotion/i,'Only a candidate the trainer selected (and, for word suggestions, one that passed its recognition check) can be saved. Open its report to see why.'],
+    [/No previous model to roll back to/i,'There is no earlier saved model of this type for this profile.'],
+    [/must be completed before evaluation/i,'Wait until training has finished, then choose Refresh status.'],
+    [/Stop or discard the recording first/i,'Go back to the recording step and finish or discard the open try.']
+  ];
+  const hint=hints.find(([pattern])=>pattern.test(message));
+  return hint?`${message}. ${hint[1]}`.replace(/\.\. /,'. '):message;
+}
+
 async function refreshModelStatus(){
   if(recording||working||modelBusy)return;
   modelBusy=true; controls();
-  try{modelData=await request('/api/models'); renderModels()}
-  catch(e){modelData=null; $('modelStatus').textContent=`Model status unavailable: ${e.message}`}
+  try{modelData=await request('/api/models'); $('modelError').textContent=''; renderModels()}
+  catch(e){modelData=null; $('modelStatus').textContent='Model status unavailable.'; $('modelError').textContent=modelErrorHelp(e.message)}
   finally{modelBusy=false; controls()}
 }
 
@@ -1519,6 +1418,7 @@ async function modelAction(path,data){
   if(recording||working||modelBusy)return;
   modelBusy=true; controls();
   try{
+    $('modelError').textContent='';
     modelData=await action('models/'+path,data); renderModels();
     if(path==='promote'||path==='rollback'){
       const message=document.createElement('span');
@@ -1529,7 +1429,7 @@ async function modelAction(path,data){
       $('modelSaveNotice').replaceChildren(message,link);
     }
   }
-  catch(e){$('modelStatus').textContent=e.message}
+  catch(e){$('modelError').textContent=modelErrorHelp(e.message)}
   finally{modelBusy=false; controls()}
 }
 
@@ -1555,11 +1455,11 @@ $('viewReport').onclick=()=>{
 };
 $('promoteModel').onclick=()=>{
   const kind=$('modelKind').value,candidate_id=$('candidateSelect').value;
-  if(confirm(`Save candidate ${candidate_id} for this profile? Reload the main app's models in Settings afterward.`))modelAction('promote',{kind,candidate_id});
+  if(confirm(`Save candidate ${candidate_id} as this profile's model? The running main app keeps its current models until you reload them in Settings.`))modelAction('promote',{kind,candidate_id});
 };
 $('rollbackModel').onclick=()=>{
   const kind=$('modelKind').value;
-  if(confirm(`Roll back the active ${kind} model for this profile?`))modelAction('rollback',{kind});
+  if(confirm(`Restore the previously saved ${$('modelKind').selectedOptions?.[0]?.textContent||kind} model for this profile? The running main app keeps its current models until you reload them in Settings.`))modelAction('rollback',{kind});
 };
 
 // Setup Panel & Customization Logic
@@ -1604,7 +1504,7 @@ function renderSetupView(){
         <label>Optional icon<input type="text" value="${escape(g.emoji)}" data-field="emoji" data-idx="${idx}"></label>
         <label class="gesture-instruction">Sentence template<input type="text" data-field="intent_template" data-idx="${idx}" aria-label="Intent template for gesture ${idx+1}" placeholder="e.g. I need {gesture}"><small>Optional. Use one {gesture} slot. Only exact lip context can fill it.</small></label>
       </div></details>
-      <button type="button" class="btn-del-g btn-remove" data-idx="${idx}">Remove gesture</button>
+      <button type="button" class="btn-del-g btn-remove" data-idx="${idx}" aria-label="Remove gesture: ${escape(g.display_name||g.label)}">Remove gesture</button>
     </details></td>`;
     tr.querySelector('[data-field="intent_template"]').value=g.intent_template||'';
     tbodyG.appendChild(tr);
@@ -1616,9 +1516,10 @@ function renderSetupView(){
     const tr=document.createElement('tr');
     tr.innerHTML=`
       <td><input type="text" aria-label="Practice phrase ${idx+1}" data-idx="${idx}"></td>
-      <td><button type="button" class="btn-del-p btn-remove" data-idx="${idx}">Remove</button></td>
+      <td><button type="button" class="btn-del-p btn-remove" data-idx="${idx}" aria-label="Remove phrase ${idx+1}">Remove</button></td>
     `;
     tr.querySelector('input').value=p;
+    tr.querySelector('input').placeholder='Type a phrase you often say';
     tbodyP.appendChild(tr);
   });
 
@@ -1632,6 +1533,9 @@ function renderSetupView(){
       collectSetupFields();
       activeProfile.gestures.splice(idx,1);
       renderSetupView();
+      // Keep keyboard focus near the removed row instead of dropping it to the page.
+      const rows=$('gestureTbody').querySelectorAll('summary');
+      (rows[Math.min(idx,rows.length-1)]||$('btnAddGesture'))?.focus?.();
     };
   });
 
@@ -1645,6 +1549,8 @@ function renderSetupView(){
       collectSetupFields();
       activeProfile.lip_prompts.splice(idx,1);
       renderSetupView();
+      const inputs=$('promptTbody').querySelectorAll('input');
+      (inputs[Math.min(idx,inputs.length-1)]||$('btnAddPrompt'))?.focus?.();
     };
   });
   if(!setupBaseline){ collectSetupFields(); setupBaseline=JSON.stringify(activeProfile); }
@@ -1661,12 +1567,17 @@ $('btnAddGesture').onclick=()=>{
     emoji:'✋'
   });
   renderSetupView();
+  const added=$('gestureTbody').querySelectorAll('details.gesture-definition');
+  const last=added[added.length-1];
+  if(last){last.open=true; last.querySelector('[data-field="display_name"]')?.focus?.();}
 };
 
 $('btnAddPrompt').onclick=()=>{
   collectSetupFields();
-  activeProfile.lip_prompts.push('New custom prompt sentence.');
+  activeProfile.lip_prompts.push('');
   renderSetupView();
+  const inputs=$('promptTbody').querySelectorAll('input');
+  inputs[inputs.length-1]?.focus?.();
 };
 
 $('btnSaveProfile').onclick=async()=>{
@@ -1719,10 +1630,13 @@ async function loadProfiles(){
   allProfiles=data.profiles||[];
   const sel=$('profileSelect');
   sel.innerHTML='';
+  const nameCount={};
+  allProfiles.forEach(p=>{nameCount[p.name||p.id]=(nameCount[p.name||p.id]||0)+1;});
   allProfiles.forEach(p=>{
     const opt=document.createElement('option');
     opt.value=p.id;
-    opt.textContent=p.name?`${p.name} (${p.id})`:p.id;
+    const name=p.name||p.id;
+    opt.textContent=nameCount[name]>1?`${name} (${p.id})`:name;
     if(p.id===data.active_profile)opt.selected=true;
     sel.appendChild(opt);
   });
@@ -1738,7 +1652,7 @@ $('profileSelect').onchange=async()=>{
     activeProfile=updated;
     if(currentStage==='setup')setupBaseline=null;
     $('videoConsent').checked=false;
-    note(`Switched to profile: ${activeProfile.name} (${activeProfile.id})`);
+    note(`Switched to ${activeProfile.name||activeProfile.id}’s profile.`);
     modelData=null;
     render();
     if(currentStage==='models')await refreshModelStatus();
@@ -1761,6 +1675,7 @@ $('btnNewProfile').onclick=()=>{
 $('btnCancelNewProfile').onclick=closeProfileDialog;
 $('newProfileDialog').addEventListener('keydown',event=>{
   if(event.key==='Escape'){event.preventDefault();closeProfileDialog();return;}
+  if(event.key==='Enter'&&event.target?.tagName==='INPUT'){event.preventDefault();$('btnConfirmNewProfile').click?.();return;}
   if(event.key!=='Tab')return;
   const focusable=Array.from($('newProfileDialog').querySelectorAll('input,button,summary')).filter(el=>el.getClientRects().length&&!el.disabled);
   if(!focusable.length)return;
@@ -1776,7 +1691,7 @@ $('btnConfirmNewProfile').onclick=async()=>{
     const created=await action('profile/create',{id,name});
     closeProfileDialog(); await loadProfiles(); activeProfile=created;
     setupBaseline=null; currentStage='train'; setStage('setup');
-    note(`Created new profile: ${created.name} (${created.id})`);
+    note(`Created a profile for ${created.name}.`);
   }catch(e){alert('Failed to create profile: '+e.message);}
 };
 
@@ -1788,7 +1703,7 @@ setInterval(()=>{
   }
 },500);
 
-$('returnLink').addEventListener('click',event=>{
+for(const id of ['returnLink','brandLink','settingsLink'])$(id).addEventListener('click',event=>{
   if(!confirmDiscardSetup())event.preventDefault();
 });
 window.addEventListener('beforeunload',event=>{
@@ -1810,7 +1725,7 @@ request('/api/state').then(async s=>{
   signModelInfo=s.sign_model||null;
   captureAvailable=s.capture_available!==false;
   $('captureUnavailable').hidden=captureAvailable;
-  if(!captureAvailable)note('Preview only. Camera recording is unavailable here. Return to the main app to type, or restart without --rehearsal for local recording.',true);
+  if(!captureAvailable)note('Preview only: recording is turned off in this copy of QuietBridge. You can still edit phrases and review models.',true);
   await loadProfiles();
   if(s.paired){
     mode='paired';
@@ -1818,15 +1733,18 @@ request('/api/state').then(async s=>{
     if(activeVideoCapture)$('pairedCaptureKind').value='video';
     recording=true;
     frames=s.recorded_frames||0;
-    note('An earlier paired trial is active. Finish & save it before switching lessons.',true);
-  }else if(mode==='gestures'&&s.recording){
-    recording=true;
-    note('An earlier gesture trial is active. Finish & save it before switching lessons.',true);
+    note('An earlier try with both together is still open. Finish & save it, or discard it, before switching.',true);
   }else if(s.mouth?.recording){
+    // /api/state.recording is also true for a mouth trial, so check lips first.
     mode='lips';
     recording=true;
     frames=s.mouth.frames||0;
-    note('An earlier mouth trial is active. Finish & save it before switching lessons.',true);
+    note('An earlier lip try is still open. Finish & save it, or discard it, before switching.',true);
+  }else if(s.recording){
+    mode='gestures';
+    recording=true;
+    frames=s.recorded_frames||0;
+    note('An earlier gesture try is still open. Finish & save it, or discard it, before switching.',true);
   }
 
   // First-time onboarding: if profile has no recorded samples, guide to setup view without opening camera

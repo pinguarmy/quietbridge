@@ -515,6 +515,8 @@ def _paired_start(conn, server, profile="default", label="HELLO",
 
 
 def test_paired_validation(conn, server):
+    # Hermetic: validation must not depend on a local face_landmarker.task.
+    server.mouth._tracker_factory = FakeTracker
     # Missing / empty profile
     res, err = _paired_start(conn, server, profile="")
     assert res.status == 400
@@ -558,6 +560,37 @@ def test_paired_validation(conn, server):
     res3, _ = _start(conn, server, session="s_conflict3")
     assert res3.status == 409
     _json(conn, server, "POST", "/api/paired/discard")
+
+
+def test_paired_start_reports_missing_face_model_as_setup_error(conn, server, tmp_path):
+    """A missing local face model is a 503 setup problem, not a 400, and leaves no state."""
+    def broken_tracker():
+        raise RuntimeError("Unable to open file at /x/models/face_landmarker.task")
+
+    server.mouth._tracker_factory = broken_tracker
+    other_root = tmp_path / "unrelated_mouths"
+    server.mouth.set_root(other_root)
+
+    res, err = _paired_start(conn, server, label="REST", session="s_missing_face")
+    assert res.status == 503
+    assert "Face tracking is not available" in err["error"]
+    assert "face_landmarker.task" in err["error"]
+    assert "lipflow doctor" in err["error"]
+    assert server.paired_recording is None
+    assert server.recording is None
+    assert server.mouth.root == str(other_root)
+
+    # Standalone mouth capture uses the same setup error.
+    res, err = _json(conn, server, "POST", "/api/mouth/preview", body=b"{}",
+                     headers={"Content-Type": "application/json"})
+    assert res.status == 503
+    assert "Face tracking is not available" in err["error"]
+
+    # Keep-alive connection is still usable and the lab can recover once fixed.
+    server.mouth._tracker_factory = FakeTracker
+    res, data = _paired_start(conn, server, label="REST", session="s_missing_face")
+    assert res.status == 200
+    _json(conn, server, "POST", "/api/paired/discard", body=b"{}")
 
 
 def test_paired_recording_contract(conn, server, monkeypatch):
@@ -824,3 +857,113 @@ def test_shutdown_waits_for_active_frame_before_closing_resources(tmp_path):
     assert closes == [True]
     assert engine.closed
     assert responses == [200]
+
+
+# -- HTTP robustness: every request gets exactly one JSON answer -----------
+
+
+def _raw_exchange(server, raw: bytes) -> bytes:
+    import socket
+
+    with socket.create_connection(("127.0.0.1", server.server_address[1]), timeout=5) as sock:
+        sock.sendall(raw)
+        chunks = []
+        while True:
+            try:
+                chunk = sock.recv(65536)
+            except socket.timeout:
+                break
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+
+@pytest.mark.parametrize("path", ["/api/stop", "/api/discard", "/api/paired/discard"])
+def test_missing_content_length_gets_one_response_not_two(server, path):
+    host = f"127.0.0.1:{server.server_address[1]}"
+    raw = (f"POST {path} HTTP/1.1\r\nHost: {host}\r\n"
+           f"X-QuietBridge-Token: {server.token}\r\nConnection: close\r\n\r\n").encode()
+    reply = _raw_exchange(server, raw)
+    assert reply.count(b"HTTP/1.1 ") == 1, reply
+    assert reply.startswith(b"HTTP/1.1 411")
+
+
+def test_unknown_post_route_drains_body_for_keep_alive(conn, server):
+    body = b'{"padding": "' + b"x" * 300 + b'"}'
+    response, data = _json(conn, server, "POST", "/api/no-such-route", body=body,
+                           headers={"Content-Type": "application/json"})
+    assert response.status == 404
+    response, data = _json(conn, server, "POST", "/api/paired/no-such-action", body=body,
+                           headers={"Content-Type": "application/json"})
+    assert response.status == 404
+    # The same keep-alive connection still parses the next request correctly.
+    response, data = _json(conn, server, "GET", "/api/state")
+    assert response.status == 200 and data["token"] == server.token
+
+
+def test_wrong_host_post_drains_body_for_keep_alive(conn, server):
+    body = b"{" + b" " * 200 + b"}"
+    response, _ = _json(conn, server, "POST", "/api/stop", body=body,
+                        headers={"Host": "evil.example", "Content-Type": "application/json"})
+    assert response.status == 403
+    response, data = _json(conn, server, "GET", "/api/state")
+    assert response.status == 200
+
+
+@pytest.mark.parametrize("path,payload", [
+    ("/api/start", []),
+    ("/api/start", {"label": "HELLO", "split": "train", "session": "s1", "profile": 7}),
+    ("/api/profile/create", {"id": "p1", "name": 5}),
+    ("/api/profile/create", {"id": 123, "name": "Sam"}),
+    ("/api/profile/create", {"id": "p2", "name": "Sam", "gestures": ["HELLO"]}),
+    ("/api/profile/update", {"name": ["x"]}),
+    ("/api/profile/select", {"id": ["default"]}),
+    ("/api/mouth/start", {"text": 5, "split": "train", "session": "m1"}),
+    ("/api/mouth/start", {"text": "Hello, how are you?", "split": "train", "session": 9}),
+])
+def test_wrong_json_types_are_400_not_dropped_connections(conn, server, path, payload):
+    server.mouth._tracker_factory = FakeTracker
+    response, data = _json(conn, server, "POST", path, body=json.dumps(payload),
+                           headers={"Content-Type": "application/json"})
+    assert response.status == 400, data
+    assert data["error"]
+    assert server.recording is None and not server.mouth.snapshot()["recording"]
+
+
+def test_unexpected_handler_error_returns_json_500(conn, server, monkeypatch):
+    def boom():
+        raise TypeError("synthetic failure")
+
+    monkeypatch.setattr(server.lips, "start", boom)
+    response, data = _json(conn, server, "POST", "/api/lips/start", body=b"{}",
+                           headers={"Content-Type": "application/json"})
+    assert response.status == 500
+    assert "synthetic failure" in data["error"]
+    # A fresh connection keeps working after the failure.
+    fresh = http.client.HTTPConnection("127.0.0.1", server.server_address[1])
+    try:
+        response, data = _json(fresh, server, "GET", "/api/state")
+        assert response.status == 200
+    finally:
+        fresh.close()
+
+
+def test_failed_mouth_start_for_other_profile_restores_mouth_root(conn, server):
+    _json(conn, server, "POST", "/api/profile/create",
+          body=json.dumps({"id": "other", "name": "Other"}),
+          headers={"Content-Type": "application/json"})
+    _json(conn, server, "POST", "/api/profile/select", body=json.dumps({"id": "default"}),
+          headers={"Content-Type": "application/json"})
+    before = server.mouth.root
+
+    def broken_tracker():
+        raise RuntimeError("Unable to open file at models/face_landmarker.task")
+
+    server.mouth._tracker_factory = broken_tracker
+    response, data = _json(conn, server, "POST", "/api/mouth/start",
+                           body=json.dumps({"text": "Hello, how are you?", "split": "train",
+                                            "session": "other_s1", "profile": "other"}),
+                           headers={"Content-Type": "application/json"})
+    assert response.status == 503
+    assert server.mouth.root == before

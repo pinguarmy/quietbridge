@@ -24,6 +24,13 @@ MIN_ROIS = 12
 _SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
+class TrackerUnavailable(RuntimeError):
+    """The local face-tracking backend could not be built (e.g. model file missing).
+
+    This is a setup problem on this computer, not a bad request from the page.
+    """
+
+
 class MouthCapture:
     def __init__(self, data_root=None, tracker_factory=None):
         self.root = os.path.expanduser(data_root or DEFAULT_ROOT)
@@ -52,10 +59,16 @@ class MouthCapture:
     def _ensure_tracker(self):
         if self._tracker is None:
             factory = self._tracker_factory
-            if factory is None:
-                from lipflow.face import FaceTracker
-                factory = FaceTracker
-            self._tracker = factory()
+            try:
+                if factory is None:
+                    from lipflow.face import FaceTracker
+                    factory = FaceTracker
+                self._tracker = factory()
+            except Exception as error:
+                raise TrackerUnavailable(
+                    "Face tracking is not available on this computer, so lip clips cannot be "
+                    f"recorded ({error}). Check the local face model with `uv run lipflow doctor`."
+                ) from error
         return self._tracker
 
     def preview(self):
