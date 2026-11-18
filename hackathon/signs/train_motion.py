@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Train and evaluate the personal motion-v2 dynamic gesture model.
 
-Fits MotionModel on the train split of ~/.local/share/quietbridge/sequences
-(session prefix peter-motion-v2-), calibrates thresholds with
+Fits MotionModel on the train split of a sequences directory (by default every
+recorded session; --session-prefix narrows it), calibrates thresholds with
 leave-one-trial-out on train only, then evaluates once on the held-out
 test split. The test split is never used for tuning.
 
@@ -34,7 +34,7 @@ from hackathon.signs.motion import (  # noqa: E402
 
 DEFAULT_DATA = "~/.local/share/quietbridge/sequences"
 DEFAULT_OUTPUT = "~/.cache/quietbridge/motion_v2.npz"
-SESSION_PREFIX = "peter-motion-v2-"
+SESSION_PREFIX = ""
 SCORE_GATE = 0.75
 
 
@@ -102,7 +102,7 @@ def main(argv=None):
     parser.add_argument("--output", default=DEFAULT_OUTPUT,
                         help="candidate NPZ path (report goes to <name>.report.json)")
     parser.add_argument("--session-prefix", default=SESSION_PREFIX,
-                        help="only this session prefix; pass '' for a profile's custom sessions")
+                        help="only sessions whose id starts with this prefix; default uses every session")
     parser.add_argument("--allow-legacy-no-validation", action="store_true",
                         help="reproduce old data without an independent validation session")
     parser.add_argument("--overwrite", action="store_true",

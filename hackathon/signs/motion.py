@@ -31,7 +31,6 @@ from pathlib import Path
 
 import numpy as np
 
-SUPPORTED_LABELS = ("HELLO", "WELCOME", "OPENAI", "DDE", "HACKATHON", "REST")
 REST_LABEL = "REST"
 N_FRAMES = 32
 N_HANDS = 2
@@ -51,7 +50,7 @@ class MotionModelError(ValueError):
 # Trial loading / validation
 # ---------------------------------------------------------------------------
 
-def load_trials(data_dir, split, session_prefix="peter-motion-v2-"):
+def load_trials(data_dir, split, session_prefix=""):
     """Load trials of one split whose session_id starts with session_prefix."""
     split_dir = Path(data_dir).expanduser() / split
     trials = []

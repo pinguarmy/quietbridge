@@ -1,6 +1,6 @@
-"""Standalone loopback lab server for recording raw DDE gesture sequences.
+"""Standalone loopback lab server for recording raw gesture sequences.
 
-Independent from Sam's runtime: serves ``lab.html`` and a small JSON/JPEG API
+Independent from the main runtime: serves ``lab.html`` and a small JSON/JPEG API
 on 127.0.0.1 only, records raw MediaPipe hand landmarks (both hands, no
 normalization) into local ``.npz`` sequence files. Nothing is uploaded and no
 images or video are stored unless explicitly consented for paired video capture.
@@ -73,7 +73,7 @@ class Engine:
     without the native dependency. Raw top-1 labels come straight from the
     classifier; confirmed events reuse the existing EventStabilizer gate and
     the recognizer's conservative ``_pick_label`` reducer, so an unsupported
-    pose like DDE is never reported as a recognized sign.
+    pose is never reported as a recognized sign.
     """
 
     def __init__(self, model_path=None):
@@ -318,6 +318,9 @@ def _append_frame(server: _LabServer, rec: _Recording, result: FrameResult, time
 class _Handler(BaseHTTPRequestHandler):
     server: _LabServer
     protocol_version = "HTTP/1.1"
+    # Headers and body are separate writes; Nagle plus delayed ACK would stall
+    # each keep-alive response for ~40 ms.
+    disable_nagle_algorithm = True
 
     # -- helpers ---------------------------------------------------------
 
