@@ -1,3 +1,7 @@
+import os
+
+import pytest
+
 from lipflow.cleanup import basic_cleanup, numbers_to_digits, _user_prompt
 
 
@@ -58,7 +62,11 @@ def test_practice_sentences_fall_back_to_harvard(tmp_path, monkeypatch):
 
 
 def test_training_targets_drop_punctuation():
+    from lipflow.train_lm import SPM
     from lipflow.train_vsr import _targets
+
+    if not os.path.exists(SPM):
+        pytest.skip(f"needs the SentencePiece model {SPM}; download models with ./setup.sh (or setup.ps1)")
 
     class R:
         token_list = ["<blank>"] + [l.split()[0] for l in open("lipflow/unigram5000_units.txt", encoding="utf-8").read().splitlines()] + ["<eos>"]

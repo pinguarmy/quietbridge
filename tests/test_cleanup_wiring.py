@@ -34,6 +34,19 @@ def test_explicit_backend_and_style_beat_settings(monkeypatch):
 
 # -- CLI ------------------------------------------------------------------------
 
+
+def _require_cli_hotkey_backend():
+    """lipflow.__main__.main() imports the platform hotkey module before dispatching run/file:
+    lipflow/win/hotkey.py (pynput) on Windows, lipflow/hotkey.py (macOS Quartz) elsewhere."""
+    if sys.platform == "win32":
+        return
+    try:
+        import Quartz  # noqa: F401
+    except ImportError as e:
+        pytest.skip("lipflow CLI run/file import lipflow/hotkey.py, which needs macOS Quartz "
+                    f"(pyobjc-framework-quartz): {e}")
+
+
 def _capture_app(monkeypatch):
     captured = {}
 
@@ -46,6 +59,7 @@ def _capture_app(monkeypatch):
 
 
 def test_cli_run_passes_cleanup_and_style(monkeypatch):
+    _require_cli_hotkey_backend()
     captured = _capture_app(monkeypatch)
     main(["run", "--cleanup", "gemini", "--cleanup-style", "polish"])
     assert captured["backend"] == "gemini"
@@ -53,6 +67,7 @@ def test_cli_run_passes_cleanup_and_style(monkeypatch):
 
 
 def test_cli_run_defaults_leave_cleanup_to_settings(monkeypatch):
+    _require_cli_hotkey_backend()
     captured = _capture_app(monkeypatch)
     main([])
     assert captured["backend"] == "auto"
@@ -60,6 +75,7 @@ def test_cli_run_defaults_leave_cleanup_to_settings(monkeypatch):
 
 
 def test_cli_file_passes_cleanup_style(monkeypatch, capsys):
+    _require_cli_hotkey_backend()
     made = {}
 
     class FakeCleaner:

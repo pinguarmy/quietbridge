@@ -1,5 +1,13 @@
-"""Push-to-talk timing (shared by macOS and Windows) and the Windows key mapping. Runs everywhere."""
-from pynput.keyboard import Key, KeyCode
+"""Push-to-talk timing (shared by macOS and Windows) and the Windows key mapping.
+
+Runs wherever pynput can load a keyboard backend (macOS, Windows, Linux with an X display)."""
+import pytest
+
+try:
+    from pynput.keyboard import Key, KeyCode
+except ImportError as e:  # e.g. headless Linux: pynput's Xorg backend needs a DISPLAY
+    pytest.skip(f"pynput cannot load a keyboard backend on this host (no display?): {e}",
+                allow_module_level=True)
 
 from lipflow.ptt import DOUBLE_TAP, TAP_MAX, PushToTalkState
 

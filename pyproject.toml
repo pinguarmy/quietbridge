@@ -1,7 +1,7 @@
 [project]
 name = "lipflow"
 version = "0.1.0"
-description = "Wispr Flow, but for your lips: silent dictation from your webcam (macOS and Windows)"
+description = "QuietBridge: local-first assistive communication. Silent lip movements, sign concepts and personal gestures become reviewable text, then local speech. Includes the original Lipflow silent-dictation app."
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "anthropic>=0.40",
@@ -17,7 +17,7 @@ dependencies = [
     "pyobjc-framework-cocoa>=10.3; sys_platform == 'darwin'",
     "pyobjc-framework-quartz>=10.3; sys_platform == 'darwin'",
     "requests>=2.31",
-    "pyyaml>=6",  # existing DSH CPA credential reference (runtime read-only)
+    "pyyaml>=6",  # lipflow/cloud.py: optional read-only CPA key lookup in ~/.dsh/.credentials.yaml (legacy Lipflow cleanup)
     "sentencepiece>=0.2.2",
     "sounddevice>=0.5.6",
     "torch>=2.4",
@@ -25,13 +25,16 @@ dependencies = [
 
 [project.scripts]
 lipflow = "lipflow.__main__:main"
+quietbridge = "hackathon.server:main"  # same as `python -m hackathon.server`
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["lipflow", "espnet"]
+# Hatchling ships every non-ignored file under these directories, including
+# hackathon/ui/*, hackathon/vocabulary.json, hackathon/signs/lab.html and labels.json.
+packages = ["lipflow", "espnet", "hackathon"]
 
 [dependency-groups]
 dev = [
