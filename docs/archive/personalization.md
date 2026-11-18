@@ -1,3 +1,5 @@
+> **Historical (archived 2026-11-18).** Chinese guide to one person's legacy Lipflow personalization setup (cloud cleanup endpoint, Right Option key); superseded by the [original Lipflow guide](../lipflow-legacy.md). QuietBridge personalization is described in [using QuietBridge](../using-quietbridge.md).
+
 # Lipflow 极速个性化与唇动输入使用指南 (Personalization Guide)
 
 这个版本保留输入法的按键与光标输入方式，把声音换成摄像头口型输入。先定制词库、录制口型并训练，再用真实样本调优。

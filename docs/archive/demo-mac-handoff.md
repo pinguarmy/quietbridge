@@ -1,3 +1,5 @@
+> **Historical (archived 2026-11-18).** Hackathon demo-machine handoff with fixed demo phrases and hold-to-record; superseded by the [README quick start](../../README.md#quick-start) and [using QuietBridge](../using-quietbridge.md). Not current instructions.
+
 # QuietBridge demo Mac handoff
 
 **Deployment clarification:** Sam now describes the camera on Peter's computer

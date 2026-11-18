@@ -1,3 +1,5 @@
+> **Historical (archived 2026-11-18).** Dated design briefs (2026-11-03/04) and an earlier native Lipflow brief; superseded by the current UI in `hackathon/ui/` and the [review protocol](../review-protocol.md). Not a current specification.
+
 # QuietBridge web interface, 2026-11-03
 
 A quiet communication desk. The message is the focal point, with one clear capture action and explicit speech confirmation.

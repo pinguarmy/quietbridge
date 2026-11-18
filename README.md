@@ -2,197 +2,80 @@
 
 **Lips, sign concepts and personal gestures, turned into a voice.** A local-first communication tool under active development.
 
-One webcam feeds silent lip reading and either stock poses, a personal gesture model or an explicitly installed isolated-sign video model. The person reviews the proposed text and presses **Speak** for on-device speech. Standard sign-language support is part of the product direction. The experimental BSL backend is word-level recognition, not full sentence translation or validated daily-use BSL support.
+QuietBridge lets a person build a message by typing, by silently mouthing English words to a webcam, or with a small set of hand gestures, review the proposed text, and then choose to speak it with the computer's own on-device voice. One webcam feeds silent lip reading and either stock poses, a personal gesture model or an explicitly installed isolated-sign video model. Nothing is spoken until the person presses **Speak**. Standard sign-language support is part of the product direction. The experimental BSL backend is word-level recognition, not full sentence translation or validated daily-use BSL support.
 
-## Product workflow
+**Status, honestly:** the software paths below have automated contract tests. **Nothing has been validated with real users yet**, recognition accuracy on new users' sessions has not been measured, and audible speech on real hardware has not been checked in this round. The earlier model-review 10/10 ratings are not whole-product quality measurements; see [the revised review method and evidence](docs/review-protocol.md). Real-user effectiveness, independent-session recognition, physical camera/speech behavior and rights remain separate requirements.
 
-Each profile has isolated configuration and data under `~/.local/share/quietbridge/profiles/<id>/`:
+## What works today, and what does not
 
-```text
-profile.json                 Custom concepts, instructions and lip prompts
-sequences/{train,validation,test}/   Hand landmarks
-mouths/{train,validation,test}/      Labelled mouth crops
-models/                      Explicitly selected model candidates
-```
+| Capability | State | Limits |
+| --- | --- | --- |
+| Type → review → speak | Works without camera, models or training | Covered by browser contract tests with a silent speech recorder. Audible output not verified on real hardware this round. |
+| Lip reading (Auto-AVSR, reused from `lipflow/`) | Ranked English text candidates from aligned mouth crops; optional personal visual/language candidates | Silent mouthing is ambiguous. Decoder scores are not calibrated probabilities. No new-user accuracy measurement. |
+| Stock poses (MediaPipe gesture model) | Four mapped poses: thumb up, thumb down, open palm, pointing up | Not a BSL/ASL vocabulary or fingerspelling. Mappings are not live-verified, so their phrases need confirmation. |
+| Personal gesture model | You record sessions and train a candidate; one accepted movement per explicit recording window; REST and rejected motions stay silent | Hand landmarks only. Effectiveness for a real user not measured. |
+| Isolated BSL sign windows (experimental) | An external BSL-1K I3D bundle that **you** install can propose one sign concept per window alongside lips | Engineering smoke test only. No trained REST/unknown class. Always requires confirmation. You must check the weights' rights yourself. |
+| Continuous BSL/ASL sentence translation | **Not supported** | Sign languages have their own grammar; a list of gesture names is not translation. No ASL model has been integrated. |
+| Validation with real users | **None yet** | See [review protocol](docs/review-protocol.md#participant-availability-2026-11-08). |
 
-Choose **Personalize** in the main app to create a profile, customize gestures and prompts, and record independent sessions. The main app opens its own local recording page on demand; no second command or fixed port is required. Camera tracking loads only after an explicit recording action. Rehearsal permits profile editing but does not permit camera capture.
+The [recognition audit](docs/recognition-audit.md) has the detailed capability table and evidence links.
 
-You can still run the recording lab separately:
+## Platform support
 
-```sh
-uv run python -m hackathon.signs.lab
-```
+QuietBridge is a Python 3.11/3.12 loopback web app (`127.0.0.1`) used from a desktop browser. On-device speech uses whatever the operating system provides:
 
-Open <http://127.0.0.1:8766>, or choose **Personalize** in the main app. New profiles begin with **Choose phrases**, then **Practice**, **Check on another occasion**, **Final check** and **Activate**. These remain separate train, validation and test recording sessions. Gesture details expand individually; internal labels and sentence templates stay under Advanced. Capture statistics and session IDs are optional details. The model page shows one training action for the selected model type and preserves explicit activation and rollback.
+| Platform | Speech backend | Automated checks in this repository |
+| --- | --- | --- |
+| Windows | Windows PowerShell (or `pwsh`) with `System.Speech` | [windows.yml](.github/workflows/windows.yml): full setup with models, Python suite, Node UI and Chrome browser contracts, a real sample-clip lip read |
+| Linux | `espeak-ng`, `espeak` or Speech Dispatcher's `spd-say`, whichever is installed first (for example `sudo apt install espeak-ng`) | [linux.yml](.github/workflows/linux.yml): headless Python suite without models, Node UI and Chrome browser contracts |
+| macOS | The built-in `say` | No macOS CI job. The original Lipflow app targets Apple Silicon Macs ([legacy guide](docs/lipflow-legacy.md)). |
 
-The browser targets 25 fps and displays the actual received rate; resampling does not recover lost frames. Personalize asks before saving local training samples, and separately asks before each full-frame sign-video trial. Saving or discarding a trial turns the camera off. Leaving with an active trial warns first; the page then attempts an authenticated discard and releases browser tracks. Exit delivery is best effort, not a guarantee after an abrupt browser termination.
+Without a speech backend the page says so; you can still use **Show large** or **Copy message**. None of these backends has been checked for audible output on real hardware in this round. Camera recognition and audible speech are not exercised by any CI job.
 
-## Run the main app
+## Quick start
 
-```sh
-uv sync --frozen
-uv run python -m hackathon.assets --download
-uv run python -m hackathon.signs.assets --download
-uv run python -m hackathon.server --browser-camera
-```
-
-Open <http://127.0.0.1:8765>. Stock models and gestures remain the default. Select a profile explicitly:
+Install [uv](https://docs.astral.sh/uv/), clone this repository, then from the checkout:
 
 ```sh
-uv run python -m hackathon.server --browser-camera --profile alice
+uv sync --frozen                                   # Python dependencies (large: includes PyTorch)
+uv run python -m hackathon.assets --download       # lip-reading and face models, ~1.2 GB (LRS3: non-commercial research use)
+uv run python -m hackathon.signs.assets --download # stock MediaPipe gesture model
+uv run quietbridge --browser-camera --open         # serves http://127.0.0.1:8765 and opens it
 ```
 
-If `alice` has a promoted `models/motion.npz`, the app uses its custom vocabulary and dynamic recognizer. Otherwise it keeps compatible stock gestures and shows a setup warning. Start the camera, then choose **Start lips + gesture recording** for one custom motion and its words. Choose **Finish recording** to decode the shared window. The button is a toggle, so there is no sustained hold requirement; Space from the page background also toggles capture. **Finish message** stops the camera for final review. REST, rejected and cancelled windows emit nothing. Pure lip input and stock gestures retain automatic capture.
+The two downloads are needed only for camera input: without them the server still starts, typing works and lip reading is reported as unavailable. `quietbridge` is the same as `python -m hackathon.server`; `uv run quietbridge --help` lists every option. Without `--open`, visit <http://127.0.0.1:8765> yourself. To look at the page with synthetic inputs and no camera or model loading, run `uv run quietbridge --rehearsal`; rehearsal does not validate recognition. Stock models and gestures are the default; select a profile explicitly with `--profile alice`.
 
-The communication page separates capture, review and speech. Its short first-use guide can be skipped and reopened. Typing is visible without a camera or training, and a skip link goes straight to it. Use this message applies the words without speaking or learning automatically. Unfinished edits stay in this tab through Settings/Personalize navigation and new recognition results; they are cleared when applied or deliberately discarded with New message. Speak is disabled while an edit is unapplied. Message and camera order stays fixed at every screen size, with message first in both visual and keyboard order. The main page names the active backend and enabled concepts. Mouth framing is optional.
+## Using the page
 
-The page tracks the running server's identity separately from a message revision. After a server restart it stops browser capture, accepts the fresh session and preserves unfinished typing for review. Message actions have a 15-second deadline and are never automatically retried, because a timed-out action may already have committed. The next poll can still show fresh state while an action is pending. New message only clears edits that existed when it was confirmed, not words typed while waiting.
+- **Type first if you like.** Typing is visible without a camera or training, and a skip link goes straight to it. The short first-use guide can be skipped and reopened.
+- **Use this message** applies typed or edited words without speaking or learning automatically. **Ctrl+Enter** (**Cmd+Enter** on a Mac) in the text box does the same; it never speaks. **Speak** is disabled while an edit is unapplied.
+- **Speak** sends the applied message to on-device speech; **Stop speaking** interrupts it. Conflicts and uncertain inputs require you to choose or confirm first. UNKNOWN input never becomes a sentence.
+- **Show large** displays the applied message full-screen so you can turn the screen toward someone. **Copy message** copies it. **New message** clears only the edits that existed when you confirmed it.
+- **Camera input is optional.** Start the camera, then choose **Start lips + gesture recording** and **Finish recording** for one window. The button is a toggle, so there is no sustained hold; Space from the page background also toggles capture. **Finish message** stops the camera for final review. In browser-camera mode the preview is the browser's own local video; frames are also uploaded to the loopback server, for recognition only.
+- **Unfinished edits survive** Settings/Personalize navigation and new recognition results in the same tab.
+- **Settings** shows the active profile and models, supported concepts, frame rate, gaps and latency. **Personalize** opens the local recording page on demand.
+- The page follows the operating system's light or dark setting. Message and camera order stays fixed at every screen size, message first.
 
-The earlier model-review 10/10 ratings are not whole-product quality measurements. See [the revised review method and evidence](docs/review-protocol.md). Real-user effectiveness, independent-session recognition, physical camera/speech behavior and rights remain separate requirements.
+Details, including recording windows, profiles, model reloads, corrections and the fusion safety rules, are in [Using QuietBridge](docs/using-quietbridge.md).
 
-Automatic motion segmentation is available as an opt-in experiment with `QUIETBRIDGE_MOTION_AUTO=1`. It detects movement/rest windows without the Record button. Its thresholds are engineering defaults, not calibrated user-specific probabilities; validate false triggers and missed motions before choosing it for regular use.
+## Documentation
 
-During a camera session, lip activity starts a chunk, about 700 ms of low activity ends it, and a bounded in-memory pre-roll retains the preceding 300 ms. Chunks accumulate into a session until you stop the camera. Review alternatives replace one window at a time and retain the selected text from every other window; the app does not build every possible cross-window combination. These geometric thresholds are segmentation hints, not speech confidence, and still need real-user validation.
+| Read this | For |
+| --- | --- |
+| [Using QuietBridge](docs/using-quietbridge.md) | Profiles, Personalize, recording windows, explicit models, corrections, fusion and safety rules |
+| [Standard signs with lips](docs/standard-signs.md) | Running and recording with an explicit isolated-sign bundle |
+| [Standard-sign support and evidence](docs/sign-language-support.md) | BSL-1K export, sources, rights checks and what was actually run |
+| [Training and evaluation](docs/training-and-evaluation.md) | Training motion, lip and language-model candidates; paired fusion evaluation |
+| [Verification](docs/verification.md) | Test commands, CI, and what each does and does not prove |
+| [Review protocol](docs/review-protocol.md) | How the product is reviewed; current evidence and gaps |
+| [Recognition audit](docs/recognition-audit.md) | Capabilities, fixed defects and what would establish an accuracy gain |
+| [hackathon/README.md](hackathon/README.md) | Developer notes: contracts and runtime invariants |
+| [docs/README.md](docs/README.md) | Index of all docs, including archived history |
 
-An explicit personal lip candidate and language model can be selected without replacing the legacy Lipflow defaults:
+## References, licensing and privacy
 
-```sh
-uv run python -m hackathon.server --browser-camera --profile alice \
-  --lip-model /absolute/path/to/lip-candidate.pth \
-  --lip-language-model /absolute/path/to/language-candidate.pth
-```
-
-The main app loads promoted `models/motion.npz`, `models/lip.pth` and `models/lm.pth` from the selected profile at startup or profile reload. Saving a model in Personalize does not change a recognizer already in memory. Stop the camera, open Settings and choose **Reload current models**. Reload clears the draft and preserves explicit command-line overrides. Wait for model readiness before starting another recording. Settings shows the active profile, separate visual/language model identities, actual frame rate, frame gaps and latency. The main recording limit defaults to 30 seconds and can be changed with `--max-utterance-seconds`.
-
-You can edit an incorrect message before speaking. Applying a correction never speaks automatically. Only an explicit learning choice stores it in that profile's local `corrections.jsonl`; otherwise it remains an in-memory correction. Future language-model candidates include those approved corrected texts in training and report their count. Known validation/test sources and contradictory source metadata are excluded from correction learning, including historical records. Training reports source coverage, excluded records and source session/trial IDs. Consented day-to-day corrections without a recording source remain usable, but are marked as unknown provenance. This is not proof of evaluation independence; do not learn from a held-out session.
-
-## Standard sign language with lips
-
-The main runtime now accepts an explicit local sign-video bundle:
-
-```sh
-uv run python -m hackathon.server --browser-camera \
-  --sign-model /absolute/path/to/bsl-bundle/manifest.json
-```
-
-This replaces the stock/personal hand classifier, not the lip reader. Start the camera, choose Start recording for **one sign and its words**, choose Finish recording, then finish the message and review. Both workers share the window. Only enabled class mappings can contribute a sign concept; low scores, unmapped classes, short capture, large gaps and overflow stay silent. This classifier has no trained REST/unknown class, so thresholds alone cannot guarantee safe rejection of arbitrary movements. All standard-sign output requires confirmation.
-
-The BSL-1K exporter consumes an externally installed upstream source, checkpoint and its exact class-ordered JSON labels. It does not download, bundle or license them. See [standard-sign setup, sources and validation limits](docs/sign-language-support.md) before exporting. Explicit model load failure is visible; it never falls back to stock and calls that BSL. ASL is an allowed manifest language, but no ASL pretrained model was integrated or verified in this round.
-
-### Record and compare standard signs with lips
-
-Start the local recording lab with the **same trusted bundle**:
-
-```sh
-uv run python -m hackathon.signs.lab \
-  --sign-model /absolute/path/to/bsl-bundle/manifest.json
-```
-
-In **Paired**, choose **Standard sign + lips · local video**. Select an enabled sign, REST or unrelated movement and an intended sentence from your profile. Add suitable sentences in Choose phrases first; do not pair `apple` with an unrelated welcome prompt. Each trial requires explicit video consent before opening the camera. It saves local 256-square BGR frames containing face, upper body and hands, linked to the original hand coordinates and mouth crops. The default personal-gesture mode still saves no full-frame video. Finish within 240 frames / 10 seconds; overflow cannot be saved as a truncated trial. Discard writes no recording.
-
-Use separate recording occasions for practice, validation and final test. Then compare lips-only, signs-only and fusion on the same video pairs:
-
-```sh
-uv run python -m hackathon.evaluate_fusion \
-  --profile alice --split validation \
-  --sign-model /absolute/path/to/bsl-bundle/manifest.json \
-  --output /absolute/path/to/new-sign-comparison.json
-```
-
-Reports include WER/exact text, sign recall, REST/unknown false emissions, actual capture timing, inference-only sign timing and captured/current model identities. They reject missing consent, malformed video and known cross-split ID reuse. Personal and standard-sign pairs stay separate; standard-sign recordings never enter the personal motion trainer. This does not fine-tune BSL weights, promote a model or establish accuracy without independent labelled recordings. See [the implementation and smoke-test limits](docs/sign-language-support.md#consented-paired-capture-and-replay-2026-11-04).
-
-## Train and evaluate candidates
-
-The recording lab collects data; it does not silently deploy a model. Train a motion candidate from custom profile sessions:
-
-```sh
-uv run python -m hackathon.signs.train_motion \
-  --data "$HOME/.local/share/quietbridge/profiles/alice/sequences" \
-  --session-prefix "" \
-  --output "$HOME/.local/share/quietbridge/profiles/alice/models/motion.candidate.npz"
-```
-
-The trainer fits on train, calibrates acceptance thresholds on independent validation, then evaluates final test once. Per-label thresholds fall back to train leave-one-out rules when validation coverage is insufficient. The report separates positive recall, REST silence and wrong labels and includes per-trial rejection diagnostics. Review validation and final test before promoting a candidate to `models/motion.npz`. The old `--allow-legacy-no-validation` exists only to reproduce historical data.
-
-Train a lip candidate using the same beam width as the main app:
-
-```sh
-uv run python -m hackathon.signs.train_lips \
-  --data "$HOME/.local/share/quietbridge/profiles/alice/mouths" \
-  --output "$HOME/.local/share/quietbridge/profiles/alice/models/lip.candidate.pth" \
-  --beam 4
-```
-
-Training requires an independent `validation/` session. Selection rejects overall WER regression, target-prompt regression and increased contrast false welcomes. Existing candidates are not automatically promoted.
-
-Train a personal language-model candidate from the same profile's independent text sessions:
-
-```sh
-uv run python -m hackathon.signs.train_language \
-  --data "$HOME/.local/share/quietbridge/profiles/alice/mouths" \
-  --output "$HOME/.local/share/quietbridge/profiles/alice/models/lm.candidate.pth"
-```
-
-The language report records held-out and general-English perplexity. A candidate is saved only when validation improves without excessive general regression. Review the report before selecting it with `--lip-language-model`; no candidate is deployed automatically.
-
-Perplexity alone does not establish recognition quality. Compare the same VSR and test ROIs with stock versus personal language models:
-
-```sh
-uv run python -m hackathon.evaluate_language \
-  --data "$HOME/.local/share/quietbridge/profiles/alice/mouths" \
-  --candidate "$HOME/.local/share/quietbridge/profiles/alice/models/lm.candidate.pth" \
-  --output "$HOME/.local/share/quietbridge/profiles/alice/models/lm-comparison.json"
-```
-
-The comparison is diagnostic, uses beam4 and never promotes a candidate. Language promotion requires valid finite, nonnegative error rates and matching candidate/visual SHA-256 identities. Changing either model invalidates the old comparison. Evaluate again to save a new report without overwriting the old one; unchanged reports can be reused.
-
-## Paired fusion evaluation
-
-Use the recording lab's **Paired** mode to capture the same expression as aligned mouth crops and hand landmarks. Both files share a `pair_id`, profile, session and split, while retaining independent trial IDs. Ordinary single-modality recordings can remain in the same profile directories.
-
-After promoting the models to evaluate, run the same paired samples through both paths:
-
-```sh
-uv run python -m hackathon.evaluate_fusion \
-  --profile alice --split test \
-  --output "$HOME/.local/share/quietbridge/profiles/alice/models/fusion-diagnostic.json"
-```
-
-The report compares lips-only, gestures-only and fusion WER and exact intent. It also reports gesture positive recall, wrong labels, and REST/unknown false emissions with their denominators. Missing negative samples produce null rates, not claims of zero false triggers. A gesture may supply only one slot, so its standalone text can be shorter than the full reference. Default models follow the profile's promoted paths, with SHA-256 identities; explicit flags override them. The output remains diagnostic. It neither proves that the model never saw test data nor measures live accuracy or response time.
-
-See the [recognition audit and cooperation plan](docs/recognition-audit.md) for supported sign input, fixed fusion defects and remaining evaluation limits.
-
-For capture-only checks, `uv run python -m hackathon.signs.capture_analysis <mouth.npz>` reports actual fps, frame gaps, face coverage and mouth-activity edges. Older recordings without activity metadata report those fields as null.
-
-## Fusion and safety
-
-- Lip candidates retain decoder scores and capture timing; scores are not calibrated probabilities.
-- Gesture agreement can rerank candidates. Partial agreement remains reviewable.
-- An optional profile `intent_template`, such as `I want {gesture}`, fills a concept only when the lip candidate exactly matches the declared static context. Unknown words and conflicting gestures are not erased.
-- Supported gesture-only sequences compose in time order. Unknown input never contributes text.
-- Combined decoding waits for the current dynamic-gesture result. Cancellation invalidates late work from either worker.
-- Text and local speech work offline. Optional API formatting stays asynchronous and revision-bound. It can normalize spacing or add a final period, not replace words or translate sign grammar. Suggestions are separate choices; errors preserve local text, and changing AI settings removes unselected suggestions.
-
-## Verification
-
-```sh
-uv run pytest
-node --check hackathon/ui/app.js
-node --test hackathon/tests/test_ui_flow.cjs hackathon/tests/test_cleanup_settings_ui.cjs hackathon/signs/tests/test_lab_*.cjs
-# Requires Node 24 and an installed Chrome/Chromium; no new npm package.
-node scripts/check_web.mjs
-node scripts/check_web.mjs --calibrate
-node scripts/check_web.mjs --keyboard-profile
-```
-
-The browser checks launch their own headless Chrome, temporary profile and loopback rehearsal server. They use real DOM, native dialogs, selected keyboard events and real HTTP, with a silent speech recorder instead of audio. No physical camera, model workers or provider calls start. `CHROME_BIN` and `PYTHON_BIN` can select installed executables; on Windows use `.venv/Scripts/python.exe`. Each run logs source/served-script hashes and verifies the browser-loaded script. Calibration reruns the same assertions against known behavioral faults and must reject each at its designated check. This tests the suite's ability to catch those faults, not blind-reviewer skill or human usability. `--keyboard-profile` checks typed apply, explicit silent dispatch and draft navigation with CDP keyboard/text input and no DOM focus/click, then separately checks profile draft isolation with DOM-dispatched controls. It is not a full keyboard/capture, screen-reader or real-zoom test. See [the review protocol](docs/review-protocol.md).
-
-Synthetic checks and fake backends establish integration behavior, not live recognition accuracy. Real use still requires new-session camera trials, paired lips/gesture evaluation, REST/unknown false-trigger measurements and audible speech checks. Do not tune on the final-test session.
-
-## References and licensing
-
-- The [original Lipflow guide](docs/lipflow-legacy.md) preserves the base application and historical benchmarks.
+- The [original Lipflow guide](docs/lipflow-legacy.md) preserves the base application and historical benchmarks. The `lipflow` package and command remain in this repository.
 - Based on [amywork777/lipflow](https://github.com/amywork777/lipflow), retained as the `upstream` remote.
-- See [LICENSE](LICENSE) and [NOTICE](NOTICE) for attribution and model restrictions. Treat LRS3 weights as non-commercial research use.
+- See [LICENSE](LICENSE) and [NOTICE](NOTICE) for attribution and model restrictions. Treat LRS3 weights as non-commercial research use. External sign-model weights are not downloaded, bundled or licensed by this repository.
 
-This repository is private. Do not commit keys, models, profile settings or personal recordings.
+This repository is private. Do not commit keys, models, profile settings or personal recordings. Obtain consent before sharing samples.

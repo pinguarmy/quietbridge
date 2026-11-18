@@ -5,6 +5,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: windows-latest
@@ -33,6 +40,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - name: UI script syntax
+        run: node --check hackathon/ui/app.js
+      - name: Node UI contract tests
+        # pwsh passes the quoted glob through unchanged; Node 24 expands it itself.
+        shell: pwsh
+        run: node --test hackathon/tests/test_ui_flow.cjs hackathon/tests/test_cleanup_settings_ui.cjs "hackathon/signs/tests/test_lab_*.cjs"
       - name: Browser contracts and deliberate-fault sensitivity (silent rehearsal)
         shell: pwsh
         run: |

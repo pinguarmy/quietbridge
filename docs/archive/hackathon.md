@@ -1,3 +1,5 @@
+> **Historical (archived 2026-11-18).** Six-hour hackathon sprint plan; superseded by the [README](../../README.md) and [review protocol](../review-protocol.md). Not current instructions.
+
 # QuietBridge: six-hour sprint plan
 
 Adapted from the team's *LipFlow 6 Hour Hackathon Team Brief*. The project is now QuietBridge. This is a plan, not a report of completed features.

@@ -1,3 +1,5 @@
+> **Historical (archived 2026-11-18).** Chinese notes for one person's legacy Lipflow personalization session; superseded by the [original Lipflow guide](../lipflow-legacy.md). Not QuietBridge instructions.
+
 # 一次完成定制、训练和调优
 
 ## 已选体验

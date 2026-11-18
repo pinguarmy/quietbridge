@@ -33,7 +33,7 @@ The default model is `gemini-3.8-flash`; the endpoint/model are configurable. Cr
 come from the existing CPA environment or DSH credential reference, not from the settings
 file. No new Google API key or installation is needed.
 
-See [the one-session personalization guide](personalization.md) for vocabulary,
+See [the one-session personalization guide](archive/personalization.md) (historical, in Chinese) for vocabulary,
 phrase customization, recording, face training, and tuning. The face recordings still
 require your participation; text-only tests do not establish your personal lip-reading accuracy.
 
@@ -215,7 +215,8 @@ uv run pytest             # the paste test is opt-in: LIPFLOW_TEST_PASTE=1
 ```
 
 On Windows: `setup.ps1 -Samples`, then `uv run pytest`. CI runs the whole Windows setup and reads
-a real clip on every push (`.github/workflows/windows.yml`).
+a real clip on every push (`.github/workflows/windows.yml`). A headless Linux workflow (`.github/workflows/linux.yml`) runs the suite without models;
+see [Verification](verification.md).
 
 Code map: `lipflow/face.py` (landmarks → mouth crops), `vsr.py` (model), `camera.py`, `hotkey.py`
 (Quartz event tap; pynput's macOS listener crashes on recent macOS), `paste.py`, `hud.py`,

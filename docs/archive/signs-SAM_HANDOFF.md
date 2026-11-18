@@ -1,3 +1,5 @@
+> **Historical (archived 2026-11-18).** Hackathon demo handoff, 1 November 2026; superseded by the [README](../../README.md) and [docs index](../README.md). Not current instructions.
+
 # Current demo handoff — 1 November 2026
 
 ## Source and running state

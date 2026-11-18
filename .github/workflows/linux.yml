@@ -1,0 +1,60 @@
+name: linux
+
+# Headless Linux checks. No camera, no models, no audible speech: this workflow checks
+# software contracts only, never recognition accuracy or real-user effectiveness.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # Fast checks first, before the large Python install, so UI breakage fails early.
+      - name: UI script syntax
+        run: node --check hackathon/ui/app.js
+      - name: Node UI contract tests
+        # The glob is quoted so Node expands it itself, as on Windows.
+        run: node --test hackathon/tests/test_ui_flow.cjs hackathon/tests/test_cleanup_settings_ui.cjs "hackathon/signs/tests/test_lab_*.cjs"
+
+      # The locked Linux torch wheel pulls the CUDA libraries (about 3 GB). They are
+      # downloaded on each run rather than cached: setup-uv prunes prebuilt wheels from its
+      # cache, and keeping them would use most of the repository's Actions cache quota.
+      # Models and sample clips are not downloaded; tests that need them skip with a reason.
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install locked dependencies
+        run: uv sync --frozen
+      - name: Product entry point
+        run: uv run quietbridge --help
+
+      - name: Browser contracts and deliberate-fault sensitivity (silent rehearsal)
+        run: |
+          CHROME_BIN="$(command -v google-chrome || command -v google-chrome-stable || true)"
+          if [ -z "$CHROME_BIN" ]; then echo "Chrome missing; browser contracts were not checked" >&2; exit 1; fi
+          export CHROME_BIN
+          export PYTHON_BIN="$PWD/.venv/bin/python"
+          "$CHROME_BIN" --version
+          node scripts/check_web.mjs
+          node scripts/check_web.mjs --calibrate
+          node scripts/check_web.mjs --keyboard-profile
+
+      - name: Tests (headless; platform-, display- and model-dependent tests skip with reasons)
+        run: uv run pytest -q -rs

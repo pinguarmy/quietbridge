@@ -1,23 +1,23 @@
-# QuietBridge application guide
+# `hackathon/`: QuietBridge application package
 
-QuietBridge is a local-first, per-user communication tool. The main app turns lip movements and supported gestures into reviewable text and local speech. The recording lab handles profile setup, customization and independent data collection.
+Developer notes for the QuietBridge product code. For what QuietBridge is, its status and the quick start, read the [root README](../README.md); for usage, training and checks, see the [documentation index](../docs/README.md). The package name `hackathon` is historical; it is the product package, and it reuses Auto-AVSR and face processing from `lipflow/`.
 
 ## Surfaces
 
 ```sh
-# Main app, browser camera
-uv run python -m hackathon.server --browser-camera
+# Main app, browser camera (same as: uv run python -m hackathon.server --browser-camera)
+uv run quietbridge --browser-camera --open
 
 # Main app with a personal profile and explicit lip candidates
-uv run python -m hackathon.server --browser-camera --profile alice \
+uv run quietbridge --browser-camera --profile alice \
   --lip-model /absolute/path/to/lip-candidate.pth \
   --lip-language-model /absolute/path/to/lm-candidate.pth
 
-# Profile setup and guided recording
+# Profile setup and guided recording (also opened on demand from Personalize)
 uv run python -m hackathon.signs.lab
 ```
 
-Main app: <http://127.0.0.1:8765>. Recording lab: <http://127.0.0.1:8766>. Both bind to loopback. Rehearsal remains available with `--rehearsal`; it uses synthetic input and does not validate recognition.
+Main app: <http://127.0.0.1:8765>. Recording lab: <http://127.0.0.1:8766>. Both bind to loopback. Rehearsal remains available with `--rehearsal`; it uses synthetic input and does not validate recognition. Local speech lives in `speech.py` (macOS `say`, Windows `System.Speech`, Linux `espeak-ng`/`espeak`/`spd-say`).
 
 ## Profiles and data
 
@@ -59,7 +59,7 @@ Custom motion uses `SignRecognizer.start()`, `process()` and `finish()` for one 
 
 ## Training and evaluation
 
-See the root [README](../README.md) for exact motion, visual-lip and language-model candidate commands. Training and evaluation use profile data but do not deploy automatically.
+See [Training and evaluation](../docs/training-and-evaluation.md) for exact motion, visual-lip and language-model candidate commands. Training and evaluation use profile data but do not deploy automatically.
 
 Reports must distinguish positive gesture recall from REST silence, and ordinary lip sentences from named entities or other difficult targets. Preserve raw candidates and per-trial diagnostics. Never tune on final test.
 
@@ -69,6 +69,7 @@ Reports must distinguish positive gesture recall from REST silence, and ordinary
 uv run pytest
 uv run lipflow doctor
 node --check hackathon/ui/app.js
+node --test hackathon/tests/test_ui_flow.cjs hackathon/tests/test_cleanup_settings_ui.cjs "hackathon/signs/tests/test_lab_*.cjs"
 ```
 
-Unit tests, fake backends and loopback HTTP checks establish software behavior only. Real camera quality, live accuracy, long-running false triggers and audible speech require separate on-device acceptance.
+The browser contract checks and what every check does and does not prove are in [Verification](../docs/verification.md). Unit tests, fake backends and loopback HTTP checks establish software behavior only. Real camera quality, live accuracy, long-running false triggers and audible speech require separate on-device acceptance.

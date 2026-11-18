@@ -1,3 +1,5 @@
+> **Historical (archived 2026-11-18).** Hackathon product story and demo pitch; superseded by the [README](../../README.md). Its demo-machine and fixed-phrase plans are not current instructions.
+
 # QuietBridge product story
 
 QuietBridge aims to reduce the effort between wanting to express something and

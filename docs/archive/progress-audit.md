@@ -1,3 +1,5 @@
+> **Historical (archived 2026-11-18).** Hackathon-era progress audit (1 November 2026); superseded by the [recognition audit](../recognition-audit.md) and [review protocol](../review-protocol.md). Not current status.
+
 # QuietBridge progress audit
 
 ## Latest deployment and delivery update

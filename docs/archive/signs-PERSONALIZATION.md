@@ -1,6 +1,8 @@
+> **Historical (archived 2026-11-18).** Hackathon-era personal data and demo status notes, 1 November 2026; superseded by the [README](../../README.md) and [docs index](../README.md). Not current instructions.
+
 # Personal data, model results and remaining demo work
 
-Status: 1 November 2026. The browser-camera/tracking/training baseline was pushed directly to `main` as `f25f571`, with explicit user authorization. Latest automatic-camera and fast-text work is still in progress, **not deployed**. Detailed integration state is in [SAM_HANDOFF.md](SAM_HANDOFF.md).
+Status: 1 November 2026. The browser-camera/tracking/training baseline was pushed directly to `main` as `f25f571`, with explicit user authorization. Latest automatic-camera and fast-text work is still in progress, **not deployed**. Detailed integration state is in [SAM_HANDOFF.md](signs-SAM_HANDOFF.md).
 
 ## Recording and preview
 
