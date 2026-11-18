@@ -5,14 +5,14 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 function screen(page = 'index.html', sessionValues = new Map(), localValues = new Map()) {
-  const elements = new Map(), timers = new Map(), windowListeners = new Map();
+  const elements = new Map(), timers = new Map(), windowListeners = new Map(), documentListeners = new Map(), images = [];
   let timerId = 0;
   function element(tag = 'DIV') {
     const classes = new Set();
     return {
       tagName: tag.toUpperCase(), textContent: '', hidden: false, disabled: false,
       value: '', checked: false, style: {}, dataset: {}, children: [], attributes: {},
-      classList: { toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }, contains(name) { return classes.has(name); } },
+      classList: { toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }, add(name) { classes.add(name); }, remove(name) { classes.delete(name); }, contains(name) { return classes.has(name); } },
       setAttribute(name, value) { this.attributes[name] = value; },
       removeAttribute(name) { delete this.attributes[name]; },
       listeners: {},
@@ -24,11 +24,12 @@ function screen(page = 'index.html', sessionValues = new Map(), localValues = ne
     };
   }
   const html = fs.readFileSync(path.join(__dirname, '../ui/', page), 'utf8');
-  for (const [, tag, id] of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"/g)) elements.set(id, element(tag));
+  for (const [markup, tag, id] of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"[^>]*>/g)) { const el = element(tag); el.hidden = /\shidden[\s>]/.test(markup); elements.set(id, el); }
   const context = {
     document: {
       getElementById(id) { return elements.get(id) || null; },
-      createElement: element, addEventListener() {},
+      createElement: element, hidden: false, body: element('BODY'),
+      addEventListener(name, fn) { documentListeners.set(name, fn); },
       querySelectorAll(selector) { return selector === '.alternative' ? elements.get('alternatives').children : []; },
     },
     window: { addEventListener(name, fn) { windowListeners.set(name, fn); }, confirm: () => true,
@@ -38,6 +39,7 @@ function screen(page = 'index.html', sessionValues = new Map(), localValues = ne
     setTimeout(fn, ms) { const id=++timerId; timers.set(id,{fn,ms});return id; },
     clearTimeout(id) { timers.delete(id); },
     Date, Promise, console, AbortController,
+    Image: function () { images.push(this); this.decode = () => new Promise(() => {}); },
     Option: function (label, value) { return { textContent: label, value }; },
   };
   vm.createContext(context);
@@ -52,7 +54,7 @@ function screen(page = 'index.html', sessionValues = new Map(), localValues = ne
     };
     vm.runInContext('render(sample)', context);
   }
-  return { context, elements, render, sessionValues, localValues, timers, windowListeners };
+  return { context, elements, render, sessionValues, localValues, timers, windowListeners, documentListeners, images };
 }
 
 test('reloading models targets the running profile and reports warmup truthfully', async () => {
@@ -417,4 +419,254 @@ test('typed messages use the current revision without speaking or enabling learn
   assert.equal(elements.get('message').textContent, 'Please wait');
   assert.equal(elements.get('speak').disabled, false);
   assert.equal(elements.get('save-correction').disabled, true);
+});
+
+// ---- Speech controls, Show large, keyboard apply, polling cadence, local preview ----
+const settle = () => new Promise(setImmediate);
+function okJson(data) { return { ok: true, status: 200, json: async () => data }; }
+
+test('Stop speaking appears only while the device is speaking and sends one direct request', async () => {
+  const a = screen(); a.render({ server_instance: 'boot', token: 'tok', decision: { text: 'Hello', status: 'accepted', reason: 'corrected' } });
+  assert.equal(a.elements.get('stop-speaking').hidden, true, 'absent speaking field means not speaking');
+  assert.equal(a.elements.get('speak').disabled, false);
+  a.render({ server_instance: 'boot', token: 'tok', revision: 2, speaking: true, decision: { text: 'Hello', status: 'accepted', reason: 'corrected' } });
+  assert.equal(a.elements.get('stop-speaking').hidden, false);
+  assert.equal(a.elements.get('speak').disabled, true, 'no second speech request while speaking');
+  // An unrelated action is hung; stopping speech must not wait behind it.
+  const calls = [];
+  a.context.fetch = async (url, options) => {
+    calls.push([url, options.body, options.headers['X-Lipflow-Token']]);
+    if (url.endsWith('/stop_speaking')) return okJson({ ...a.context.sample, revision: 3, speaking: false });
+    return new Promise(() => {});
+  };
+  vm.runInContext("requestAction('mode', {mode:'lips'})", a.context);
+  await a.elements.get('stop-speaking').onclick(); await settle();
+  assert.deepEqual(calls.filter(c => c[0].endsWith('/stop_speaking')), [['/api/action/stop_speaking', '{}', 'tok']]);
+  assert.equal(a.elements.get('stop-speaking').hidden, true);
+  assert.equal(calls.filter(c => c[0].endsWith('/speak')).length, 0);
+});
+
+test('a failed stop-speaking request reports the uncertainty and is not retried', async () => {
+  const a = screen(); a.render({ token: 'tok', speaking: true, decision: { text: 'Hello', status: 'accepted', reason: 'corrected' } });
+  let calls = 0; a.context.fetch = async () => { calls++; throw new Error('Network down'); };
+  await a.elements.get('stop-speaking').onclick();
+  assert.equal(calls, 1);
+  assert.match(a.elements.get('error').textContent, /still speaking/);
+  assert.equal(a.elements.get('stop-speaking').disabled, false);
+});
+
+test('Show large shows only applied or explicitly selected text and never speaks', async () => {
+  const a = screen(); const calls = []; a.context.fetch = async url => { calls.push(url); return new Promise(() => {}); };
+  a.render({ decision: { text: 'I need water', status: 'confirmation_needed', reason: 'conflict' }, alternatives: ['I need water', 'No.'] });
+  assert.equal(a.elements.get('show-large').disabled, true, 'an unchosen conflict cannot be shown');
+  a.elements.get('show-large').onclick();
+  assert.equal(a.elements.get('large-display').hidden, true);
+  a.elements.get('alternatives').children[1].onclick();
+  assert.equal(a.elements.get('show-large').disabled, false, 'an explicit selection can be shown');
+  a.elements.get('corrected-text').value = 'Unapplied words'; a.elements.get('corrected-text').listeners.input();
+  assert.equal(a.elements.get('show-large').disabled, true, 'an unapplied edit cannot be shown');
+  a.render({ revision: 2, decision: { text: 'Applied words', status: 'accepted', reason: 'corrected' } });
+  a.elements.get('corrected-text').value = 'Applied words'; a.elements.get('corrected-text').listeners.input();
+  assert.equal(a.elements.get('show-large').disabled, false);
+  a.elements.get('show-large').onclick();
+  assert.equal(a.elements.get('large-display').hidden, false);
+  assert.equal(a.elements.get('large-text').textContent, 'Applied words');
+  assert.equal(a.elements.get('large-close').focused, true, 'focus moves into the dialog');
+  assert.equal(a.elements.get('main').inert, true, 'background is inert');
+  a.elements.get('show-large').focused = false;
+  a.documentListeners.get('keydown')({ code: 'Escape', key: 'Escape', target: a.elements.get('large-close'), preventDefault() {} });
+  assert.equal(a.elements.get('large-display').hidden, true);
+  assert.equal(a.elements.get('main').inert, false);
+  assert.equal(a.elements.get('show-large').focused, true, 'focus returns to the opener');
+  assert.deepEqual(calls, [], 'showing never requests speech, learning or any action');
+});
+
+test('Show large is refused for a recognized but unconfirmed message and during a live session', () => {
+  const a = screen();
+  a.render({ decision: { text: 'Maybe these words', status: 'confirmation_needed', reason: 'lip_only' } });
+  assert.equal(a.elements.get('show-large').disabled, true);
+  a.render({ revision: 2, session_active: true, session_text: 'live words', decision: { text: 'live words', status: 'accepted', reason: 'lip_only' } });
+  assert.equal(a.elements.get('show-large').disabled, true);
+});
+
+test('Escape closes Show large before it cancels a recording', async () => {
+  const a = screen(); const calls = []; a.context.fetch = async url => { calls.push(url); return okJson({ ...a.context.sample, revision: 9, phase: 'idle' }); };
+  a.render({ phase: 'recording', decision: { text: 'Applied', status: 'accepted', reason: 'corrected' } });
+  vm.runInContext('openLargeDisplay()', a.context);
+  assert.equal(a.elements.get('large-display').hidden, false);
+  const escape = { code: 'Escape', key: 'Escape', target: a.elements.get('large-close'), preventDefault() {} };
+  a.documentListeners.get('keydown')(escape); await settle();
+  assert.equal(a.elements.get('large-display').hidden, true);
+  assert.deepEqual(calls, []);
+  a.documentListeners.get('keydown')({ ...escape, target: a.elements.get('show-large') }); await settle();
+  assert.deepEqual(calls, ['/api/action/cancel']);
+});
+
+test('Ctrl+Enter and Cmd+Enter apply the edit with the button guards and never speak', async () => {
+  const a = screen(); a.render({ token: 'tok', decision: { text: 'Old', status: 'accepted', reason: 'corrected' } });
+  const calls = []; a.context.fetch = async (url, options) => { calls.push([url, JSON.parse(options.body)]); return okJson({ ...a.context.sample, revision: calls.length + 1, decision: { text: JSON.parse(options.body).text, status: 'accepted', reason: 'corrected' } }); };
+  const editor = a.elements.get('corrected-text');
+  const key = extra => { let prevented = false; editor.listeners.keydown({ key: 'Enter', preventDefault() { prevented = true; }, ...extra }); return prevented; };
+  assert.equal(key({ ctrlKey: true }), true);
+  await settle();
+  assert.deepEqual(calls, [], 'unchanged text: the disabled button guard applies');
+  editor.value = 'New words'; editor.listeners.input();
+  assert.equal(key({}), false, 'plain Enter keeps its newline');
+  assert.deepEqual(calls, []);
+  key({ ctrlKey: true }); await settle(); await vm.runInContext('actionChain', a.context);
+  assert.deepEqual(calls, [['/api/action/correct', { revision: 1, text: 'New words', learn: false }]]);
+  editor.value = 'Mac words'; editor.listeners.input();
+  key({ metaKey: true }); await settle(); await vm.runInContext('actionChain', a.context);
+  assert.equal(calls.length, 2);
+  assert.equal(calls.some(c => c[0].endsWith('/speak') || c[0].endsWith('/confirm')), false);
+});
+
+test('Ctrl+Enter is ignored while another action is pending', async () => {
+  const a = screen(); a.render({ decision: { text: 'Old', status: 'accepted', reason: 'corrected' } });
+  const editor = a.elements.get('corrected-text'); editor.value = 'Edit'; editor.listeners.input();
+  let calls = 0; a.context.fetch = () => { calls++; return new Promise(() => {}); };
+  a.elements.get('save-correction').onclick(); await settle();
+  editor.listeners.keydown({ key: 'Enter', ctrlKey: true, preventDefault() {} }); await settle();
+  assert.equal(calls, 1);
+});
+
+test('Space toggling still ignores form controls', async () => {
+  const a = screen(); a.render(); let calls = 0; a.context.fetch = () => { calls++; return new Promise(() => {}); };
+  for (const tag of ['TEXTAREA', 'INPUT', 'BUTTON']) a.documentListeners.get('keydown')({ code: 'Space', target: { tagName: tag }, preventDefault() {} });
+  assert.equal(calls, 0);
+  a.documentListeners.get('keydown')({ code: 'Space', target: { tagName: 'MAIN' }, preventDefault() {} }); await settle();
+  assert.equal(calls, 1);
+});
+
+function pollTimers(a) { const poll = vm.runInContext('poll', a.context); return [...a.timers.values()].filter(t => t.fn === poll); }
+test('state polling slows when idle or hidden, never stops, and is fast again on activity', async () => {
+  const a = screen('index.html');
+  const idle = { rehearsal: true, browser_camera: false, camera: 'rehearsal' };
+  a.context.fetch = async url => url === '/api/state' ? okJson({ ...a.context.sample }) : new Promise(() => {});
+  a.render(idle);
+  vm.runInContext('lastUserActivity = 0', a.context);
+  await vm.runInContext('poll()', a.context);
+  assert.deepEqual(pollTimers(a).map(t => t.ms), [1000], 'idle polling is slower but scheduled');
+  a.context.document.hidden = true;
+  await vm.runInContext('poll()', a.context);
+  assert.deepEqual(pollTimers(a).map(t => t.ms), [3000], 'hidden tab polls slowly but still polls');
+  a.context.document.hidden = false;
+  a.documentListeners.get('visibilitychange')();
+  assert.deepEqual(pollTimers(a).map(t => t.ms), [0], 'becoming visible polls at once');
+  await vm.runInContext('poll()', a.context);
+  assert.deepEqual(pollTimers(a).map(t => t.ms), [180], 'recent activity keeps the fast rate');
+  vm.runInContext('lastUserActivity = 0', a.context); await vm.runInContext('poll()', a.context);
+  a.documentListeners.get('pointerdown')();
+  assert.deepEqual(pollTimers(a).map(t => t.ms), [0], 'a user action wakes polling');
+});
+
+test('pending actions, sessions and connection loss keep polling live', async () => {
+  const a = screen('index.html');
+  a.render({ rehearsal: true, browser_camera: false, camera: 'rehearsal' });
+  vm.runInContext('lastUserActivity = 0', a.context);
+  a.context.document.hidden = true;
+  a.context.fetch = async url => url === '/api/state' ? okJson({ ...a.context.sample }) : new Promise(() => {});
+  vm.runInContext("requestAction('mode', {mode:'lips'})", a.context);
+  await vm.runInContext('poll()', a.context);
+  assert.deepEqual(pollTimers(a).map(t => t.ms), [180], 'pending action: fast even when hidden');
+  const b = screen('index.html');
+  b.context.fetch = async () => { throw new Error('down'); };
+  b.render({ rehearsal: true, browser_camera: false, camera: 'rehearsal' });
+  vm.runInContext('lastUserActivity = 0', b.context); b.context.document.hidden = true;
+  await vm.runInContext('poll()', b.context);
+  assert.match(b.elements.get('error').textContent, /Reconnecting/);
+  assert.ok(pollTimers(b)[0].ms <= 1000, 'reconnect detection stays at 1 s or faster');
+  const c = screen('index.html');
+  c.context.fetch = async () => okJson({ ...c.context.sample });
+  c.render({ session_active: true, auto_recognition: true });
+  vm.runInContext('lastUserActivity = 0', c.context);
+  await vm.runInContext('poll()', c.context);
+  assert.deepEqual(pollTimers(c).map(t => t.ms), [180], 'active session: fast');
+});
+
+test('Settings runs no camera tracking or preview polling', async () => {
+  const a = screen('settings.html'); const urls = [];
+  a.context.fetch = async url => { urls.push(url); return okJson({ ...a.context.sample }); };
+  a.render({ browser_camera: false, rehearsal: false, camera: 'ready' });
+  await settle();
+  assert.equal(urls.includes('/api/tracking'), false);
+  assert.equal(a.images.length, 0);
+});
+
+function cameraScreen() {
+  const a = screen(); a.render({ server_instance: 'boot', token: 'tok' });
+  let stopped = 0; const track = { stop() { stopped++; }, addEventListener() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  a.context.navigator = { mediaDevices: { getUserMedia: async () => stream } };
+  const video = a.elements.get('browser-camera'); video.play = async () => {};
+  const urls = [];
+  a.context.fetch = async (url, options) => {
+    urls.push([url, options?.method || 'GET']);
+    if (url === '/api/action/camera_session') { const body = JSON.parse(options.body); return okJson({ ...a.context.sample, revision: a.context.sample.revision + 1, session_active: body.active }); }
+    return new Promise(() => {});
+  };
+  return { a, stream, video, urls, stopped: () => stopped };
+}
+
+test('browser camera shows the local mirrored video and never downloads its own frames', async () => {
+  const { a, stream, video, urls } = cameraScreen();
+  assert.equal(video.hidden, true);
+  await a.elements.get('browser-camera-button').onclick();
+  assert.equal(video.srcObject, stream);
+  assert.equal(video.hidden, false, 'local video is the preview');
+  assert.equal(a.elements.get('camera').hidden, true);
+  assert.equal(a.elements.get('camera-placeholder').hidden, true);
+  assert.equal(a.elements.get('camera-preview').classList.contains('live'), true);
+  assert.equal(a.elements.get('preview-status').textContent, 'Camera on · mirrored');
+  a.render({ server_instance: 'boot', token: 'tok', revision: 5, camera: 'ready', session_active: true });
+  await settle();
+  assert.equal(a.images.length, 0, 'no GET /api/frame image polling in browser-camera mode');
+  assert.equal(urls.some(([u, m]) => u.startsWith('/api/frame') && m === 'GET'), false);
+  assert.equal(urls.some(([u]) => u === '/api/tracking'), true, 'landmark overlay still polls while live');
+});
+
+test('stopping the browser camera releases tracks and clears the preview instead of freezing it', async () => {
+  const { a, video, stopped } = cameraScreen();
+  await a.elements.get('browser-camera-button').onclick();
+  await a.elements.get('browser-camera-button').onclick();
+  assert.equal(stopped(), 1);
+  assert.equal(video.srcObject, null);
+  assert.equal(video.hidden, true);
+  assert.equal(a.elements.get('camera-placeholder').hidden, false);
+  assert.equal(a.elements.get('camera-preview').classList.contains('live'), false);
+  assert.equal(a.elements.get('preview-status').textContent, 'Camera off');
+  assert.equal(vm.runInContext('trackingWanted()', a.context), false, 'tracking stops with the camera');
+});
+
+test('server-owned camera keeps the downloaded preview path', () => {
+  const a = screen(); a.render({ browser_camera: false, camera: 'ready' });
+  assert.equal(a.images.length, 1);
+  assert.match(a.images[0].src, /^\/api\/frame\?t=/);
+});
+
+test('frame upload waits for a new video frame and never overlaps', async () => {
+  const a = screen(); a.render({ server_instance: 'boot', token: 'tok' });
+  const video = a.elements.get('browser-camera'); video.videoWidth = 960; video.currentTime = 1;
+  let frameCallback = null; video.requestVideoFrameCallback = cb => { frameCallback = cb; return 7; };
+  let uploads = 0, release; a.context.fetch = async (url, options) => { if (url === '/api/frame') { uploads++; return new Promise(r => { release = r; }); } return new Promise(() => {}); };
+  vm.runInContext("browserCameraStream={getTracks:()=>[{stop(){}}]};browserFrameCanvas.getContext=()=>({drawImage(){}});browserFrameCanvas.toBlob=cb=>cb({});", a.context);
+  const first = vm.runInContext('uploadBrowserFrames(true)', a.context); await settle();
+  assert.equal(uploads, 1);
+  assert.equal(frameCallback, null, 'nothing scheduled while the upload is in flight');
+  release({ ok: true, status: 200 }); await first;
+  assert.equal(uploads, 1, 'the next upload waits for a new frame');
+  assert.equal(typeof frameCallback, 'function');
+  let cb = frameCallback; frameCallback = null; cb(); await settle();
+  assert.equal(uploads, 1, 'a frame inside the 40 ms budget is skipped, not encoded');
+  assert.equal(typeof frameCallback, 'function', 'and the next frame is awaited');
+  vm.runInContext('nextFrameUploadAt = 0', a.context);
+  cb = frameCallback; frameCallback = null; cb(); await settle();
+  assert.equal(uploads, 2);
+  // Fallback without requestVideoFrameCallback: an unchanged frame is not re-encoded.
+  delete video.requestVideoFrameCallback; release({ ok: true, status: 200 }); await settle();
+  let draws = 0; vm.runInContext('browserFrameCanvas.getContext=()=>({drawImage(){globalThis.__draws=(globalThis.__draws||0)+1}})', a.context);
+  await vm.runInContext('uploadBrowserFrames(false)', a.context);
+  draws = vm.runInContext('globalThis.__draws||0', a.context);
+  assert.equal(draws, 0);
+  vm.runInContext('stopBrowserCamera()', a.context);
 });

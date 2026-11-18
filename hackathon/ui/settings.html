@@ -2,12 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>Settings · QuietBridge</title><link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <main class="settings-page">
   <header><a class="wordmark" href="/">QuietBridge<span class="bridge-mark" aria-hidden="true"></span></a><a class="settings-link" href="/">Back to your message</a></header>
-  <section class="intro"><p class="eyebrow">Make it yours</p><h1>A few preferences.</h1><p>Choose your input here. Typing needs no setup or training. Add optional personal phrases in <a href="/record">Personalize</a>.</p></section>
+  <section class="intro"><p class="eyebrow">Make it yours</p><h1>A few preferences.</h1><p>Choose how you give input. Typing needs no setup or training. Add optional personal gestures in <a href="/record">Personalize</a>.</p></section>
   <section class="settings-section">
     <h2>Your profile</h2>
     <p class="section-copy">Using <strong id="profile-name">Stock configuration</strong></p>
@@ -18,12 +19,12 @@
     </div>
     <p id="profile-model-status" class="hint" role="status" aria-live="polite"></p>
     <p id="profile-switch-status" class="hint" role="status" aria-live="polite"></p><p id="profile-switch-error" class="error" role="alert"></p>
-    <p class="hint">After saving a model in Personalize, stop the camera and reload here. Reload clears the current draft. Explicit startup model paths still take priority. <a href="/record">Personalize your gestures</a>.</p>
+    <p class="hint">After saving a model in Personalize, stop the camera, then choose Reload current models. Reloading clears the current message; an unfinished typed edit stays in this tab. If QuietBridge was started with a specific model file, that model stays in use. <a href="/record">Personalize your gestures</a>.</p>
   </section>
-  <section class="settings-section"><h2>How would you like to communicate?</h2><div class="mode-switch" role="group" aria-label="Input mode"><button data-mode="combined">Lips and gestures</button><button data-mode="lips">Lips only</button><button data-mode="signs">Gestures only</button></div><p id="mode-hint" class="hint">Either input can work on its own.</p></section>
+  <section class="settings-section"><h2>How would you like to communicate?</h2><div class="mode-switch" role="group" aria-label="Input mode"><button type="button" data-mode="combined" aria-describedby="mode-hint">Lips and gestures</button><button type="button" data-mode="lips" aria-describedby="mode-hint">Lips only</button><button type="button" data-mode="signs" aria-describedby="mode-hint">Gestures only</button></div><p id="mode-hint" class="hint">Either input can work on its own.</p></section>
   <section id="gestures" class="settings-section">
     <h2>Your gesture vocabulary</h2><p id="vocabulary-summary" class="section-copy">Checking your gestures…</p><div id="labels" class="label-list"></div>
-    <p id="sign-model-status" class="support-note" role="status">Checking the sign-language model…</p>
+    <p id="sign-model-status" class="support-note">Checking the sign-language model…</p>
     <p class="support-note">An explicitly installed BSL or ASL video model can provide isolated sign concepts alongside lips. Standard signs, personal gestures and stock poses are different backends. Full sentences, fingerspelling and non-manual grammar are not yet supported. A saved gesture name is not proof of sign-language support.</p>
   </section>
   <details id="cleanup" class="settings-section">
@@ -40,10 +41,10 @@
       <p id="cleanup-settings-status" class="hint" role="status" aria-live="polite"></p><p id="cleanup-settings-error" class="error" role="alert"></p>
     </form>
   </details>
-  <section id="preview" class="settings-section" hidden><h2>Try without a camera</h2><p class="section-copy">These synthetic examples show the message flow. They do not test recognition.</p><div class="preview-form"><label>Example lip-reading text<input id="test-text" value="Yes" maxlength="2000"></label><label>Gesture<select id="test-label"><option value="">No gesture</option></select></label><button id="test-submit">Preview message</button></div></section>
+  <section id="preview" class="settings-section" hidden><h2>Try without a camera</h2><p class="section-copy">These synthetic examples show the message flow. They do not test recognition.</p><div class="preview-form"><label>Example lip-reading text<input id="test-text" value="Yes" maxlength="2000"></label><label>Gesture<select id="test-label"><option value="">No gesture</option></select></label><button id="test-submit" type="button">Preview message</button></div></section>
   <details class="settings-section diagnostics"><summary>Technical details</summary>
     <div class="input-status"><div><span>Camera</span><strong id="camera-status">Starting</strong></div><div><span>Lip reader</span><strong id="lip-status">Starting</strong></div><div><span>Hand recognizer</span><strong id="hand-status">Starting</strong></div><div><span>Gesture input</span><strong id="sign-input">—</strong></div><div><span>Last stable gesture</span><strong id="last-sign">—</strong></div></div>
-    <p class="hint">Visual model: <strong id="lip-model">stock</strong> · Language model: <strong id="language-model">stock</strong></p><p id="component-errors" class="component-errors"></p>
+    <p class="hint">Lip-reading model: <strong id="lip-model">stock</strong> · Language model: <strong id="language-model">stock</strong></p><p id="component-errors" class="component-errors"></p>
     <div class="metrics"><div><span>Release to text</span><strong id="metric-release">—</strong></div><div><span>Lip decode</span><strong id="metric-decode">—</strong></div><div><span>Local fusion</span><strong id="metric-fusion">—</strong></div><div><span>Camera input</span><strong id="metric-camera-fps">—</strong></div><div><span>Recorded lip rate</span><strong id="metric-lip-fps">—</strong></div><div><span>Raw lip frames</span><strong id="metric-frames">—</strong></div><div><span>Largest frame gap</span><strong id="metric-gap">—</strong></div></div>
     <p class="hint">Frame rates describe actual input, not the model's 25 fps target. Preview mode does not measure vision performance. Speech timing measures dispatch, not audible onset.</p>
   </details>

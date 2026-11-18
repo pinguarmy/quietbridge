@@ -6,8 +6,18 @@ let speaking = false, pendingActions = 0, renderedRevision = null, renderedAlter
 let browserCameraStream = null, browserCameraStarting = false, browserCameraStopping = false, browserCameraGeneration = 0, browserFrameTimer = null, browserFrameCanvas = document.createElement('canvas');
 browserFrameCanvas.width = 960; browserFrameCanvas.height = 720;
 let editorDirty = false, editorProfile = null, editVersion = 0;
+// Text the user explicitly picked from the alternatives for this revision.
+let userSelection = null, stopSpeakingPending = false, largeDisplayOpener = null;
 const retiredInstances = new Set();
 const ACTION_TIMEOUT_MS = 15000;
+// Upload target stays ~25 fps; the 960x720 JPEG contract is unchanged.
+const FRAME_UPLOAD_INTERVAL_MS = 40;
+let browserFrameCallback = null, nextFrameUploadAt = 0, lastUploadedVideoTime = null;
+// State polling never stops. It is fast while anything can change soon and
+// slower only when idle or in a hidden tab. Reconnect checks stay at 1 s or faster.
+const POLL_FAST_MS = 180, POLL_IDLE_MS = 1000, POLL_HIDDEN_MS = 3000, POLL_RECONNECT_MS = 1000;
+const RECENT_ACTIVITY_MS = 10000;
+let pollTimer = null, pollDueAt = 0, pollInFlight = false, lastUserActivity = Date.now();
 const draftKey = profile => 'quietbridge-unsent-v1:' + (profile || 'default');
 function storageRead(key) { try { return window.sessionStorage?.getItem(key) ?? null; } catch (_) { return null; } }
 function storageWrite(key, value) { try { if (value !== null) window.sessionStorage?.setItem(key, value); else window.sessionStorage?.removeItem(key); } catch (_) {} }
@@ -19,7 +29,7 @@ function editMessage() {
   editVersion++;
   editorDirty = $('corrected-text').value !== (state?.decision?.text || '');
   persistEditor(); updateMessage();
-  text('draft-status', editorDirty ? 'Unfinished edit kept in this tab. Choose Use this message before speaking it.' : '');
+  text('draft-status', editorDirty ? 'Unfinished edit kept in this tab.' : '');
 }
 function confirmDiscard(message) { return typeof window.confirm === 'function' && window.confirm(message); }
 function hasCurrentMessage() { return Boolean(editorDirty || state?.decision?.text || state?.session_text); }
@@ -36,11 +46,47 @@ function renderCapabilities(s) {
   text('active-input', `${s.profile_name || 'Stock configuration'} · ${s.rehearsal ? backend : s.mode === 'lips' ? 'Lips only' : s.mode === 'signs' ? backend : 'Lips + ' + backend}. Typing is always available.`);
   text('capability-note', `${backend}: ${concepts}. ${s.rehearsal ? 'Examples do not test recognition.' : 'Only these configured concepts can contribute text. Not full sign-language translation.'}`);
 }
-async function uploadBrowserFrames() {
+// One upload at a time. Uploads follow new video frames (requestVideoFrameCallback
+// where available) within a 40 ms budget, so ~25 fps is kept on a 30 fps camera
+// and unchanged frames are not re-encoded. Older browsers fall back to a timer.
+function scheduleFrameUpload() {
+  if (!browserCameraStream) return;
+  const generation = browserCameraGeneration, video = $('browser-camera');
+  const current = () => browserCameraStream && generation === browserCameraGeneration;
+  if (typeof video?.requestVideoFrameCallback === 'function') {
+    browserFrameCallback = video.requestVideoFrameCallback(() => {
+      browserFrameCallback = null;
+      if (!current()) return;
+      if (Date.now() < nextFrameUploadAt) scheduleFrameUpload(); else uploadBrowserFrames(true);
+    });
+  } else {
+    browserFrameTimer = setTimeout(() => {
+      browserFrameTimer = null;
+      if (current()) uploadBrowserFrames(false);
+    }, Math.max(10, nextFrameUploadAt - Date.now()));
+  }
+}
+function cancelFrameUpload() {
+  if (browserFrameTimer) clearTimeout(browserFrameTimer);
+  browserFrameTimer = null;
+  const video = $('browser-camera');
+  if (browserFrameCallback !== null && typeof video?.cancelVideoFrameCallback === 'function') video.cancelVideoFrameCallback(browserFrameCallback);
+  browserFrameCallback = null;
+}
+function hasNewVideoFrame(video, knownNewFrame) {
+  if (knownNewFrame || typeof video.currentTime !== 'number') return true;
+  return video.currentTime !== lastUploadedVideoTime;
+}
+async function uploadBrowserFrames(knownNewFrame = false) {
   if (!browserCameraStream || !state?.browser_camera || state.rehearsal) return;
+  const generation = browserCameraGeneration;
   try {
     const video = $('browser-camera');
-    if (video?.videoWidth) {
+    if (video?.videoWidth && hasNewVideoFrame(video, knownNewFrame)) {
+      const now = Date.now();
+      // At most half an interval of catch-up, so a late frame never causes a burst.
+      nextFrameUploadAt = Math.max(nextFrameUploadAt, now - FRAME_UPLOAD_INTERVAL_MS / 2) + FRAME_UPLOAD_INTERVAL_MS;
+      lastUploadedVideoTime = video.currentTime;
       browserFrameCanvas.getContext('2d').drawImage(video, 0, 0, 960, 720);
       const blob = await new Promise(resolve => browserFrameCanvas.toBlob(resolve, 'image/jpeg', .7));
       if (blob && browserCameraStream && state?.browser_camera && !state.rehearsal) {
@@ -56,7 +102,8 @@ async function uploadBrowserFrames() {
       }
     }
   } catch (_) { text('error', 'Camera frames could not reach QuietBridge. Finish message to stop the camera, then retry or type below.'); }
-  if (browserCameraStream) browserFrameTimer = setTimeout(uploadBrowserFrames, 40);
+  // A stop/start while this upload was in flight owns its own loop.
+  if (generation === browserCameraGeneration) scheduleFrameUpload();
 }
 async function startBrowserCamera() {
   if (browserCameraStarting || browserCameraStopping || browserCameraStream) return;
@@ -73,6 +120,7 @@ async function startBrowserCamera() {
     browserCameraStream.getVideoTracks()[0]?.addEventListener('ended', () => { void stopCameraSession(); }, {once:true});
     await $('browser-camera').play();
     if (generation !== browserCameraGeneration) return;
+    renderPreview();
     if (!await requestAction('camera_session', {active:true})) {
       if (generation !== browserCameraGeneration) return;
       const message = $('error')?.textContent || 'Could not start recognition.';
@@ -113,13 +161,15 @@ function endCameraSessionOnUnload() {
   }
 }
 function stopBrowserCamera() {
+  cancelFrameUpload();
   browserCameraGeneration++;
-  if (browserFrameTimer) clearTimeout(browserFrameTimer);
-  browserFrameTimer = null;
+  lastUploadedVideoTime = null;
   if (browserCameraStream) browserCameraStream.getTracks().forEach(track => track.stop());
   browserCameraStream = null;
-  const video = $('browser-camera'); if (video) video.srcObject = null;
+  // The local preview is cleared, not frozen: no picture remains after the camera stops.
+  const video = $('browser-camera'); if (video) { video.srcObject = null; video.hidden = true; }
   const button = $('browser-camera-button'); if (button) button.textContent = 'Start camera';
+  renderPreview();
 }
 
 const handsCanvas = $('hands-overlay'), handsDraw = handsCanvas?.getContext('2d'), mouthCanvas = $('mouth-overlay'), mouthDraw = mouthCanvas?.getContext('2d');
@@ -130,7 +180,7 @@ let latestTracking = null, trackingAt = 0, crop = null;
 // the server may have committed it, so poll and review before trying again.
 function requestAction(name, data = {}) {
   const instance = state?.server_instance;
-  pendingActions++; updateMessage();
+  pendingActions++; updateMessage(); wakePoll();
   actionChain = actionChain.then(async () => {
     if (instance && instance !== state?.server_instance) throw new Error('QuietBridge restarted. Review the current message before trying again.');
     const controller = new AbortController();
@@ -212,8 +262,7 @@ function render(s) {
     browserCameraButton.classList.toggle('is-active', Boolean(browserCameraStream));
     browserCameraButton.disabled = browserCameraStarting || browserCameraStopping || (!browserCameraStream && s.session_finalizing === true);
   }
-  text('preview-status', s.rehearsal ? 'Preview · camera off' : ready || browserCameraStream ? 'Camera on' : browserCameraAvailable ? 'Waiting for browser camera' : s.camera === 'unavailable' ? 'Camera unavailable' : 'Getting ready…');
-  text('camera-message', s.rehearsal ? 'Your camera is off in preview.' : browserCameraAvailable && !browserCameraStream ? 'Select Start camera to share this browser camera.' : s.camera === 'unavailable' ? 'Allow camera access in your browser, or type your message below.' : 'Getting your camera ready…');
+  text('camera-message', cameraMessageText(s));
   const record = $('record');
   const motionInput = ['motion', 'isolated'].includes(s.sign_input);
   const explicitMotionSession = motionInput && s.mode !== 'lips' && s.session_active === true;
@@ -263,6 +312,7 @@ function render(s) {
   const alternativesKey = JSON.stringify([s.alternatives, s.cleanup?.status, s.cleanup?.suggestion, d.status, s.phase]);
   if (revisionChanged) {
     chosenText = review && d.reason === 'conflict' ? null : (d.text || null);
+    userSelection = null;
     renderedRevision = s.revision;
     if ($('corrected-text')) {
       if (editorProfile !== (s.profile_id || 'default')) {
@@ -291,7 +341,7 @@ function render(s) {
         button.onclick = () => {
           if (speaking) return;
           if (editorDirty && !confirmDiscard('Use these selected words instead of your unfinished edit? The unfinished edit will be replaced.')) return;
-          editVersion++; chosenText = candidate;
+          editVersion++; chosenText = candidate; userSelection = candidate;
           if ($('corrected-text')) $('corrected-text').value = candidate;
           editorDirty = false; persistEditor();
           if ($('learn-correction')) $('learn-correction').checked = false;
@@ -310,6 +360,7 @@ function render(s) {
   }
   text('cleanup-status', s.cleanup?.status === 'pending' ? 'Preparing an optional AI suggestion…' : s.cleanup?.status === 'error' ? 'AI suggestion unavailable. Your original message is still available.' : s.cleanup?.status === 'ready' ? 'Review the AI suggestion before choosing it.' : '');
   updateMessage();
+  renderPreview();
   text('last-spoken', s.last_spoken ? 'Last spoken: ' + s.last_spoken : '');
   text('correction-status', s.last_correction || '');
   text('result-timing', !s.rehearsal && s.metrics?.release_to_text_ms !== undefined ? 'Release → text · ' + (s.metrics.release_to_text_ms / 1000).toFixed(1) + ' s' : '');
@@ -335,23 +386,62 @@ function render(s) {
   return true;
 }
 
-function updateMessage() {
-  if (!state || !$('message')) return;
+// Snapshot of the message flags shared by the status copy and button guards.
+function messageView() {
   const d = state.decision, review = d.status === 'confirmation_needed';
   const sessionActive = state.session_active === true;
   const sessionFinalizing = state.session_finalizing === true;
-  const sessionBusy = sessionActive || sessionFinalizing;
-  const sessionText = typeof state.session_text === 'string' ? state.session_text.trim() : '';
   const chunkProcessing = ['tail', 'decoding'].includes(state.phase);
-  const cleanupPending = state.cleanup?.source_revision === state.revision && state.cleanup?.status === 'pending';
-  const processing = sessionFinalizing || chunkProcessing;
   const draft = typeof state.draft_text === 'string' && state.draft_text.trim()
     ? state.draft_text.trim()
     : typeof state.greedy_preview === 'string' && state.greedy_preview.trim()
       ? state.greedy_preview.trim() : '';
+  return {
+    d, review, sessionActive, sessionFinalizing, draft,
+    sessionBusy: sessionActive || sessionFinalizing,
+    sessionText: typeof state.session_text === 'string' ? state.session_text.trim() : '',
+    processing: sessionFinalizing || chunkProcessing,
+    cleanupPending: state.cleanup?.source_revision === state.revision && state.cleanup?.status === 'pending',
+  };
+}
+function deviceSpeaking() { return state?.speaking === true; }
+function decisionStatusText(v) {
+  if (editorDirty) return 'Unapplied edit';
+  if (v.cleanupPending) return 'Formatting suggestion…';
+  if (v.sessionFinalizing) return 'Finishing last words…';
+  if (v.sessionActive) return 'Recognizing…';
+  if (deviceSpeaking()) return 'Speaking…';
+  if (v.review) return 'Check your message';
+  if (v.d.status === 'accepted') return 'Ready to speak';
+  return ({tail:'Finishing', decoding:'Reading lips…', recording:'Recording silent input'})[state.phase]
+    || (state.lips === 'warming' ? 'Warming up' : 'Waiting');
+}
+function reasonText(v) {
+  if (editorDirty) return 'Your edit has not replaced the displayed message. Choose Use this message before speaking.';
+  if (state.lip_error) return 'Some words could not be read. You can edit or type your message. ' + state.lip_error;
+  if (v.sessionActive) return 'Live draft. Choose Finish message when you are done.';
+  if (v.sessionFinalizing) return 'Camera off. Finishing the last words.';
+  if (!state.speech_available) return 'On-device speech is unavailable. Choose Show large to turn the screen toward someone, or Copy message.';
+  if (v.review && v.d.reason === 'conflict') return 'The inputs differ. Choose the message you intended.';
+  if (v.review && v.d.reason === 'partial_agreement') return 'Only part of the gesture sequence matches. Review the words and alternatives.';
+  if (v.review) return 'If these are your words, confirm and speak.';
+  if (v.d.status === 'accepted') return 'Speak or show it whenever you are ready.';
+  return 'Nothing is spoken until you choose.';
+}
+// Show large displays only text the user applied or explicitly selected:
+// never an unapplied edit, a live draft or an unchosen conflict.
+function largeDisplayText(v) {
+  if (editorDirty || v.sessionBusy || v.processing || !chosenText) return null;
+  if (v.d.status === 'accepted' && chosenText === v.d.text) return chosenText;
+  if (userSelection !== null && chosenText === userSelection) return chosenText;
+  return null;
+}
+function updateMessage() {
+  if (!state || !$('message')) return;
+  const v = messageView(), {d, review, sessionBusy, sessionText, processing, draft} = v;
   const liveDraft = sessionBusy && Boolean(sessionText);
   const displayText = sessionBusy
-    ? sessionText || draft || (sessionFinalizing ? 'Finishing last words…' : 'Your words will appear here.')
+    ? sessionText || draft || (v.sessionFinalizing ? 'Finishing last words…' : 'Your words will appear here.')
     : chosenText || sessionText || (processing ? draft || 'Reading your words…' : review ? 'Which message did you mean?' : 'Your words will appear here.');
   text('message', displayText);
   $('message').classList.toggle('empty', !sessionText && !chosenText && !processing && !draft);
@@ -359,17 +449,22 @@ function updateMessage() {
   // result needs the reading spinner. Live text is a draft, not a final message.
   $('message').classList.toggle('processing', processing && !sessionText);
   $('message').classList.toggle('draft', liveDraft || (processing && Boolean(draft)));
-  $('message').style.textDecoration = liveDraft ? 'underline dotted' : '';
-  $('message').style.textUnderlineOffset = liveDraft ? '0.18em' : '';
+  $('message').classList.toggle('live-draft', liveDraft);
+  // Hold announcements while live words change; the settled result is announced once.
+  $('message').setAttribute('aria-busy', String(sessionBusy || processing));
   hide('draft-label', !(liveDraft || processing && Boolean(draft)));
   if ((sessionBusy || processing) && $('alternatives')) $('alternatives').replaceChildren();
-  text('decision-status', editorDirty ? 'Unapplied edit' : cleanupPending ? 'Formatting suggestion…' : sessionFinalizing ? 'Finishing last words…' : sessionActive ? 'Recognizing…' : review ? 'Check your message' : d.status === 'accepted' ? 'Ready to speak' : state.phase === 'tail' ? 'Finishing' : state.phase === 'decoding' ? 'Reading lips…' : state.phase === 'recording' ? 'Recording silent input' : state.lips === 'warming' ? 'Warming up' : 'Waiting');
+  text('decision-status', decisionStatusText(v));
   $('decision-status').classList.toggle('review', review);
   if ($('corrected-text')) $('corrected-text').disabled = sessionBusy || processing;
-  text('reason', editorDirty ? 'Your edit has not replaced the displayed message. Choose Use this message before speaking.' : state.lip_error ? 'Some words could not be read. You can edit or type your message. ' + state.lip_error : sessionActive ? 'Live draft. Choose Finish message when you are done.' : sessionFinalizing ? 'Camera off. Finishing the last words.' : !state.speech_available ? 'On-device speech is unavailable. You can show this message or choose Copy message.' : review && d.reason === 'conflict' ? 'The inputs differ. Choose the message you intended.' : review && d.reason === 'partial_agreement' ? 'Only part of the gesture sequence matches. Review the words and alternatives.' : review ? 'If these are your words, confirm and speak.' : d.status === 'accepted' ? 'Speak whenever you are ready.' : 'Nothing is spoken until you choose.');
+  text('reason', reasonText(v));
   document.querySelectorAll('.alternative').forEach(b => {const selected = b.dataset.candidate === chosenText; b.classList.toggle('selected', selected); b.setAttribute('aria-pressed', String(selected)); b.disabled = speaking;});
   text('speak-label', review || (chosenText && chosenText !== d.text) ? 'Confirm & speak' : 'Speak message');
-  $('speak').disabled = sessionBusy || processing || editorDirty || connectionLost || pendingActions > 0 || !chosenText || !state.speech_available || speaking || !['accepted','confirmation_needed'].includes(d.status);
+  $('speak').disabled = sessionBusy || processing || editorDirty || connectionLost || pendingActions > 0 || !chosenText || !state.speech_available || speaking || deviceSpeaking() || !['accepted','confirmation_needed'].includes(d.status);
+  hide('stop-speaking', !deviceSpeaking());
+  if ($('stop-speaking')) $('stop-speaking').disabled = stopSpeakingPending;
+  if ($('show-large')) $('show-large').disabled = largeDisplayText(v) === null;
+  $('show-large')?.classList.toggle('show-large-primary', !state.speech_available);
   if ($('new-message')) $('new-message').disabled = sessionBusy || processing || speaking || pendingActions > 0 || !hasCurrentMessage();
   if ($('copy-message')) $('copy-message').disabled = !($('corrected-text')?.value.trim() || chosenText);
   if ($('save-correction')) {
@@ -401,21 +496,43 @@ function clearTracking() {
   handsDraw?.clearRect(0, 0, 640, 480); mouthDraw?.clearRect(0, 0, 320, 200);
   text('hands-status', 'Waiting for tracking'); text('mouth-status', 'Face not detected');
 }
-function paintTracking() {
-  if (!handsDraw || !mouthDraw || !latestTracking || Date.now() - trackingAt > 1500) { clearTracking(); return; }
-  const hands = latestTracking.hands || [], mouth = latestTracking.mouth || {};
+// The picture the mouth crop is drawn from. Both previews appear mirrored: the
+// server JPEG is mirrored in its pixels, the local video only through CSS.
+function previewSource() {
+  const video = $('browser-camera');
+  if (browserCameraStream && video && !video.hidden && video.videoWidth) return {el:video, width:video.videoWidth, height:video.videoHeight, mirroredPixels:false};
+  const image = $('camera');
+  if (image && !image.hidden && image.naturalWidth) return {el:image, width:image.naturalWidth, height:image.naturalHeight, mirroredPixels:true};
+  return null;
+}
+// Light strokes with a dark halo stay legible over any video, in either page theme.
+function haloStroke(draw, path) {
+  draw.save(); draw.strokeStyle = 'rgba(0,0,0,.6)'; draw.lineWidth += 2.5; path(); draw.stroke(); draw.restore();
+  path(); draw.stroke();
+}
+function haloText(draw, label, x, y) {
+  draw.save(); draw.font = '600 15px sans-serif'; draw.lineJoin = 'round'; draw.lineWidth = 4; draw.strokeStyle = 'rgba(0,0,0,.8)';
+  draw.strokeText(label, x, y); draw.fillText(label, x, y); draw.restore();
+}
+function paintHands(hands) {
   handsDraw.clearRect(0, 0, 640, 480);
   for (const hand of hands) {
     const points = hand.landmarks || [], color = hand.handedness === 'Left' ? '#4cdbab' : '#ffc071';
+    const at = p => [(1 - p[0]) * 640, p[1] * 480];
     handsDraw.strokeStyle = color; handsDraw.fillStyle = color; handsDraw.lineWidth = 2.5;
-    for (const [a,b] of handEdges) if (points[a] && points[b]) { handsDraw.beginPath(); handsDraw.moveTo((1-points[a][0])*640, points[a][1]*480); handsDraw.lineTo((1-points[b][0])*640, points[b][1]*480); handsDraw.stroke(); }
-    points.forEach((p,i) => { handsDraw.beginPath(); handsDraw.arc((1-p[0])*640,p[1]*480, i===0?5:3,0,Math.PI*2); handsDraw.fill(); });
-    if(points.length){handsDraw.font='14px sans-serif';handsDraw.fillText(`${hand.label || hand.handedness || 'Hand'} · ${(hand.score||0).toFixed(2)}`,Math.max(5,(1-points[0][0])*640),Math.max(16,points[0][1]*480-10));}
+    for (const [a, b] of handEdges) if (points[a] && points[b]) haloStroke(handsDraw, () => { handsDraw.beginPath(); handsDraw.moveTo(...at(points[a])); handsDraw.lineTo(...at(points[b])); });
+    points.forEach((p, i) => { handsDraw.beginPath(); handsDraw.arc(...at(p), i === 0 ? 5 : 3, 0, Math.PI * 2); handsDraw.fill(); });
+    if (points.length) { const [x, y] = at(points[0]); haloText(handsDraw, `${hand.label || hand.handedness || 'Hand'} · ${(hand.score || 0).toFixed(2)}`, Math.max(5, x), Math.max(16, y - 10)); }
   }
-  text('hands-status', hands.length ? `Tracking ${hands.length} hand${hands.length===1?'':'s'}` : 'No hand detected');
-  const box = mouth.mouth_box, image = $('camera');
-  if (!box || box.length !== 4 || !image || image.hidden || !image.naturalWidth) { mouthDraw.clearRect(0,0,320,200); text('mouth-status','Face not detected'); crop=null; return; }
-  const [bx,by,bw,bh]=box, aspect=1.6*image.naturalHeight/image.naturalWidth;
+  text('hands-status', hands.length ? `Tracking ${hands.length} hand${hands.length === 1 ? '' : 's'}` : 'No hand detected');
+}
+function paintTracking() {
+  if (!handsDraw || !mouthDraw || !latestTracking || Date.now() - trackingAt > 1500) { clearTracking(); return; }
+  const hands = latestTracking.hands || [], mouth = latestTracking.mouth || {};
+  paintHands(hands);
+  const box = mouth.mouth_box, source = previewSource();
+  if (!box || box.length !== 4 || !source) { mouthDraw.clearRect(0,0,320,200); text('mouth-status','Face not detected'); crop=null; return; }
+  const [bx,by,bw,bh]=box, aspect=1.6*source.height/source.width;
   const targetW=Math.min(1,Math.max(.18,bw*2.4)), targetH=Math.min(1,Math.max(targetW/aspect,bh*3.2));
   if(!crop) crop={x:1-(bx+bw/2),y:by+bh/2,w:targetW,h:targetH};
   const centerX=1-(bx+bw/2),centerY=by+bh/2;
@@ -425,43 +542,118 @@ function paintTracking() {
   crop.w=Math.max(.18,Math.min(1,crop.w)); crop.h=Math.max(crop.w/aspect,Math.min(1,crop.h));
   let left=Math.max(0,Math.min(1-crop.w,crop.x-crop.w/2)), top=Math.max(0,Math.min(1-crop.h,crop.y-crop.h/2));
   mouthDraw.clearRect(0,0,320,200);
-  mouthDraw.drawImage(image,left*image.naturalWidth,top*image.naturalHeight,crop.w*image.naturalWidth,crop.h*image.naturalHeight,0,0,320,200);
+  if (source.mirroredPixels) mouthDraw.drawImage(source.el,left*source.width,top*source.height,crop.w*source.width,crop.h*source.height,0,0,320,200);
+  else {
+    // Mirrored crop [left, left+w] is source [1-left-w, 1-left], drawn flipped.
+    mouthDraw.save(); mouthDraw.translate(320, 0); mouthDraw.scale(-1, 1);
+    mouthDraw.drawImage(source.el,(1-left-crop.w)*source.width,top*source.height,crop.w*source.width,crop.h*source.height,0,0,320,200);
+    mouthDraw.restore();
+  }
   const path=(points,close)=>{if(!Array.isArray(points)||points.length<2)return;mouthDraw.beginPath();points.forEach((p,i)=>{const x=((1-p[0])-left)/crop.w*320,y=(p[1]-top)/crop.h*200;i?mouthDraw.lineTo(x,y):mouthDraw.moveTo(x,y)});if(close)mouthDraw.closePath();mouthDraw.stroke();points.forEach(p=>{mouthDraw.beginPath();mouthDraw.arc(((1-p[0])-left)/crop.w*320,(p[1]-top)/crop.h*200,2.2,0,Math.PI*2);mouthDraw.fill()})};
   mouthDraw.strokeStyle='#ff5c9a';mouthDraw.fillStyle='#ff8bb3';mouthDraw.lineWidth=2.4;path(mouth.outer_lips,true);mouthDraw.lineWidth=1.8;path(mouth.inner_lips,true);
   text('mouth-status','Tracking lips · live landmarks');
 }
+
+// Camera loops run only while there is a live picture to show in a visible tab.
+let trackingRunning = false, previewRunning = false;
+function cameraLive() {
+  if (!state || state.rehearsal) return false;
+  return state.browser_camera === true ? Boolean(browserCameraStream) : state.camera === 'ready';
+}
+function trackingWanted() { return Boolean($('hands-overlay')) && cameraLive() && !document.hidden; }
+// GET /api/frame is only for a server-owned camera. A browser-owned camera shows its local video.
+function serverPreviewWanted() {
+  return Boolean($('camera')) && Boolean(state) && !state.rehearsal && state.browser_camera !== true && state.camera === 'ready' && !document.hidden;
+}
+function ensureCameraLoops() {
+  if (!trackingRunning && trackingWanted()) { trackingRunning = true; trackingPoll(); }
+  if (!previewRunning && serverPreviewWanted()) { previewRunning = true; preview(); }
+}
 async function trackingPoll() {
+  if (!trackingWanted()) { trackingRunning = false; clearTracking(); return; }
   try { const r=await fetch('/api/tracking'); if(!r.ok) throw Error(); latestTracking=await r.json(); trackingAt=Date.now(); paintTracking(); }
   catch (_) { if(Date.now()-trackingAt>1500) clearTracking(); }
   setTimeout(trackingPoll,100);
 }
+async function preview() {
+  if (!serverPreviewWanted()) { previewRunning = false; renderPreview(); return; }
+  try {
+    // Use the same-origin JPEG URL: blob URLs are intentionally blocked by CSP.
+    // Decode before replacing the displayed frame so failed requests never show
+    // a broken-image icon or make the mouth canvas draw an incomplete image.
+    const next = new Image();
+    next.src = '/api/frame?t=' + Date.now();
+    await next.decode();
+    const img = $('camera');
+    if (serverPreviewWanted()) { img.src = next.src; img.hidden = false; renderPreview(); }
+  } catch (_) {}
+  setTimeout(preview, 100);
+}
+function previewStatusText(s) {
+  if (s.rehearsal) return 'Preview · camera off';
+  if (s.browser_camera === true) return browserCameraStream ? 'Camera on · mirrored' : browserCameraStarting ? 'Starting camera…' : 'Camera off';
+  if (s.camera === 'ready') return 'Camera on';
+  return s.camera === 'unavailable' ? 'Camera unavailable' : 'Getting ready…';
+}
+function cameraMessageText(s) {
+  if (s.rehearsal) return 'Your camera is off in preview.';
+  if (s.browser_camera === true) return 'Select Start camera to share this browser camera.';
+  if (s.camera === 'unavailable') return 'Allow camera access in your browser, or type your message below.';
+  return 'Getting your camera ready…';
+}
+// Single owner of which picture is visible: local video, server JPEG or placeholder.
+function renderPreview() {
+  const image = $('camera'), video = $('browser-camera');
+  if (!image && !video) return;
+  const serverOwned = Boolean(state) && !state.rehearsal && state.browser_camera !== true;
+  if (video) video.hidden = !browserCameraStream;
+  if (image && !serverOwned) image.hidden = true;
+  if (state) text('preview-status', previewStatusText(state));
+  let showing = Boolean(browserCameraStream);
+  if (serverOwned && image) {
+    showing = !image.hidden && image.naturalWidth > 0;
+    // A stopped server camera keeps its last decoded frame, labelled as such.
+    if (showing && state.camera !== 'ready') text('preview-status', 'Camera off · last frame');
+  }
+  hide('camera-placeholder', showing);
+  $('camera-preview')?.classList.toggle('live', showing);
+  ensureCameraLoops();
+}
+
+function pollShouldBeFast() {
+  if (!state || pendingActions > 0 || speaking || stopSpeakingPending) return true;
+  if (browserCameraStream || browserCameraStarting || browserCameraStopping) return true;
+  if (state.phase !== 'idle' || state.session_active === true || state.session_finalizing === true
+      || state.auto_recognition === true || state.speaking === true || state.cleanup?.status === 'pending') return true;
+  // A server-owned camera can produce gesture results at any moment.
+  if (!state.rehearsal && state.browser_camera !== true && state.camera === 'ready') return true;
+  return Date.now() - lastUserActivity < RECENT_ACTIVITY_MS;
+}
+function pollDelay() {
+  const actionPending = pendingActions > 0 || speaking || stopSpeakingPending;
+  let delay = pollShouldBeFast() ? POLL_FAST_MS : POLL_IDLE_MS;
+  if (document.hidden && !actionPending) delay = Math.max(delay, POLL_HIDDEN_MS);
+  if (connectionLost) delay = Math.min(delay, POLL_RECONNECT_MS);
+  return delay;
+}
+function schedulePoll(delay = pollDelay()) {
+  clearTimeout(pollTimer);
+  pollDueAt = Date.now() + delay;
+  pollTimer = setTimeout(poll, delay);
+}
+// Any user action returns polling to the fast rate at once.
+function wakePoll() {
+  lastUserActivity = Date.now();
+  if (!pollInFlight && pollTimer && pollDueAt - Date.now() > POLL_FAST_MS) schedulePoll(0);
+}
 async function poll() {
+  clearTimeout(pollTimer); pollTimer = null; pollInFlight = true;
   try {
     const response = await fetch('/api/state'); if (!response.ok) throw new Error();
     if (connectionLost) {text('error', ''); connectionLost = false;}
     const result = await response.json(); render(result);
   } catch (_) { connectionLost = true; persistEditor(); text('error', 'Connection lost. Reconnecting automatically. Your edit is kept in this tab; you can still type or copy it.'); if ($('speak')) $('speak').disabled = true; if ($('record')) $('record').disabled = true; if ($('save-correction')) $('save-correction').disabled = true; }
-  setTimeout(poll, 180);
-}
-async function preview() {
-  if (!$('camera')) return;
-  if (state && !state.rehearsal && state.camera === 'ready') {
-    try {
-      // Use the same-origin JPEG URL: blob URLs are intentionally blocked by CSP.
-      // Decode before replacing the displayed frame so failed requests never show
-      // a broken-image icon or make the mouth canvas draw an incomplete image.
-      const next = new Image();
-      next.src = '/api/frame?t=' + Date.now();
-      await next.decode();
-      const img = $('camera');
-      img.src = next.src; img.hidden = false; hide('camera-placeholder', true);
-    } catch (_) {}
-  } else {
-    const hasFrozenFrame = $('camera').naturalWidth > 0 && !$('camera').hidden;
-    hide('camera', !hasFrozenFrame); hide('camera-placeholder', hasFrozenFrame);
-    if (hasFrozenFrame && !browserCameraStream) text('preview-status', 'Camera off · last frame');
-  }
-  setTimeout(preview, 100);
+  finally { pollInFlight = false; schedulePoll(); }
 }
 document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
   if (hasCurrentMessage() && b.dataset.mode !== state?.mode && !confirmDiscard('Changing input clears the current message. Continue?')) return;
@@ -482,16 +674,31 @@ async function toggleRecording() {
   await requestAction(state.phase === 'recording' ? 'stop' : 'start');
 }
 if (recordButton) recordButton.onclick = toggleRecording;
+function largeDisplayOpen() { return Boolean($('large-display')) && !$('large-display').hidden; }
+// Escape closes the topmost layer first: the large display (a modal), then an
+// active recording is cancelled, then the guide closes.
 document.addEventListener('keydown', e => {
+  wakePoll();
+  if (largeDisplayOpen()) {
+    if (e.code === 'Escape' || e.key === 'Escape') { e.preventDefault(); closeLargeDisplay(); }
+    else if (e.key === 'Tab') { e.preventDefault(); $('large-close')?.focus(); }
+    return;
+  }
   if (e.code === 'Escape' && state && state.phase !== 'idle') {requestAction('cancel'); return;}
   if (e.code === 'Escape' && $('first-use-guide') && !$('first-use-guide').hidden) { setGuide(false); $('open-guide')?.focus(); return; }
   if (!recordButton || ['INPUT','SELECT','TEXTAREA','BUTTON','A','SUMMARY'].includes(e.target.tagName) || e.target.isContentEditable) return;
   if (e.code === 'Space' && !e.repeat && !recordButton.disabled) {e.preventDefault(); toggleRecording();}
 });
+document.addEventListener('pointerdown', wakePoll, {passive:true});
+document.addEventListener('input', wakePoll, true);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) wakePoll();
+  ensureCameraLoops();
+});
 if ($('cancel')) $('cancel').onclick = () => {keyHeld = pointerHeld = false; requestAction('cancel');};
 if ($('speak')) $('speak').onclick = speakMessage;
 if ($('corrected-text')) $('corrected-text').addEventListener('input', editMessage);
-if ($('save-correction')) $('save-correction').onclick = async () => {
+async function applyEditedMessage() {
   if (!state || pendingActions || $('save-correction').disabled) return;
   const value = $('corrected-text').value;
   const applied = await requestAction('correct', {revision:state.revision, text:value,
@@ -501,7 +708,60 @@ if ($('save-correction')) $('save-correction').onclick = async () => {
     $('learn-correction').checked = false;
     updateMessage(); $('speak')?.focus();
   }
-};
+}
+if ($('save-correction')) $('save-correction').onclick = applyEditedMessage;
+// Ctrl+Enter / Cmd+Enter in the editor = Use this message, with the same guards. It never speaks.
+if ($('corrected-text')) $('corrected-text').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || e.isComposing) return;
+  e.preventDefault();
+  if ($('save-correction')) return applyEditedMessage();
+});
+async function stopSpeaking() {
+  if (stopSpeakingPending || !token) return;
+  // Sent directly, not queued behind a slow action. Idempotent; never retried automatically.
+  stopSpeakingPending = true; updateMessage(); wakePoll();
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), ACTION_TIMEOUT_MS);
+  try {
+    const res = await fetch('/api/action/stop_speaking', {method:'POST', signal:controller.signal,
+      headers:{'Content-Type':'application/json', 'X-Lipflow-Token':token}, body:'{}'});
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Speech could not be stopped.');
+    render(result);
+  } catch (e) {
+    text('error', `${e.name === 'AbortError' ? 'Stopping speech timed out.' : e.message || 'Speech could not be stopped.'} Check whether it is still speaking, then try again.`);
+  } finally { clearTimeout(timer); stopSpeakingPending = false; updateMessage(); }
+}
+if ($('stop-speaking')) $('stop-speaking').onclick = stopSpeaking;
+// Large-type display for turning the screen toward someone. Shows only text the
+// user applied or selected. It never speaks, learns or changes the message.
+function largeTextSize(value) {
+  const n = value.length;
+  return n <= 24 ? 'size-xl' : n <= 70 ? 'size-l' : n <= 180 ? 'size-m' : n <= 500 ? 'size-s' : 'size-xs';
+}
+function openLargeDisplay() {
+  if (!state || !$('large-display')) return;
+  const value = largeDisplayText(messageView());
+  if (value === null) return;
+  largeDisplayOpener = $('show-large');
+  const display = $('large-text');
+  display.textContent = value;
+  ['size-xl', 'size-l', 'size-m', 'size-s', 'size-xs'].forEach(size => display.classList.toggle(size, size === largeTextSize(value)));
+  if ($('main')) $('main').inert = true;
+  $('large-display').hidden = false;
+  document.body?.classList?.add('large-open');
+  $('large-close')?.focus();
+}
+function closeLargeDisplay() {
+  if (!largeDisplayOpen()) return;
+  $('large-display').hidden = true;
+  if ($('main')) $('main').inert = false;
+  document.body?.classList?.remove('large-open');
+  // Return focus to the opener; if it became unavailable meanwhile, to the editor.
+  const opener = largeDisplayOpener; largeDisplayOpener = null;
+  if (opener && !opener.disabled) opener.focus(); else focusEditor();
+}
+if ($('show-large')) $('show-large').onclick = openLargeDisplay;
+if ($('large-close')) $('large-close').onclick = closeLargeDisplay;
 if ($('new-message')) $('new-message').onclick = async () => {
   if (!state || $('new-message').disabled) return;
   if (hasCurrentMessage() && !confirmDiscard('Start a new message? The current words and unfinished edit will be cleared.')) return;
@@ -610,4 +870,4 @@ if ($('profile-reload-btn')) $('profile-reload-btn').onclick = async () => {
 if ($('profile-switch-btn')) $('profile-switch-btn').onclick = handleProfileSwitch;
 if ($('profile-select')) loadProfilesList();
 
-poll(); preview(); trackingPoll();
+poll();

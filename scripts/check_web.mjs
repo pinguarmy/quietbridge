@@ -228,6 +228,24 @@ async function run(variant, coreOnly=false) {
     expect(await js(()=>!document.querySelector('#first-use-guide').hidden),'Space opens guide from keyboard',await js(()=>document.activeElement?.id));
     await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27}); await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
     expect(await js(()=>document.querySelector('#first-use-guide').hidden && document.activeElement?.id==='open-guide'),'Escape closes guide and restores focus',await js(()=>document.activeElement?.id));
+    currentCase='keyboard-apply-show-large';
+    // Real CDP keys: Ctrl+Enter applies (never speaks); Show large opens/closes with focus handling.
+    const speechBefore=(await snap()).speech_calls.length;
+    await edit('Shown with large type');
+    await evaluate("document.querySelector('#corrected-text').focus()");
+    await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,modifiers:2});
+    await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,modifiers:2});
+    await waitFor(async()=> (await state()).decision.text==='Shown with large type','Ctrl+Enter applies the typed message');
+    expect((await visible()).editor==='Shown with large type','Ctrl+Enter inserted no newline',await visible());
+    await waitFor(()=>evaluate("!document.querySelector('#show-large').disabled"),'Show large available for applied text');
+    await evaluate("document.querySelector('#show-large').focus()");
+    await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'});
+    await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    const large=await js(()=>({open:!document.querySelector('#large-display').hidden,focus:document.activeElement?.id,text:document.querySelector('#large-text').textContent,inert:document.querySelector('main').inert,fills:document.querySelector('#large-display').getBoundingClientRect().width===innerWidth}));
+    expect(large.open && large.focus==='large-close' && large.text==='Shown with large type' && large.inert && large.fills,'Show large opens full-width with focus inside',large);
+    await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27}); await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+    expect(await js(()=>document.querySelector('#large-display').hidden && document.activeElement?.id==='show-large' && !document.querySelector('main').inert),'Escape closes Show large and restores focus',await js(()=>document.activeElement?.id));
+    expect((await snap()).speech_calls.length===speechBefore,'Ctrl+Enter and Show large never dispatch speech',await snap());
     currentCase='camera-permission-owner';
     // Synthetic permission promises on the actual DOM, never a physical device.
     // Capture requests are intercepted; the rehearsal backend is not changed.
@@ -264,7 +282,7 @@ async function run(variant, coreOnly=false) {
     expect(await js(()=>document.querySelector('#newProfileDialog').contains(document.activeElement)),'Tab remains inside lab modal',await js(()=>document.activeElement?.id));
     await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27}); await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
     expect(await js(()=>document.querySelector('#newProfileDialog').hidden && document.activeElement?.id==='btnNewProfile'),'Escape closes modal and restores focus',await js(()=>document.activeElement?.id));
-    console.log('PASS focused browser contracts (dispatched input; real keyboard and native dialogs; silent fixture)');
+    console.log('PASS focused browser contracts (dispatched input; real keyboard and native dialogs; Ctrl+Enter and Show large via CDP keys; silent fixture)');
   } finally {
     if(cdp && browser && browser.exitCode===null) {try {await Promise.race([cdp.send('Browser.close'),sleep(1000)]);} catch {} }
     const waitExit=async child=>{if(child.exitCode!==null || child.signalCode!==null) return; await Promise.race([new Promise(resolve=>child.once('exit',resolve)),sleep(2000)]); if(child.exitCode===null && child.signalCode===null){child.kill('SIGKILL'); await new Promise(resolve=>child.once('exit',resolve));}};
