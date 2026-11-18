@@ -40,58 +40,11 @@ def put_latest(q, value):
     return dropped
 
 
-MOTION_PHRASES = {"HELLO": "Hi", "WELCOME": "Welcome", "OPENAI": "OpenAI",
-                  "DDE": "DEE", "HACKATHON": "Hackathon"}
-
-
-class _MotionWindow:
-    """Experimental sliding-window adapter; no images or training samples saved."""
-    def __init__(self, model):
-        self.model = model
-        self.frames = deque(maxlen=240)
-        self.last_check = None
-        self.latched = None
-        self.quiet_since = None
-        self.candidate = None
-        self.streak = 0
-
-    def update(self, hands, timestamp_ms):
-        import numpy as np
-        landmarks = np.zeros((2, 21, 3), dtype=np.float32)
-        present = np.zeros(2, dtype=bool)
-        handedness = np.full(2, "", dtype="U5")
-        for slot, hand in enumerate(hands[:2]):
-            points = np.asarray(hand.get("landmarks", []), dtype=np.float32)
-            if points.shape == (21, 3):
-                landmarks[slot] = points
-                present[slot] = True
-                handedness[slot] = hand.get("handedness", "")
-        self.frames.append((timestamp_ms, landmarks, present, handedness))
-        while self.frames and timestamp_ms - self.frames[0][0] > 4000:
-            self.frames.popleft()
-        if (len(self.frames) < 20 or timestamp_ms - self.frames[0][0] < 3000
-                or (self.last_check is not None and timestamp_ms - self.last_check < 1000)):
-            return []
-        self.last_check = timestamp_ms
-        trial = {"timestamps_ms": np.array([f[0] for f in self.frames]),
-                 "landmarks": np.stack([f[1] for f in self.frames]),
-                 "hand_present": np.stack([f[2] for f in self.frames]),
-                 "handedness": np.stack([f[3] for f in self.frames])}
-        label, score = self.model.predict(trial)
-        if label not in MOTION_PHRASES or not np.isfinite(score) or score < .75:
-            self.candidate, self.streak = None, 0
-            if self.quiet_since is None:
-                self.quiet_since = timestamp_ms
-            elif timestamp_ms - self.quiet_since >= 1000:
-                self.latched = None
-            return []
-        self.quiet_since = None
-        self.streak = self.streak + 1 if label == self.candidate else 1
-        self.candidate = label
-        if self.streak < 2 or self.latched is not None:
-            return []
-        self.latched = label
-        return [SignEvent(label, float(score), self.frames[0][0], timestamp_ms, True)]
+def _motion_vocabulary_error(path):
+    return ValueError(
+        f"Custom motion model {path} has no vocabulary. Select the profile that owns it "
+        "(--profile) or pass --vocabulary with its label-to-phrase mapping; stock gesture "
+        "meanings and fixed phrases are never applied to a custom motion model.")
 
 
 class ProfileSwitchConflict(RuntimeError):
@@ -142,10 +95,9 @@ class Runtime:
         self._lip_activity = LipActivityDetector(self.lip_activity_config)
         self.vocabulary = {} if self.isolated_sign_model_path else (load_vocabulary() if vocabulary is None else vocabulary)
         if self.motion_model_path and not self.isolated_sign_model_path and not rehearsal and vocabulary is None:
-            # Stock pose meanings must never leak into the custom motion session.
-            self.vocabulary = {label: {"display_name": phrase, "phrase": phrase,
-                               "matches": [phrase], "enabled": True, "verified": False}
-                               for label, phrase in MOTION_PHRASES.items()}
+            # Stock pose meanings must never leak into the custom motion session,
+            # and a model without its own label-to-phrase mapping fails visibly.
+            raise _motion_vocabulary_error(self.motion_model_path)
         self._fusion_vocabulary = ({k: {**v, "verified": True} for k, v in self.vocabulary.items()}
                                    if rehearsal else self.vocabulary)
         self.lock = threading.RLock()
@@ -162,7 +114,11 @@ class Runtime:
         self.frame_times = deque()
         self.events = deque(maxlen=100)
         self.seen = deque(maxlen=200)
-        self.jpeg = None
+        # Preview: keep only the latest frame reference; encode lazily on request.
+        self._preview_frame = None
+        self._preview_seq = 0
+        self._preview_cache = None  # (sequence, mirrored JPEG bytes)
+        self._preview_encode_lock = threading.Lock()
         self._last_frame_timestamp_ms = None
         self.tracking = {"hands": [], "mouth": None}
         self.speaker = Speaker()
@@ -245,11 +201,10 @@ class Runtime:
         workers = [] if self.browser_camera else [("capture", self._capture)]
         workers += [("hands", self._hands), *([("lips", self._lips)] if self.enable_lips else [])]
         for name, target in workers:
-            def run_worker(t=target, worker_stop=self._worker_stop):
-                try:
-                    t(worker_gen, worker_stop)
-                except TypeError:
-                    t()
+            # Every worker takes (generation, stop event). A TypeError raised
+            # inside a worker must never re-run it with default arguments.
+            def run_worker(t=target, generation=worker_gen, worker_stop=self._worker_stop):
+                t(generation, worker_stop)
             thread = threading.Thread(target=run_worker, name=f"demo-{name}", daemon=True)
             self.threads.append(thread)
             thread.start()
@@ -269,7 +224,72 @@ class Runtime:
                                   "revision": self.revision,
                                   "confirmed": self.confirmed_revision == self.revision,
                                   "rehearsal": self.rehearsal, "browser_camera": self.browser_camera,
-                                  "speech_available": self.speaker.available, "vocabulary": self.vocabulary})
+                                  "speech_available": self.speaker.available,
+                                  "speaking": self._speaker_speaking(),
+                                  "speech_backend": self._speaker_backend(),
+                                  "vocabulary": self.vocabulary})
+
+    def _speaker_speaking(self):
+        # Strict: test doubles (e.g. Mock) answer any attribute with a truthy object.
+        try:
+            return getattr(self.speaker, "speaking", False) is True
+        except Exception:
+            return False
+
+    def _speaker_backend(self):
+        try:
+            backend = getattr(self.speaker, "backend", None)
+        except Exception:
+            return None
+        return backend if isinstance(backend, str) else None
+
+    def stop_speaking(self):
+        """Stop local speech. Never touches the message, revision or phase."""
+        stop = getattr(self.speaker, "stop", None)
+        if callable(stop):
+            stop()
+
+    @property
+    def jpeg(self):
+        """Mirrored JPEG of the latest camera frame, or None (encoded on demand)."""
+        return self.preview_jpeg()
+
+    @jpeg.setter
+    def jpeg(self, value):
+        with self.lock:
+            self._preview_seq += 1
+            self._preview_frame = None
+            self._preview_cache = None if value is None else (self._preview_seq, bytes(value))
+
+    def _set_preview_frame(self, frame_bgr):
+        # Caller holds self.lock. Frames are read-only for consumers.
+        self._preview_seq += 1
+        self._preview_frame = frame_bgr
+
+    def preview_jpeg(self):
+        """Encode the latest frame at most once, outside the runtime lock."""
+        with self.lock:
+            frame, seq, cache = self._preview_frame, self._preview_seq, self._preview_cache
+        if cache is not None and cache[0] == seq:
+            return cache[1]
+        if frame is None:
+            return None
+        with self._preview_encode_lock:
+            with self.lock:
+                cache = self._preview_cache
+            if cache is not None and cache[0] == seq:
+                return cache[1]
+            import cv2
+            ok, encoded = cv2.imencode(".jpg", cv2.flip(frame, 1), [cv2.IMWRITE_JPEG_QUALITY, 75])
+            if not ok:
+                return None
+            data = encoded.tobytes()
+            with self.lock:
+                if self._preview_seq == seq:
+                    self._preview_cache = (seq, data)
+                elif self._preview_frame is None:
+                    return None  # Cleared (camera stop / profile switch) while encoding.
+            return data
 
     def tracking_snapshot(self):
         with self.lock:
@@ -367,6 +387,11 @@ class Runtime:
                     self._publish(None, [event], now)
 
     def action(self, name, data):
+        if name == "stop_speaking":
+            # Allowed in any phase and idempotent. Stopping can wait for the
+            # speech process to exit, so it deliberately runs outside the lock.
+            self.stop_speaking()
+            return
         with self.lock:
             if getattr(self, "_switching_profile", False):
                 raise ProfileSwitchConflict("A profile switch is in progress")
@@ -483,10 +508,9 @@ class Runtime:
                 self._publish(None, [], clock_ms())
             elif name == "new_message":
                 self._check_revision(data)
-                process = getattr(self.speaker, "_process", None)
                 if (self.state["session_active"] or self.state["session_finalizing"]
                         or self.state["phase"] != "idle"
-                        or (process is not None and process.poll() is None)):
+                        or self._speaker_speaking()):
                     raise ValueError("Finish the current input or speech before starting a new message")
                 # Cancel publishes a decision, so discard the accumulated session first.
                 self.session.reset()
@@ -695,8 +719,6 @@ class Runtime:
 
     def receive_frame(self, frame_bgr, timestamp_ms=None):
         """Ingest one browser frame; return False for a repeated timestamp."""
-        import cv2
-
         with self.lock:
             if getattr(self, "_switching_profile", False):
                 return False
@@ -709,10 +731,8 @@ class Runtime:
             self._note_frame_time(now)
             # Frames are read-only for consumers; preview processing uses a new array.
             self._queue_camera_frame(frame_bgr, now)
-            ok, encoded = cv2.imencode(".jpg", cv2.flip(frame_bgr, 1),
-                                       [cv2.IMWRITE_JPEG_QUALITY, 75])
-            if ok:
-                self.jpeg = encoded.tobytes()
+            # No encode here: the preview is produced only if GET /api/frame asks.
+            self._set_preview_frame(frame_bgr)
             self.state["camera"] = "ready"
             return True
 
@@ -729,7 +749,6 @@ class Runtime:
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, 960)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 540)
             cap.set(cv2.CAP_PROP_FPS, 30)
-            last_preview = 0
             last_frame = time.perf_counter()
             while not self.stop.is_set() and (worker_stop is None or not worker_stop.is_set()):
                 if worker_gen != self._worker_generation:
@@ -749,15 +768,9 @@ class Runtime:
                 with self.lock:
                     if worker_gen == self._worker_generation:
                         self._queue_camera_frame(frame, now)
+                        self._set_preview_frame(frame)
                         self.state["camera"] = "ready"
                         self._note_frame_time(now)
-                if now - last_preview >= 100:
-                    ok, encoded = cv2.imencode(".jpg", cv2.flip(frame, 1), [cv2.IMWRITE_JPEG_QUALITY, 75])
-                    if ok:
-                        with self.lock:
-                            if worker_gen == self._worker_generation:
-                                self.jpeg = encoded.tobytes()
-                    last_preview = now
         except Exception as exc:
             with self.lock:
                 if worker_gen == self._worker_generation:
@@ -1100,14 +1113,18 @@ class Runtime:
             else:
                 new_vocab, new_motion, new_warning = profile_configuration(new_profile)
 
-            if new_vocab is None:
-                new_vocab = load_vocabulary()
-
             # Motion model resolution
             if self._explicit_motion_model is not None:
                 target_motion = self._explicit_motion_model
             else:
                 target_motion = new_motion
+
+            if new_vocab is None:
+                if (target_motion is not None and not self.rehearsal
+                        and self.isolated_sign_model_path is None):
+                    # Same rule as startup: no stock meanings for a custom model.
+                    raise _motion_vocabulary_error(target_motion)
+                new_vocab = load_vocabulary()
 
             if target_motion is not None and not Path(target_motion).is_file():
                 raise FileNotFoundError(f"Motion model not found: {target_motion}")

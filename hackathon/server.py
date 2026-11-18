@@ -7,12 +7,21 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlencode
 import secrets
+import socket
+import sys
 import threading
+import traceback
+import webbrowser
 
 from .runtime import Runtime, ProfileSwitchConflict
 from .profiles import ProfileManager, profile_configuration
 
 UI = Path(__file__).with_name("ui")
+# Idle keep-alive connections close after this many seconds; server_close()
+# also shuts down every open connection so restarts never reuse old handlers.
+IDLE_TIMEOUT_S = 15
+# Largest ignored request body drained to keep a keep-alive connection usable.
+MAX_DRAIN_BYTES = 1024 * 1024
 
 
 class _LazyLabEngine:
@@ -48,8 +57,88 @@ def make_server(runtime, port=8765):
         return {**runtime.snapshot(), "token": token, "server_instance": server_instance}
 
     class Handler(BaseHTTPRequestHandler):
+        # HTTP/1.1 keep-alive: the page polls state, tracking and frames many
+        # times per second. Every response carries Content-Length, and an
+        # unread request body is drained or the connection is closed.
+        protocol_version = "HTTP/1.1"
+        timeout = IDLE_TIMEOUT_S  # idle keep-alive connections do not linger
+        # Headers and body are separate writes; with Nagle plus the client's
+        # delayed ACK each keep-alive response would stall for ~40 ms.
+        disable_nagle_algorithm = True
+
         def log_message(self, *args):
             pass
+
+        def setup(self):
+            super().setup()
+            self.server.track_connection(self.connection, True)
+
+        def finish(self):
+            try:
+                super().finish()
+            finally:
+                self.server.track_connection(self.connection, False)
+
+        def _begin(self):
+            self._body_consumed = False
+            self._responded = False
+
+        def _read_body(self, length):
+            self._body_consumed = True
+            return self.rfile.read(length)
+
+        def _drain_unread_body(self):
+            """Keep the connection usable after a response that ignored the body."""
+            if getattr(self, "_body_consumed", True):
+                return
+            self._body_consumed = True
+            if self.headers.get("Transfer-Encoding"):
+                self.close_connection = True
+                return
+            try:
+                remaining = int(self.headers.get("Content-Length", "0") or 0)
+            except ValueError:
+                self.close_connection = True
+                return
+            if remaining <= 0:
+                return
+            if remaining > MAX_DRAIN_BYTES:
+                self.close_connection = True
+                remaining = MAX_DRAIN_BYTES  # read what we can so the reply is not reset
+            previous = self.connection.gettimeout()
+            self.connection.settimeout(0.25)
+            try:
+                while remaining:
+                    chunk = self.rfile.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+            except (TimeoutError, OSError):
+                pass
+            finally:
+                try:
+                    self.connection.settimeout(previous)
+                except OSError:
+                    pass
+            if remaining:
+                self.close_connection = True
+
+        def _dispatch(self, handler):
+            self._begin()
+            try:
+                handler()
+            except (BrokenPipeError, ConnectionResetError):
+                self.close_connection = True
+            except Exception:
+                # Unexpected failures answer with a generic 500; details stay in the log.
+                traceback.print_exc(file=sys.stderr)
+                if self._responded:
+                    self.close_connection = True
+                    return
+                try:
+                    self._json(500, {"error": "Internal server error; see the server log"})
+                except OSError:
+                    self.close_connection = True
 
         def _local_request(self):
             allowed = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
@@ -58,13 +147,21 @@ def make_server(runtime, port=8765):
                 return False
             return True
 
-        def _send(self, status, body, content_type):
+        def _send(self, status, body, content_type, headers=()):
+            self._drain_unread_body()
+            if self.server.closing:
+                self.close_connection = True
+            self._responded = True
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self'; connect-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'")
+            for name, value in headers:
+                self.send_header(name, value)
+            if self.close_connection:
+                self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
 
@@ -72,53 +169,53 @@ def make_server(runtime, port=8765):
             self._send(status, json.dumps(data).encode(), "application/json; charset=utf-8")
 
         def do_GET(self):
+            self._dispatch(self._get)
+
+        def do_POST(self):
+            self._dispatch(self._post)
+
+        def _get(self):
             if not self._local_request():
                 return
             path = self.path.split("?", 1)[0]
-            try:
-                if path == "/api/state":
-                    self._json(200, state_payload())
-                elif path == "/api/cleanup/config":
-                    self._json(200, runtime.cleanup_config())
-                elif path == "/api/profiles":
-                    manager = getattr(runtime, "profile_manager", None) or ProfileManager()
-                    with runtime.lock:
-                        active_id = runtime.profile.id if runtime.profile else manager.active_profile_id
-                    self._json(200, {
-                        "active_profile": active_id,
-                        "profiles": manager.list_profiles(include_stats=True),
-                    })
-                elif path == "/api/tracking":
-                    self._json(200, runtime.tracking_snapshot())
-                elif path == "/api/frame":
-                    with runtime.lock:
-                        jpeg = runtime.jpeg
-                    if jpeg:
-                        self._send(200, jpeg, "image/jpeg")
-                    else:
-                        self._json(503, {"error": "No camera frame yet"})
-                elif path == "/record":
-                    try:
-                        lab = self.server.personalize_server()
-                    except (OSError, ValueError, RuntimeError) as exc:
-                        self._json(503, {"error": f"Personalize could not start: {exc}"})
-                        return
-                    self.send_response(302)
-                    return_to = f"http://127.0.0.1:{self.server.server_port}/"
-                    self.send_header("Location", f"http://127.0.0.1:{lab.server_port}/?" + urlencode({"return_to": return_to}))
-                    self.send_header("Cache-Control", "no-store")
-                    self.send_header("Content-Length", "0")
-                    self.end_headers()
-                elif path in {"/", "/index.html", "/settings", "/settings.html", "/app.js", "/cleanup-settings.js", "/cleanup-display.js", "/style.css"}:
-                    filename = {"/": "index.html", "/settings": "settings.html"}.get(path, path[1:])
-                    mime = {"index.html": "text/html", "settings.html": "text/html", "app.js": "text/javascript", "cleanup-settings.js": "text/javascript", "cleanup-display.js": "text/javascript", "style.css": "text/css"}[filename]
-                    self._send(200, (UI / filename).read_bytes(), mime + "; charset=utf-8")
+            if path == "/api/state":
+                self._json(200, state_payload())
+            elif path == "/api/cleanup/config":
+                self._json(200, runtime.cleanup_config())
+            elif path == "/api/profiles":
+                manager = getattr(runtime, "profile_manager", None) or ProfileManager()
+                with runtime.lock:
+                    active_id = runtime.profile.id if runtime.profile else manager.active_profile_id
+                self._json(200, {
+                    "active_profile": active_id,
+                    "profiles": manager.list_profiles(include_stats=True),
+                })
+            elif path == "/api/tracking":
+                self._json(200, runtime.tracking_snapshot())
+            elif path == "/api/frame":
+                # Encoded on demand, outside the runtime lock.
+                jpeg = runtime.preview_jpeg()
+                if jpeg:
+                    self._send(200, jpeg, "image/jpeg")
                 else:
-                    self._json(404, {"error": "Not found"})
-            except (BrokenPipeError, ConnectionResetError):
-                pass
+                    self._json(503, {"error": "No camera frame yet"})
+            elif path == "/record":
+                try:
+                    lab = self.server.personalize_server()
+                except (OSError, ValueError, RuntimeError) as exc:
+                    self._json(503, {"error": f"Personalize could not start: {exc}"})
+                    return
+                return_to = f"http://127.0.0.1:{self.server.server_port}/"
+                location = f"http://127.0.0.1:{lab.server_port}/?" + urlencode({"return_to": return_to})
+                self._send(302, b"", "text/plain; charset=utf-8", [("Location", location)])
+            elif path in {"/", "/index.html", "/settings", "/settings.html", "/app.js", "/cleanup-settings.js", "/cleanup-display.js", "/style.css"}:
+                filename = {"/": "index.html", "/settings": "settings.html"}.get(path, path[1:])
+                mime = {"index.html": "text/html", "settings.html": "text/html", "app.js": "text/javascript", "cleanup-settings.js": "text/javascript", "cleanup-display.js": "text/javascript", "style.css": "text/css"}[filename]
+                self._send(200, (UI / filename).read_bytes(), mime + "; charset=utf-8")
+            else:
+                self._json(404, {"error": "Not found"})
 
-        def do_POST(self):
+        def _post(self):
             if not self._local_request():
                 return
             origin = self.headers.get("Origin")
@@ -140,20 +237,22 @@ def make_server(runtime, port=8765):
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= 8192:
                     raise ValueError("Invalid request size")
-                data = json.loads(self.rfile.read(length))
+                data = json.loads(self._read_body(length))
                 if not isinstance(data, dict):
                     raise ValueError("Expected a JSON object")
                 if self.path == "/api/cleanup/config":
-                    self._json(200, runtime.configure_cleanup(data))
+                    payload = runtime.configure_cleanup(data)
                 elif self.path == "/api/cleanup/test":
-                    self._json(200, runtime.test_cleanup())
+                    payload = runtime.test_cleanup()
                 else:
                     runtime.action(self.path.removeprefix("/api/action/"), data)
-                    self._json(200, state_payload())
+                    payload = state_payload()
+            except (BrokenPipeError, ConnectionResetError):
+                raise
             except (ValueError, TypeError, RuntimeError, OSError) as exc:
                 self._json(400, {"error": str(exc)})
-            except (BrokenPipeError, ConnectionResetError):
-                pass
+                return
+            self._json(200, payload)
 
         def _handle_frame(self):
             if not runtime.browser_camera or runtime.rehearsal:
@@ -172,6 +271,7 @@ def make_server(runtime, port=8765):
                 # Drain the declared request without retaining it. Closing before
                 # the body is read races the client's send and can surface as a
                 # BrokenPipe instead of the intended 413 response.
+                self._body_consumed = True
                 remaining = length
                 self.connection.settimeout(0.25)
                 try:
@@ -190,7 +290,7 @@ def make_server(runtime, port=8765):
                 self.close_connection = True
                 self._json(400, {"error": "A JPEG frame is required"})
                 return
-            body = self.rfile.read(length)
+            body = self._read_body(length)
             import cv2
             import numpy as np
             frame = cv2.imdecode(np.frombuffer(body, dtype=np.uint8), cv2.IMREAD_COLOR)
@@ -205,7 +305,7 @@ def make_server(runtime, port=8765):
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= 8192:
                     raise ValueError("Invalid request size")
-                body = self.rfile.read(length)
+                body = self._read_body(length)
                 try:
                     data = json.loads(body)
                 except ValueError:
@@ -221,25 +321,49 @@ def make_server(runtime, port=8765):
                 payload["profile"] = profile.to_dict(include_stats=True)
                 payload["ok"] = True
                 payload.update(state_payload())
-                self._json(200, payload)
             except ProfileSwitchConflict as exc:
                 self._json(409, {"error": str(exc)})
+                return
             except (KeyError, ValueError, FileNotFoundError) as exc:
                 self._json(400, {"error": str(exc)})
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            except Exception as exc:
-                self._json(500, {"error": str(exc)})
+                return
+            # Anything else reaches _dispatch: a generic 500, details in the log.
+            self._json(200, payload)
 
     class MainServer(ThreadingHTTPServer):
         daemon_threads = True
 
         def __init__(self, address):
-            super().__init__(address, Handler)
+            # Set before binding: a failed bind calls server_close() from
+            # TCPServer.__init__, which must report the real OSError.
             self._lab_lock = threading.Lock()
             self._lab = None
             self._lab_thread = None
             self._closed = False
+            self._connections_lock = threading.Lock()
+            self._connections = set()
+            super().__init__(address, Handler)
+
+        @property
+        def closing(self):
+            return self._closed
+
+        def track_connection(self, connection, open_):
+            with self._connections_lock:
+                if open_:
+                    self._connections.add(connection)
+                else:
+                    self._connections.discard(connection)
+
+        def _shutdown_connections(self):
+            with self._connections_lock:
+                connections = list(self._connections)
+            for connection in connections:
+                try:
+                    # Wake handler threads blocked on an idle keep-alive read.
+                    connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
 
         def personalize_server(self):
             with self._lab_lock:
@@ -282,8 +406,22 @@ def make_server(runtime, port=8765):
                 lab.server_close()
                 lab.engine.close()
             super().server_close()
+            self._shutdown_connections()
 
     return MainServer(("127.0.0.1", port))
+
+
+def open_in_browser(url, opener=None):
+    """Best-effort: open the printed URL without delaying or failing the server."""
+    def run():
+        try:
+            (opener or webbrowser.open)(url)
+        except Exception as exc:  # never fatal: the URL is printed as well
+            print(f"Could not open a browser ({exc}); open {url} manually.",
+                  file=sys.stderr, flush=True)
+    thread = threading.Thread(target=run, name="quietbridge-open-browser", daemon=True)
+    thread.start()
+    return thread
 
 
 def main():
@@ -300,6 +438,8 @@ def main():
     parser.add_argument("--lip-language-model", type=Path, help="Explicit personal language-model weights")
     parser.add_argument("--sign-model", type=Path, help="Explicit local BSL/ASL isolated-sign manifest; replaces stock/personal gesture backend")
     parser.add_argument("--max-utterance-seconds", type=float, default=30.0)
+    parser.add_argument("--open", action="store_true",
+                        help="Open the printed loopback URL in the default browser once listening")
     args = parser.parse_args()
     from .profiles import (ProfileManager, profile_language_model,
                            profile_lip_model)
@@ -311,26 +451,33 @@ def main():
     lip_model = args.lip_model or (promoted_lip if promoted_lip.is_file() else None)
     language_model = args.lip_language_model or (promoted_language if promoted_language.is_file() else None)
     use_profile = args.profile is not None or motion_model is not None or lip_model is not None or language_model is not None
-    runtime = Runtime(rehearsal=args.rehearsal, browser_camera=args.browser_camera,
-                      camera=args.camera, enable_lips=not args.sign_only,
-                      vocabulary=vocabulary, lip_model=lip_model,
-                      lip_language_model=language_model,
-                      motion_model=motion_model, sign_model=args.sign_model,
-                      profile_name=profile.name if use_profile else None,
-                      profile=profile if use_profile else None,
-                      configuration_warning=profile_warning,
-                      max_utterance_seconds=args.max_utterance_seconds,
-                      profile_manager=profiles,
-                      explicit_lip_model=args.lip_model,
-                      explicit_lip_language_model=args.lip_language_model,
-                      explicit_vocabulary_path=args.vocabulary)
+    try:
+        runtime = Runtime(rehearsal=args.rehearsal, browser_camera=args.browser_camera,
+                          camera=args.camera, enable_lips=not args.sign_only,
+                          vocabulary=vocabulary, lip_model=lip_model,
+                          lip_language_model=language_model,
+                          motion_model=motion_model, sign_model=args.sign_model,
+                          profile_name=profile.name if use_profile else None,
+                          profile=profile if use_profile else None,
+                          configuration_warning=profile_warning,
+                          max_utterance_seconds=args.max_utterance_seconds,
+                          profile_manager=profiles,
+                          explicit_lip_model=args.lip_model,
+                          explicit_lip_language_model=args.lip_language_model,
+                          explicit_vocabulary_path=args.vocabulary)
+    except ValueError as exc:
+        parser.error(str(exc))
     server = make_server(runtime, args.port)
     runtime.start()
-    print(f"QuietBridge: http://127.0.0.1:{server.server_port}", flush=True)
+    url = f"http://127.0.0.1:{server.server_port}"
+    print(f"QuietBridge: {url}", flush=True)
     print("REHEARSAL — synthetic inputs, no recognition" if args.rehearsal else
           "BROWSER CAMERA — allow camera access in the browser. Wait for warmup before recording."
           if args.browser_camera else
           "LOCAL — no cloud inference. Wait for warmup before recording.", flush=True)
+    if args.open:
+        # The socket is already listening; requests queue until serve_forever runs.
+        open_in_browser(url)
     try:
         server.serve_forever(poll_interval=0.2)
     except KeyboardInterrupt:

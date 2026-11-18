@@ -32,9 +32,9 @@ def request(port, method, path, body=None, headers=None):
 
 def test_browser_runtime_waits_and_starts_workers_without_native_capture():
     runtime = Runtime(browser_camera=True, vocabulary={})
-    runtime._capture = lambda: pytest.fail("native capture must not start")
-    runtime._hands = lambda: None
-    runtime._lips = lambda: None
+    runtime._capture = lambda *_: pytest.fail("native capture must not start")
+    runtime._hands = lambda *_: None
+    runtime._lips = lambda *_: None
     try:
         state = runtime.snapshot()
         assert state["browser_camera"] is True
@@ -46,9 +46,9 @@ def test_browser_runtime_waits_and_starts_workers_without_native_capture():
         runtime.close()
 
     native = Runtime(vocabulary={})
-    native._capture = lambda: None
-    native._hands = lambda: None
-    native._lips = lambda: None
+    native._capture = lambda *_: None
+    native._hands = lambda *_: None
+    native._lips = lambda *_: None
     try:
         native.start()
         assert [thread.name for thread in native.threads] == ["demo-capture", "demo-hands", "demo-lips"]

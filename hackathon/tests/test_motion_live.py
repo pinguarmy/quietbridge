@@ -1,66 +1,61 @@
-"""Live motion wiring tests: no camera or model inference required."""
+"""Live motion wiring contracts with fakes: no camera or model inference required.
+
+The former sliding-window adapter and its fixed hackathon phrase table were
+removed; the custom motion path is SignRecognizer's explicit window (and the
+opt-in motion_auto segmenter), covered in hackathon/signs/tests.
+"""
 import queue
 from unittest.mock import Mock, patch
 
 import numpy as np
+import pytest
 
 from hackathon.contracts import SignEvent
-from hackathon.runtime import Runtime, _MotionWindow
+from hackathon.runtime import Runtime
+
+CUSTOM = {"DDE": {"display_name": "Dee", "phrase": "Dee", "matches": ["Dee"],
+                  "enabled": True, "verified": False}}
 
 
 def hand():
     return {"handedness": "Right", "landmarks": np.full((21, 3), .4).tolist()}
 
 
-def test_window_schema_cadence_bounds_and_rearm():
-    model = Mock()
-    model.predict.return_value = ("DDE", .8)
-    window = _MotionWindow(model)
-    emitted = []
-    for ts in range(0, 8100, 100):
-        emitted.extend(window.update([hand()], ts))
-    assert len(emitted) == 1 and emitted[0].label == "DDE"
-    assert model.predict.call_count == 6
-    trial = model.predict.call_args.args[0]
-    assert trial["landmarks"].shape == (41, 2, 21, 3)
-    assert trial["hand_present"].shape == (41, 2)
-    assert trial["handedness"][0, 0] == "Right"
-    assert len(window.frames) <= 240
-    assert window.frames[-1][0] - window.frames[0][0] <= 4000
-    model.predict.return_value = (None, 0)
-    for ts in range(8100, 10200, 100):
-        assert not window.update([], ts)
-    model.predict.return_value = ("DDE", .8)
-    for ts in range(10200, 12300, 100):
-        emitted.extend(window.update([hand()], ts))
-    assert len(emitted) == 2
+def test_motion_model_without_vocabulary_fails_visibly(monkeypatch):
+    monkeypatch.setenv("QUIETBRIDGE_MOTION_MODEL", "/local/personal.npz")
+    with pytest.raises(ValueError, match="no vocabulary.*--vocabulary"):
+        Runtime(enable_lips=False)
+    # Explicit constructor argument follows the same rule.
+    monkeypatch.delenv("QUIETBRIDGE_MOTION_MODEL")
+    with pytest.raises(ValueError, match="no vocabulary"):
+        Runtime(enable_lips=False, motion_model="/local/personal.npz")
 
 
-def test_low_score_unknown_and_rest_do_not_emit():
-    for prediction in [("OPENAI", .74), ("REST", 1), ("POINTING_UP", 1), (None, 0)]:
-        model = Mock()
-        model.predict.return_value = prediction
-        window = _MotionWindow(model)
-        assert not [event for ts in range(0, 6000, 100)
-                    for event in window.update([hand()], ts)]
+def test_no_fixed_demo_phrase_table_remains():
+    import hackathon.runtime as runtime_module
+    assert not hasattr(runtime_module, "MOTION_PHRASES")
+    assert not hasattr(runtime_module, "_MotionWindow")
 
 
 def test_opt_in_custom_vocabulary_needs_confirmation(monkeypatch):
     monkeypatch.setenv("QUIETBRIDGE_MOTION_MODEL", "/local/personal.npz")
-    runtime = Runtime(enable_lips=False)
+    runtime = Runtime(enable_lips=False, vocabulary=CUSTOM)
     try:
         assert runtime.state["gesture_model"] == "personal motion-v2 (experimental)"
         assert "POINTING_UP" not in runtime.vocabulary
         runtime.receive_signs([SignEvent("DDE", .8, 1000, 4000, True)], now=4000)
-        assert runtime.state["decision"]["text"] == "DEE"
+        assert runtime.state["decision"]["text"] == "Dee"
         assert runtime.state["decision"]["status"] == "confirmation_needed"
+        # A label outside the explicit vocabulary contributes no text.
+        runtime.receive_signs([SignEvent("HELLO", .9, 4100, 4500, True)], now=4500)
+        assert runtime.state["decision"]["text"] == "Dee"
     finally:
         runtime.close()
 
 
 def test_worker_routes_custom_motion_events(monkeypatch):
     monkeypatch.setenv("QUIETBRIDGE_MOTION_MODEL", "/local/personal.npz")
-    runtime = Runtime(enable_lips=False)
+    runtime = Runtime(enable_lips=False, vocabulary=CUSTOM)
     # SignRecognizer owns motion classification in the merged architecture.
     detector = Mock(last_tracking=[hand()])
     detector._motion = object()
