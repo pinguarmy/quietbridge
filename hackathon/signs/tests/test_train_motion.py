@@ -148,3 +148,27 @@ def test_train_motion_legacy_no_validation(tmp_path):
     assert report["validation_post_calibration"] is None
     assert report["test_ungated"] is not None
     assert report["thresholds_calibrated_on"] == "train leave-one-trial-out only"
+
+
+def test_no_trials_is_unmeasured_not_zero_accuracy():
+    empty = evaluate(Predictions(), [])
+    assert empty["trials"] == 0
+    assert empty["accuracy"] is None
+    assert empty["mean_predict_ms"] is None
+
+
+def test_report_without_final_test_session_marks_test_metrics_unmeasured(tmp_path, capsys):
+    data_dir = tmp_path / "data"
+    for split, session in (("train", "s-train"), ("validation", "s-val")):
+        (data_dir / split).mkdir(parents=True)
+        for label in ("HELLO", REST_LABEL):
+            for seed in range(2):
+                trial = make_trial(label, seed=seed + (10 if split == "validation" else 0),
+                                   session=session, trial_id=f"{split}-{label}-{seed}")
+                _save_npz(data_dir / split / f"{label}-{seed}.npz", trial)
+    output = tmp_path / "candidate.npz"
+    assert main(["--data", str(data_dir), "--output", str(output)]) == 0
+    report = json.loads((tmp_path / "candidate.report.json").read_text())
+    assert report["test_trials"] == 0
+    assert report["test_ungated"]["accuracy"] is None
+    assert "acc=n/a (no trials)" in capsys.readouterr().out

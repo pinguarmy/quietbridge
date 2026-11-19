@@ -301,3 +301,20 @@ def test_paired_metadata_saved(cap, tmp_path):
         assert str(z["session_id"]) == "s_pair"
         assert str(z["split"]) == "train"
         assert len(str(z["trial_id"])) == 32
+
+
+def test_failed_write_leaves_no_truncated_npz(cap, tmp_path, monkeypatch):
+    # A disk-full style failure mid-write must not leave a partial archive that
+    # later breaks lip/language training for the profile.
+    def failing_savez(f, **arrays):
+        f.write(b"PK\x03\x04 partial")
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(np, "savez", failing_savez)
+    cap.start("hello", "train", "s1")
+    cap.feed(frame(), 0)
+    with pytest.raises(OSError, match="No space"):
+        cap.stop()
+    assert list((tmp_path / "train").glob("*.npz")) == []
+    assert cap.snapshot()["error"]  # the recording stays open for retry/discard
+    monkeypatch.undo()

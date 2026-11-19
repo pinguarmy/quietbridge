@@ -72,6 +72,14 @@ def test_cross_split_leakage_rejected(tmp_path, leaked_key):
         train_language.load_text_metadata(tmp_path)
 
 
+def test_copied_recording_in_one_split_rejected(tmp_path):
+    make_npz(tmp_path / "train", "t1", "HELLO WORLD", "sess-train", "trial-1", split="train")
+    make_npz(tmp_path / "train", "t1-copy", "HELLO WORLD", "sess-train", "trial-1", split="train")
+    make_npz(tmp_path / "validation", "v1", "HELLO AGAIN", "sess-val", "trial-2", split="validation")
+    with pytest.raises(ValueError, match="appears twice in train"):
+        train_language.load_text_metadata(tmp_path)
+
+
 def test_empty_train_rejected(tmp_path):
     make_npz(tmp_path / "validation", "v1", "HELLO AGAIN", "sess-val", "trial-1", split="validation")
     with pytest.raises(ValueError, match="no training NPZs found"):
@@ -182,6 +190,7 @@ def test_successful_candidate_training_creates_pth_and_report(tmp_path, monkeypa
 
     assert output_pth.is_file()
     report_file = output_pth.with_suffix(".report.json")
+    assert report == json.loads(report_file.read_text(encoding="utf-8"))
     assert report_file.is_file()
 
     loaded_report = json.loads(report_file.read_text(encoding="utf-8"))
@@ -194,6 +203,25 @@ def test_successful_candidate_training_creates_pth_and_report(tmp_path, monkeypa
     assert loaded_report["perplexity"]["after"]["yours"] == 30.0
     assert loaded_report["selection"]["selected"] == "candidate"
     assert loaded_report["selection"]["deployment"] is False
+    assert loaded_report["text_overlap"]["also_in_training"] == 0
+
+
+def test_report_flags_validation_phrases_repeated_from_training(tmp_path, monkeypatch):
+    # Independent recording sessions of the same phrase are still the same text
+    # for a language model; the report must say so instead of implying new wording.
+    make_npz(tmp_path / "train", "t1", "Please call my sister.", "sess-train", "trial-1", split="train")
+    make_npz(tmp_path / "train", "t2", "Good morning", "sess-train", "trial-2", split="train")
+    make_npz(tmp_path / "validation", "v1", "PLEASE CALL MY SISTER", "sess-val", "trial-3", split="validation")
+    make_npz(tmp_path / "validation", "v2", "I need water", "sess-val", "trial-4", split="validation")
+    monkeypatch.setattr("lipflow.train_lm.train", lambda **kw: {
+        "train": 2, "val": 2, "before": {}, "after": {}, "saved": False})
+    args = argparse.Namespace(data=str(tmp_path), output=str(tmp_path / "out" / "lm.pth"), epochs=1,
+                              lr=3e-5, bs=32, seed=0, max_general_loss=1.15, device=None)
+    report = train_language.run(args)
+    assert report["text_overlap"]["validation_phrases"] == 2
+    assert report["text_overlap"]["also_in_training"] == 1
+    assert "memor" not in report["text_overlap"]["note"]  # plain language
+    assert "not to new wording" in report["text_overlap"]["note"]
 
 
 def test_explicit_corrections_join_language_training_only(tmp_path, monkeypatch):
@@ -305,6 +333,7 @@ def test_rejected_candidate_does_not_create_pth_and_records_rejection(tmp_path, 
         device=None,
     )
     report = train_language.run(args)
+    assert report["saved"] is False and report["selection"]["selected"] == "stock"
 
     assert not output_pth.exists()  # candidate output must NOT be created
     report_file = output_pth.with_suffix(".report.json")
@@ -339,19 +368,38 @@ class _FakeTok:
 
 @pytest.fixture()
 def fake_tokenizer(monkeypatch):
+    """Only for tests that really tokenize (split and save contracts)."""
     monkeypatch.setattr(train_lm, "Tok", _FakeTok)
 
 
-@pytest.mark.usefixtures("fake_tokenizer")
+@pytest.fixture()
+def tokenizer_must_not_load(monkeypatch):
+    """Input errors must be reported before any model asset is touched."""
+    def refuse(*args, **kwargs):
+        raise AssertionError("tokenizer loaded before the phrases were validated")
+
+    monkeypatch.setattr(train_lm, "Tok", refuse)
+
+
+@pytest.mark.usefixtures("tokenizer_must_not_load")
 def test_train_lm_raises_on_empty_phrases():
     with pytest.raises(ValueError, match="No valid training sentences"):
         train_lm.train(phrases=[], validation_phrases=["HELLO HOW ARE YOU"])
+    # Text that normalizes to nothing is still "no valid sentences", not a tokenizer error.
+    with pytest.raises(ValueError, match="No valid training sentences"):
+        train_lm.train(phrases=["123", "hi"], validation_phrases=["HELLO HOW ARE YOU"])
 
 
-@pytest.mark.usefixtures("fake_tokenizer")
+@pytest.mark.usefixtures("tokenizer_must_not_load")
 def test_train_lm_raises_on_empty_validation_phrases():
     with pytest.raises(ValueError, match="No valid validation sentences"):
         train_lm.train(phrases=["HELLO HOW ARE YOU"], validation_phrases=[])
+
+
+def test_train_lm_missing_tokenizer_asset_is_named(tmp_path, monkeypatch):
+    monkeypatch.setattr(train_lm, "SPM", str(tmp_path / "models" / "lm" / "unigram5000.model"))
+    with pytest.raises(FileNotFoundError, match="unigram5000.model"):
+        train_lm.train(phrases=["HELLO HOW ARE YOU"], validation_phrases=["PLEASE WAIT A MOMENT"])
 
 
 @pytest.mark.usefixtures("fake_tokenizer")
@@ -443,7 +491,7 @@ def test_train_lm_forgets_guard_rejects_saving(tmp_path, monkeypatch):
     assert not out_file.exists()
 
 
-@pytest.mark.usefixtures("fake_tokenizer")
+@pytest.mark.usefixtures("tokenizer_must_not_load")
 def test_train_lm_default_preserves_old_signature_and_missing_phrases_error(tmp_path, monkeypatch):
     monkeypatch.setattr("lipflow.train_lm.PHRASES", str(tmp_path / "nonexistent_phrases.txt"))
     with pytest.raises(FileNotFoundError, match="No phrases yet. Run `lipflow import-wispr` first."):

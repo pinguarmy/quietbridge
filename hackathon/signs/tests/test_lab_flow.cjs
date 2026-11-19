@@ -163,7 +163,8 @@ test('model training buttons show exactly one per selected model type and evalua
     rollbackModel: { disabled: false },
     evaluateRecognition: { hidden: false, disabled: false },
     viewReport: { disabled: false },
-    promoteModel: { disabled: false }
+    promoteModel: { disabled: false },
+    restoreHint: { textContent: '' }
   };
 
   const sandbox = {
@@ -181,6 +182,7 @@ test('model training buttons show exactly one per selected model type and evalua
   };
   vm.createContext(sandbox);
   vm.runInContext(fnMatch[0], sandbox);
+  vm.runInContext(scriptText.match(/function restoreHint\(restore,kindName\)\{[\s\S]*?\n\}/)[0], sandbox);
 
   // 1. When modelKind is 'motion'
   elements.modelKind.value = 'motion';

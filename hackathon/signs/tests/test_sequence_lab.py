@@ -967,3 +967,59 @@ def test_failed_mouth_start_for_other_profile_restores_mouth_root(conn, server):
                            headers={"Content-Type": "application/json"})
     assert response.status == 503
     assert server.mouth.root == before
+
+
+# -- audit regressions -----------------------------------------------------
+
+
+def test_same_handedness_twice_keeps_both_hands(conn, server):
+    # MediaPipe sometimes labels two hands "Left". The second hand must not
+    # overwrite the first; it takes the free slot, as motion preprocessing does.
+    server.engine._hands = [
+        HandResult("Left", "", 0.0, [[0.1, 0.2, 0.3]] * 21),
+        HandResult("Left", "", 0.0, [[0.7, 0.8, 0.9]] * 21),
+    ]
+    _start(conn, server)
+    _post_frame(conn, server)
+    response, data = _json(conn, server, "POST", "/api/stop", body=b"{}")
+    assert response.status == 200
+    with np.load(data["saved"], allow_pickle=False) as archive:
+        assert archive["hand_present"][0].tolist() == [True, True]
+        assert archive["landmarks"][0, 0, 0, 0] == pytest.approx(0.1)
+        assert archive["landmarks"][0, 1, 0, 0] == pytest.approx(0.7)
+
+
+@pytest.mark.parametrize("session", ["s[1]", "s*", "s?", "a b", "s.1", "-s"])
+def test_session_ids_with_glob_or_path_characters_are_rejected(conn, server, session):
+    # Split checks look up a session by file-name prefix; "s[1]" would match
+    # "s1_*.npz" but never itself, so its leakage would go unnoticed.
+    response, data = _start(conn, server, split="validation", session=session)
+    assert response.status == 400
+    assert "session" in data["error"]
+    _, state = _json(conn, server, "GET", "/api/state", token=False)
+    assert state["recording"] is False
+
+
+def test_glob_session_cannot_hide_split_leakage(conn, server, tmp_path):
+    train = tmp_path / "seq" / "train"
+    train.mkdir(parents=True)
+    np.savez(train / "s[1]_0001.npz", session_id=np.asarray("s[1]"))
+    response, _ = _start(conn, server, split="validation", session="s[1]")
+    assert response.status == 400
+
+
+def test_failed_sequence_write_leaves_no_truncated_npz(conn, server, tmp_path, monkeypatch):
+    def failing_savez(f, **arrays):
+        f.write(b"PK\x03\x04 partial")
+        raise ValueError("simulated write failure")
+
+    _start(conn, server)
+    _post_frame(conn, server)
+    monkeypatch.setattr(np, "savez_compressed", failing_savez)
+    response, data = _json(conn, server, "POST", "/api/stop", body=b"{}")
+    monkeypatch.undo()
+    assert response.status == 400
+    assert list((tmp_path / "seq" / "train").glob("*.npz")) == []
+    # The buffer is kept, so the try can be saved again or discarded.
+    response, data = _json(conn, server, "POST", "/api/stop", body=b"{}")
+    assert response.status == 200 and Path(data["saved"]).is_file()

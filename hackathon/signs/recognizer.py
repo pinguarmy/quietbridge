@@ -1,9 +1,10 @@
-"""Track-B sign recognizer built on MediaPipe's pretrained GestureRecognizer.
+"""Hand-pose recognizer built on MediaPipe's pretrained GestureRecognizer.
 
-Synchronous VIDEO-mode recognizer; Sam's runtime calls :meth:`SignRecognizer.process`
-from an external worker thread, one camera frame at a time. The recognizer never
-opens a camera and never touches the network; the model file must already exist
-on disk (assets are managed by the lead, see ``hackathon.signs.assets``).
+Synchronous VIDEO-mode recognizer; the QuietBridge runtime calls
+:meth:`SignRecognizer.process` from its hand worker thread, one camera frame at a
+time. The recognizer never opens a camera and never touches the network; the
+model file must already exist on disk (``python -m hackathon.signs.assets
+--download`` fetches the pinned stock model explicitly).
 
 Label contract
 --------------
@@ -22,7 +23,7 @@ any unsupported/low-confidence hand or conflicting labels produce no output;
 a single valid hand, or two hands with the same label, use the conservative
 ``min`` of the hand scores.
 
-Debounce is delegated to ``hackathon.signs.stabilizer.EventStabilizer`` (Luna):
+Debounce is delegated to ``hackathon.signs.stabilizer.EventStabilizer``:
 ``update(label, score, timestamp_ms) -> list[SignEvent]``. The stabilizer owns
 all temporal smoothing; this class only feeds it one candidate per frame and
 returns whatever events the stabilizer confirms.
@@ -51,7 +52,7 @@ LABEL_MAP = {
 #: Public vocabulary this recognizer can emit, in stable order.
 SUPPORTED_LABELS = tuple(LABEL_MAP.values())
 
-#: Match Sam's fusion floor so a rejected event cannot lock out a later valid hold.
+#: Match the fusion floor so a rejected event cannot lock out a later valid hold.
 MIN_SCORE = 0.75
 
 #: The backend is always built to track at most this many hands.
@@ -73,7 +74,7 @@ class SignRecognizer:
     motion_model_path:
         Optional motion NPZ path; alternatively set ``QUIETBRIDGE_MOTION_MODEL``.
         Explicit ``start``/``finish`` windows replace framewise classification;
-        personal static models and the stabilizer are not used in motion mode.
+        the stabilizer is not used in motion mode.
     motion_auto:
         Opt into continuous segmentation (also enabled by
         ``QUIETBRIDGE_MOTION_AUTO=1``); requires a motion model. In this mode
@@ -88,7 +89,7 @@ class SignRecognizer:
         ``hackathon.signs.stabilizer``.
     """
 
-    def __init__(self, model_path=None, *, stabilizer=None, personal_model_path=None, motion_model_path=None, motion_auto=False, motion_auto_config=None):
+    def __init__(self, model_path=None, *, stabilizer=None, motion_model_path=None, motion_auto=False, motion_auto_config=None):
         motion_model_path = motion_model_path or os.environ.get("QUIETBRIDGE_MOTION_MODEL")
         self._motion = None
         self._motion_frames = None
@@ -106,14 +107,13 @@ class SignRecognizer:
         if self.motion_auto:
             from .motion_auto import MotionAutoSegmenter
             self._motion_auto = MotionAutoSegmenter(motion_auto_config)
-        # Personal classification is opt-in: an old local model must not silently
-        # change a teammate's stock demo. No fallback to stock after rejection.
-        personal_model_path = personal_model_path or os.environ.get("QUIETBRIDGE_PERSONAL_GESTURES")
-        self._personal = None
-        if personal_model_path and self._motion is None:
-            from .personal import PersonalGestureModel
-
-            self._personal = PersonalGestureModel.load(Path(personal_model_path).expanduser())
+        # The old single-frame personal pose model was removed: it replaced the
+        # stock poses while the app still reported "stock". Fail visibly rather
+        # than silently ignoring a setting that used to change recognition.
+        if self._motion is None and os.environ.get("QUIETBRIDGE_PERSONAL_GESTURES", "").strip():
+            raise ValueError(
+                "QUIETBRIDGE_PERSONAL_GESTURES is no longer supported. Unset it, and record "
+                "personal gestures on the Personalize page (they train a motion model).")
         if model_path is None:
             from .assets import default_model_path
 
@@ -206,7 +206,7 @@ class SignRecognizer:
                 self._motion_frames.append((timestamp_ms, self.last_tracking))
             return []
 
-        label, score = self._pick_personal_label(result) if self._personal is not None else self._pick_label(result)
+        label, score = self._pick_label(result)
         return list(self._stabilizer.update(label, score, timestamp_ms))
 
     def start(self, timestamp_ms=None) -> None:
@@ -294,19 +294,6 @@ class SignRecognizer:
             return []
         return [SignEvent(label=label, score=score, start_ms=start_ms,
                           end_ms=timestamp_ms, is_final=True)]
-
-    def _pick_personal_label(self, result) -> tuple[Optional[str], float]:
-        from .features import hand_features
-
-        # Collection records exactly one hand per feature trial. Reject two-hand
-        # input rather than pretending that combination was part of training.
-        if len(result.hand_landmarks) != 1:
-            return None, 0.0
-        feature = hand_features(result.hand_landmarks[0], result.handedness[0][0].category_name)
-        label, score = self._personal.predict(feature)
-        if label not in SUPPORTED_LABELS or score < MIN_SCORE:
-            return None, 0.0
-        return label, score
 
     @staticmethod
     def _pick_label(result) -> tuple[Optional[str], float]:

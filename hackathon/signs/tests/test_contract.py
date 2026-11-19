@@ -1,6 +1,5 @@
 """Real recognizer/stabilizer/fusion wiring with synthetic backend predictions."""
 from types import SimpleNamespace
-from pathlib import Path
 
 import numpy as np
 
@@ -10,9 +9,9 @@ from hackathon.signs import recognizer as module
 from hackathon.signs.recognizer import SignRecognizer, SUPPORTED_LABELS
 
 
-def test_handoff_vocabulary_matches_real_labels_but_stays_unverified():
-    path = Path(__file__).parents[1] / "vocabulary.example.json"
-    vocabulary = load_vocabulary(path)
+def test_shipped_vocabulary_matches_real_labels_but_stays_unverified():
+    # The shipped stock vocabulary (hackathon/vocabulary.json), not a stale copy.
+    vocabulary = load_vocabulary()
     assert set(vocabulary) == set(SUPPORTED_LABELS)
     assert all(entry["verified"] is False for entry in vocabulary.values())
 

@@ -23,7 +23,7 @@ from dataclasses import asdict, dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .mouth_capture import TrackerUnavailable
+from .mouth_capture import _SESSION_RE, TrackerUnavailable
 
 #: Mirrors recognizer.SUPPORTED_LABELS without importing mediapipe at module load.
 GESTURE_SUPPORT = ["THUMB_UP", "THUMB_DOWN", "OPEN_PALM", "POINTING_UP"]
@@ -221,13 +221,9 @@ class _LabServer(ThreadingHTTPServer):
 
 
 def _valid_session(session) -> bool:
-    return (
-        isinstance(session, str)
-        and bool(session)
-        and len(session) <= 64
-        and Path(session).name == session
-        and session not in (".", "..")
-    )
+    # Same rule as mouth capture. Split checks find a session's files by name
+    # prefix, so glob characters such as "[" or "*" would hide leakage.
+    return isinstance(session, str) and bool(_SESSION_RE.match(session))
 
 
 def _check_profile_fields(profile_id, name, gestures, lip_prompts, id_required: bool) -> None:
@@ -242,6 +238,31 @@ def _check_profile_fields(profile_id, name, gestures, lip_prompts, id_required: 
     if lip_prompts is not None and (not isinstance(lip_prompts, list)
                                     or not all(isinstance(t, str) for t in lip_prompts)):
         raise ValueError("lip_prompts must be a list of strings")
+
+
+def _with_restore_points(status: dict, profile) -> dict:
+    """Add ``restore``: per model type, whether "Restore previous model" can act.
+
+    ``ModelLifecycle.status`` does not report rollback points yet. Until it does
+    (a ``restore`` field there wins), mirror ``ModelLifecycle.rollback``: the
+    newest directory in ``models/history/<kind>/`` is consumed, and it holds
+    the previous file or, when nothing was saved before, nothing (= stock).
+    """
+    if isinstance(status.get("restore"), dict):
+        return status
+    from hackathon.model_lifecycle import _KINDS
+
+    history = Path(profile.profile_dir) / "models" / "history"
+    restore = {}
+    for kind, (_, filename, _) in _KINDS.items():
+        folder = history / kind
+        entries = sorted(p for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
+        if not entries:
+            restore[kind] = {"available": False, "restores": None}
+        else:
+            restore[kind] = {"available": True,
+                             "restores": "previous_model" if (entries[-1] / filename).is_file() else "stock"}
+    return {**status, "restore": restore}
 
 
 def _check_session_split(data_root: Path, split: str, session: str) -> None:
@@ -283,9 +304,18 @@ def _save_sequence(server: _LabServer, rec: _Recording) -> Path:
                        sign_model_sha256=np.asarray(info["sha256"]),
                        sign_manifest_sha256=np.asarray(info["manifest_sha256"]))
 
-    # Exclusive creation: never overwrite an existing recording.
-    with destination.open("xb") as archive:
-        np.savez_compressed(archive, **payload)
+    # Exclusive creation: never overwrite an existing recording. A failed write
+    # (for example a full disk) must not leave a truncated .npz that later
+    # breaks training for this profile.
+    created = False
+    try:
+        with destination.open("xb") as archive:
+            created = True
+            np.savez_compressed(archive, **payload)
+    except BaseException:
+        if created:
+            destination.unlink(missing_ok=True)
+        raise
     return destination
 
 
@@ -306,6 +336,13 @@ def _append_frame(server: _LabServer, rec: _Recording, result: FrameResult, time
         slot = _HAND_SLOTS.get(hand.handedness)
         if slot is None:
             continue
+        if present[slot]:
+            # MediaPipe can label both hands "Left" (or both "Right"). Keep the
+            # second hand in the free slot, as motion preprocessing does at
+            # runtime, instead of overwriting the first one.
+            slot = 1 - slot
+            if present[slot]:
+                continue
         landmarks[slot] = np.asarray(hand.landmarks, dtype=np.float32)
         present[slot] = True
         handedness[slot] = hand.handedness
@@ -324,7 +361,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- helpers ---------------------------------------------------------
 
-    def log_message(self, fmt, *args):  # keep the console quiet during demos
+    def log_message(self, fmt, *args):  # no per-request console logging
         pass
 
     def _security_headers(self, content_type: str, length: int):
@@ -479,7 +516,7 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/api/models":
             with self.server.lock:
                 profile = self.server.profile_manager.get_active_profile()
-                payload = self.server.models.status(profile)
+                payload = _with_restore_points(self.server.models.status(profile), profile)
             self._send_json(200, payload)
             return
         if self.path == "/api/state":
@@ -573,7 +610,7 @@ class _Handler(BaseHTTPRequestHandler):
                 else:
                     self._error(404, "unknown model action")
                     return
-                payload = self.server.models.status(profile)
+                payload = _with_restore_points(self.server.models.status(profile), profile)
         except (ValueError, RuntimeError, OSError, KeyError) as error:
             self._error(400, str(error))
             return

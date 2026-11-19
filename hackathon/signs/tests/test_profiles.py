@@ -1,12 +1,10 @@
 """Unit tests for hackathon.profiles (profile management, isolation, validation)."""
-import os
 from pathlib import Path
 import pytest
 
 from hackathon.profiles import (
     DEFAULT_GESTURES,
     DEFAULT_LIP_PROMPTS,
-    SPLITS,
     ProfileManager,
     check_session_split,
     get_default_root,

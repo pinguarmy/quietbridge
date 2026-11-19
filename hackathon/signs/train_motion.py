@@ -79,7 +79,8 @@ def evaluate(model, trials, score_gate=None):
     return {
         "trials": n,
         "correct": n_correct + n_rest_ok,
-        "accuracy": (n_correct + n_rest_ok) / n if n else 0.0,
+        # No trials is "not measured", not 0 % (or 100 %).
+        "accuracy": (n_correct + n_rest_ok) / n if n else None,
         "false_positives": n_false_positive,
         "misses": n_miss,
         "positive_trials": n - n_rest,
@@ -91,7 +92,7 @@ def evaluate(model, trials, score_gate=None):
         "rest_silent_rate": n_rest_ok / n_rest if n_rest else None,
         "per_label": per_label,
         "confusion": {f"{a} -> {b}": c for (a, b), c in sorted(confusion.items())},
-        "mean_predict_ms": round(1000.0 * elapsed / n, 2) if n else 0.0,
+        "mean_predict_ms": round(1000.0 * elapsed / n, 2) if n else None,
     }
 
 
@@ -206,7 +207,9 @@ def main(argv=None):
         silent = metrics["rest_silent_rate"]
         recall_text = f"{recall:.2f}" if recall is not None else "n/a"
         silent_text = f"{silent:.2f}" if silent is not None else "n/a"
-        print(f"{name}: acc={metrics['accuracy']:.2f} fp={metrics['false_positives']} "
+        accuracy = metrics["accuracy"]
+        accuracy_text = f"{accuracy:.2f}" if accuracy is not None else "n/a (no trials)"
+        print(f"{name}: acc={accuracy_text} fp={metrics['false_positives']} "
               f"misses={metrics['misses']} mislabels={metrics['mislabels']} "
               f"positive_recall={metrics['positive_correct']}/{metrics['positive_trials']} "
               f"({recall_text}) rest_silent={metrics['rest_correctly_silent']}/"

@@ -26,7 +26,8 @@ test('gesture intent template loads, saves, clears and validates', async () => {
     innerHTML: '', appendChild() {},
     querySelectorAll(selector) { return selector === 'tr' ? [{querySelector() { return {value: 'Hello'}; }}] : []; }
   };
-  const elements = {profileDisplayName: {value: ''}, gestureTbody: tbody, promptTbody: prompts, btnSaveProfile: {}};
+  const elements = {profileDisplayName: {value: ''}, gestureTbody: tbody, promptTbody: prompts, btnSaveProfile: {},
+    setupError: {textContent: ''}, promptCount: {textContent: ''}};
   const context = {
     document: {createElement() { return {innerHTML: '', input: {value: ''}, querySelector() { return this.input; }}; }},
     $: id => elements[id],
@@ -55,6 +56,8 @@ test('gesture intent template loads, saves, clears and validates', async () => {
     fields.intent_template.value = invalid;
     await elements.btnSaveProfile.onclick();
     assert.equal(sent, null);
-    assert.match(alerts.at(-1), /exactly one/);
+    // Shown inline next to the save button (role=alert), not in a blocking dialog.
+    assert.match(elements.setupError.textContent, /exactly one \{gesture\}/);
+    assert.equal(alerts.length, 0);
   }
 });

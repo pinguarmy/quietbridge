@@ -338,3 +338,12 @@ def test_integration_with_real_stabilizer(tmp_path, monkeypatch):
     assert events[0].end_ms <= 500
     # No duplicate emission while the same gesture is held.
     assert outputs[-1] == []
+
+
+def test_removed_personal_pose_setting_fails_visibly(tmp_path, monkeypatch):
+    # The old single-frame personal model silently replaced the stock poses
+    # while the app reported "stock". A leftover setting must stop, not be ignored.
+    monkeypatch.delenv("QUIETBRIDGE_MOTION_MODEL", raising=False)
+    monkeypatch.setenv("QUIETBRIDGE_PERSONAL_GESTURES", str(tmp_path / "personal_gestures.npz"))
+    with pytest.raises(ValueError, match="QUIETBRIDGE_PERSONAL_GESTURES is no longer supported"):
+        make_recognizer(tmp_path, monkeypatch)

@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -71,6 +72,9 @@ def load_text_metadata(root: str | os.PathLike) -> dict[str, list[dict[str, str]
                 if not text or not session_id or not trial_id:
                     raise ValueError(f"{npz_path}: text/session_id/trial_id must be nonempty")
 
+                if trial_splits.get(trial_id) == split:
+                    # A copied file would count one recording twice.
+                    raise ValueError(f"{npz_path}: trial_id {trial_id!r} appears twice in {split}")
                 for key, val, seen in (
                     ("trial_id", trial_id, trial_splits),
                     ("session_id", session_id, session_splits),
@@ -132,6 +136,22 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     correction_phrases = corr_summary["texts"]
     train_phrases.extend(text for text in correction_phrases if text not in train_phrases)
 
+    # Recording sessions are independent, but a language model only sees text.
+    # When validation repeats training phrases, "validation perplexity"
+    # measures how well those exact phrases were memorised, not new wording.
+    def _norm(text: str) -> str:
+        return " ".join(re.sub(r"[^A-Za-z' ]+", " ", text).upper().split())
+
+    train_texts = {_norm(text) for text in train_phrases}
+    val_texts = sorted({_norm(text) for text in val_phrases})
+    repeated = [text for text in val_texts if text in train_texts]
+    text_overlap = {
+        "validation_phrases": len(val_texts),
+        "also_in_training": len(repeated),
+        "note": ("Validation repeats training phrases; perplexity shows fit to these phrases, "
+                 "not to new wording.") if repeated else "No validation phrase appears in training.",
+    }
+
     started = time.perf_counter()
     report: dict[str, Any] = {
         "data": str(data_root),
@@ -162,6 +182,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "max_general_loss": args.max_general_loss,
             "device": getattr(args, "device", None),
         },
+        "text_overlap": text_overlap,
         "deployment": False,
         "auto_deploy": False,
         "saved": False,

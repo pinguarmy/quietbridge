@@ -97,3 +97,33 @@ def test_candidate_gate_rejects_target_regression_despite_overall_gain():
     candidate = {"wer": 0.4, "target_wer": 0.6, "contrast_false_welcome": 0.0}
     assert train_lips.select_candidate(stock, candidate) == (
         False, "rejected: target-prompt WER regressed")
+
+
+def test_rates_without_a_denominator_are_null_not_zero():
+    target = "PLEASE CALL MY SISTER"
+    # Only target-prompt rows: there were no contrast prompts to falsely match.
+    only_target = train_lips.metrics([{"text": target, "hypothesis": target}], target)
+    assert only_target["contrast_false_welcome"] is None
+    assert only_target["contrast_false_welcome_counts"] == [0, 0]
+    # Only contrast rows: the full-phrase rate was not measured.
+    only_contrast = train_lips.metrics([{"text": "GOOD MORNING", "hypothesis": "GOOD MORNING"}], target)
+    assert only_contrast["fullphrase_exact"] is None
+    # No rows at all (for example an empty final-test split) is not a perfect 0 WER.
+    empty = train_lips.metrics([], target)
+    assert empty["wer"] is None and empty["fullphrase_exact"] is None
+    assert empty["contrast_false_welcome"] is None
+
+
+def test_selection_rejects_unscorable_validation_and_skips_unmeasured_contrast():
+    assert train_lips.select_candidate({"wer": None}, {"wer": None}) == (
+        False, "rejected: validation has no scorable words")
+    stock = {"wer": 0.5, "target_wer": 0.4, "contrast_false_welcome": None}
+    better = {"wer": 0.4, "target_wer": 0.3, "contrast_false_welcome": None}
+    assert train_lips.select_candidate(stock, better)[0] is True
+
+
+def test_copied_recording_in_one_split_is_rejected(tmp_path):
+    save_trial(tmp_path, "train", "a", "HELLO THERE", "s-train", "trial-a")
+    save_trial(tmp_path, "train", "a-copy", "HELLO THERE", "s-train", "trial-a")
+    with pytest.raises(ValueError, match="appears twice in train"):
+        train_lips.load_dataset(tmp_path)

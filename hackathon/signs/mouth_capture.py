@@ -1,12 +1,12 @@
 """Record mouth-crop training clips from frames the browser uploads.
 
-The browser already holds the user's camera for the demo and posts each frame here, so
+The browser already holds the user's camera and posts each frame here, so
 this module never opens a camera and never loads the ~1 GB VSR model. Only aligned
 96x96 grayscale mouth crops plus the prompt text are written to disk (the user has
 consented to recording training data) — no raw frames, video or audio. Everything stays
 local; there is no network or cloud access.
 
-Threading: the lead lab serialises every call under its global lock; this class starts
+Threading: the Personalize lab server serialises every call under its global lock; this class starts
 no threads and no workers.
 """
 from __future__ import annotations
@@ -238,8 +238,17 @@ class MouthCapture:
         if gesture_label is not None:
             save_dict["gesture_label"] = np.array(gesture_label)
 
-        with open(path, "xb") as f:  # never overwrite an existing trial
-            np.savez(f, **save_dict)
+        created = False
+        try:
+            with open(path, "xb") as f:  # never overwrite an existing trial
+                created = True
+                np.savez(f, **save_dict)
+        except BaseException:
+            # Do not leave a truncated .npz behind: it would break every later
+            # training run that loads this profile's mouth recordings.
+            if created:
+                os.unlink(path)
+            raise
         return path
 
     def discard(self) -> dict:

@@ -61,6 +61,9 @@ def load_dataset(root: str | os.PathLike) -> dict[str, list[dict]]:
                     raise ValueError(f"{path}: split metadata does not match its directory")
             if not item["text"] or not item["session_id"] or not item["trial_id"]:
                 raise ValueError(f"{path}: text/session_id/trial_id must be nonempty")
+            if item["trial_id"] in trial_splits and trial_splits[item["trial_id"]] == split:
+                # A copied file: one recording would count twice in fitting or scoring.
+                raise ValueError(f"{path}: trial_id {item['trial_id']!r} appears twice in {split}")
             for key, seen in (("trial_id", trial_splits), ("session_id", session_splits)):
                 value = item[key]
                 if value in seen and seen[value] != split:
@@ -105,7 +108,12 @@ def normalise(text: str) -> str:
 
 
 def target_prompt(items: list[dict]) -> str:
-    """The full welcome phrase is the longest recorded prompt."""
+    """The protected target prompt is the longest recorded prompt.
+
+    Report keys keep their historical ``*_welcome`` names for compatibility:
+    ``contrast_false_welcome`` is the rate at which a different prompt was
+    decoded as this target prompt.
+    """
     return max((x["text"] for x in items), key=lambda s: (len(normalise(s).split()), len(s)))
 
 
@@ -126,13 +134,14 @@ def metrics(results: list[dict], target: str) -> dict:
         else:
             contrast_n += 1
             contrast_false += normalise(row["hypothesis"]) == target_norm
+    # A rate with an empty denominator was not measured: report null, never 0.
     return {
         "count": len(results), "wer_errors": errors, "wer_words": words,
-        "wer": errors / max(words, 1),
-        "fullphrase_exact": target_hits / max(target_n, 1),
+        "wer": errors / words if words else None,
+        "fullphrase_exact": target_hits / target_n if target_n else None,
         "fullphrase_exact_counts": [target_hits, target_n],
         "target_wer": target_errors / target_words if target_words else None,
-        "contrast_false_welcome": contrast_false / max(contrast_n, 1),
+        "contrast_false_welcome": contrast_false / contrast_n if contrast_n else None,
         "contrast_false_welcome_counts": [contrast_false, contrast_n],
         "mean_capture_fps": round(float(np.mean([row["capture_fps"] for row in results
                                 if row.get("capture_fps") is not None])), 3)
@@ -143,7 +152,12 @@ def metrics(results: list[dict], target: str) -> dict:
 
 def select_candidate(stock: dict, candidate: dict) -> tuple[bool, str]:
     """Selection is frozen before final test and protects the hardest target prompt."""
-    if candidate["contrast_false_welcome"] > stock["contrast_false_welcome"]:
+    if stock.get("wer") is None or candidate.get("wer") is None:
+        return False, "rejected: validation has no scorable words"
+    stock_contrast = stock.get("contrast_false_welcome")
+    candidate_contrast = candidate.get("contrast_false_welcome")
+    if stock_contrast is not None and candidate_contrast is not None \
+            and candidate_contrast > stock_contrast:
         return False, "rejected: contrast false-welcome rate increased"
     if candidate.get("target_wer") is not None and stock.get("target_wer") is not None \
             and candidate["target_wer"] > stock["target_wer"] + 1e-12:

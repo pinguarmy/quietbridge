@@ -14,7 +14,7 @@ MODEL_SHA256 = "97952348cf6a6a4915c2ea1496b4b37ebabc50cbbf80571435643c455f2b0482
 
 
 def default_model_path() -> Path:
-    """Keep weights outside Git; allow the demo host to choose its own cache."""
+    """Keep weights outside Git; QUIETBRIDGE_GESTURE_MODEL can point to another local copy."""
     configured = os.environ.get("QUIETBRIDGE_GESTURE_MODEL")
     if configured:
         return Path(configured).expanduser()
@@ -48,7 +48,7 @@ def main() -> None:
     if args.download:
         path = download_model(path)
     elif not path.is_file():
-        parser.error(f"Model missing: {path}; run with --download before the demo")
+        parser.error(f"Model missing: {path}; run with --download first")
     print(path)
     print(f"sha256: {hashlib.sha256(path.read_bytes()).hexdigest()}")
 

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 
 import numpy as np
@@ -54,23 +55,36 @@ def load_trials(data_dir, split, session_prefix=""):
     """Load trials of one split whose session_id starts with session_prefix."""
     split_dir = Path(data_dir).expanduser() / split
     trials = []
+    seen_trials = {}
     for path in sorted(split_dir.glob("*.npz")):
-        with np.load(path, allow_pickle=False) as d:
-            if "sign_language" in d.files or "bgr_frames" in d.files:
-                continue  # Standard-sign checks are not personal gesture training.
-            session_id = str(d["session_id"])
-            if not session_id.startswith(session_prefix):
-                continue  # never touch older pose/other collections
-            trial = {
-                "label": str(d["label"]),
-                "landmarks": np.asarray(d["landmarks"], dtype=np.float64),
-                "hand_present": np.asarray(d["hand_present"], dtype=bool),
-                "timestamps_ms": np.asarray(d["timestamps_ms"], dtype=np.float64),
-                "handedness": np.asarray(d["handedness"]).astype(str),
-                "session_id": session_id,
-                "trial_id": str(d["trial_id"]),
-                "path": str(path),
-            }
+        try:
+            with np.load(path, allow_pickle=False) as d:
+                if "sign_language" in d.files or "bgr_frames" in d.files:
+                    continue  # Standard-sign checks are not personal gesture training.
+                session_id = str(d["session_id"])
+                if not session_id.startswith(session_prefix):
+                    continue  # never touch older pose/other collections
+                trial = {
+                    "label": str(d["label"]),
+                    "landmarks": np.asarray(d["landmarks"], dtype=np.float64),
+                    "hand_present": np.asarray(d["hand_present"], dtype=bool),
+                    "timestamps_ms": np.asarray(d["timestamps_ms"], dtype=np.float64),
+                    "handedness": np.asarray(d["handedness"]).astype(str),
+                    "session_id": session_id,
+                    "trial_id": str(d["trial_id"]),
+                    "path": str(path),
+                }
+        except Exception as exc:  # truncated zip, missing field, pickled object array
+            raise MotionModelError(
+                f"{path.name} in {split}/ is not a readable gesture recording "
+                f"({type(exc).__name__}); move it out of the folder and train again") from exc
+        # A copied file repeats its trial_id: counting one recording twice would
+        # make leave-one-out and validation look better than they are.
+        if trial["trial_id"] in seen_trials:
+            raise MotionModelError(
+                f"trial_id {trial['trial_id']!r} appears twice in {split}/ "
+                f"({seen_trials[trial['trial_id']]} and {path.name})")
+        seen_trials[trial["trial_id"]] = path.name
         trials.append(trial)
     return trials
 
@@ -109,6 +123,10 @@ def _validate_trial(trial, require_label=False):
     ts = np.asarray(trial["timestamps_ms"], dtype=np.float64)
     if ts.shape != (n,):
         raise MotionModelError(f"timestamps_ms must have shape ({n},)")
+    if not np.all(np.isfinite(lm[hp])):
+        # A NaN on a present hand would poison every distance to this trial
+        # and silently remove it from matching.
+        raise MotionModelError("a present hand has non-finite landmarks")
     return lm, hp, ts
 
 
@@ -711,8 +729,22 @@ class MotionModel:
         })
         cal_str = json.dumps(self.calibration_report_) if self.calibration_report_ else ""
         lt_str = json.dumps(self.label_thresholds_) if self.label_thresholds_ is not None else ""
+        # Write through a handle so the file is exactly `path` (np.savez would
+        # append ".npz" to other names), and publish it atomically so a crash
+        # never leaves a truncated model at the candidate path.
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            with tmp.open("xb") as handle:
+                self._write_npz(handle, meta, cal_str, lt_str)
+            os.replace(tmp, path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        return path
+
+    def _write_npz(self, handle, meta, cal_str, lt_str):
         np.savez(
-            path,
+            handle,
             templates=self.templates_,
             masks=self.masks_,
             labels=self.labels_,
@@ -723,7 +755,6 @@ class MotionModel:
             label_thresholds=np.array(lt_str),
             meta=np.array(meta),
         )
-        return path
 
     @classmethod
     def load(cls, path):

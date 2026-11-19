@@ -209,6 +209,17 @@ button.btn-remove:hover:not(:disabled){background:var(--danger-soft);border-colo
 #modelStatus.error,#modelError{color:var(--danger)}
 #modelError{font-size:14px;margin:8px 0;padding:10px 12px;background:var(--danger-soft);border-left:3px solid var(--danger);border-radius:6px;overflow-wrap:anywhere}
 #modelError:empty{display:none}
+#setupError{font-size:14px;margin:0 0 12px;padding:10px 12px;color:var(--danger);background:var(--danger-soft);border-left:3px solid var(--danger);border-radius:6px;overflow-wrap:anywhere}
+#setupError:empty{display:none}
+.heading-count{font-size:14px;font-weight:400;color:var(--muted)}
+.field-hint{font-size:14px;color:var(--muted);margin:4px 0 12px}
+.candidate-facts{margin:8px 0 12px;padding:0;list-style:none;display:grid;gap:4px;font-size:15px;overflow-wrap:anywhere}
+.candidate-facts strong{font-weight:600}
+.report-summary{margin:8px 0;overflow-x:auto}
+.report-summary table{border-collapse:collapse;min-width:100%;font-size:14px}
+.report-summary th,.report-summary td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+.report-summary td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+#reportDetails summary,#candidateFiles summary{cursor:pointer;min-height:44px;line-height:44px}
 #modelSaveNotice{font-size:14px}
 #modelSaveNotice:empty{display:none}
 #candidateSummary{font-size:14px;color:var(--ink);overflow-wrap:anywhere}
@@ -352,7 +363,7 @@ button.btn-remove:hover:not(:disabled){background:var(--danger-soft);border-colo
       <p id="pairedSignModel" class="paired-note">No standard-sign model configured for this recorder.</p>
       <div id="videoConsentBox" hidden>
         <p class="paired-note">Saves your face, upper body and both hands as a small local video (256 × 256), alongside mouth close-ups. Record one sign, at most 240 frames or 10 seconds. No sound and no uploads. Discard saves nothing.</p>
-        <label for="videoConsent"><input id="videoConsent" type="checkbox"> I agree to save this trial's video locally.</label>
+        <label for="videoConsent"><input id="videoConsent" type="checkbox"> I agree to save the video of this try on this computer.</label>
       </div>
       <label for="pairedGestureSelect">Gesture or sign (or rest, for “no gesture”)</label>
       <select id="pairedGestureSelect"></select>
@@ -416,7 +427,7 @@ button.btn-remove:hover:not(:disabled){background:var(--danger-soft);border-colo
 
   <div class="setup-section">
     <div class="section-header">
-      <h3>Phrases to mouth silently</h3>
+      <h3>Phrases to mouth silently <span id="promptCount" class="heading-count"></span></h3>
       <button id="btnAddPrompt" type="button" class="btn-subtle">Add a phrase</button>
     </div>
     <div class="table-scroll">
@@ -432,6 +443,7 @@ button.btn-remove:hover:not(:disabled){background:var(--danger-soft);border-colo
     </div>
   </div>
 
+  <div id="setupError" role="alert"></div>
   <div class="setup-actions">
     <button id="btnExitSetup" type="button" class="btn-secondary">Skip to practice</button>
     <button id="btnSaveProfile" type="button">Save and start practising</button>
@@ -451,7 +463,7 @@ button.btn-remove:hover:not(:disabled){background:var(--danger-soft);border-colo
   <div class="form-field"><label for="candidateSelect">Candidate</label><select id="candidateSelect"></select></div>
   <div id="modelStatus" role="status">Loading model status…</div>
   <div id="modelError" role="alert"></div>
-  <p id="candidateSummary"></p>
+  <div id="candidateSummary"></div>
   <div class="btn-group">
     <button id="trainMotion" type="button">Train a gesture candidate</button>
     <button id="trainVisual" type="button" hidden>Train a lip-reading candidate</button>
@@ -462,10 +474,17 @@ button.btn-remove:hover:not(:disabled){background:var(--danger-soft);border-colo
     <button id="viewReport" type="button" class="btn-secondary">View report</button>
     <button id="evaluateRecognition" type="button">Evaluate recognition</button>
     <button id="promoteModel" type="button">Save for main app</button>
-    <button id="rollbackModel" type="button" class="btn-secondary">Restore previous model</button>
+    <button id="rollbackModel" type="button" class="btn-secondary" aria-describedby="restoreHint">Restore previous model</button>
   </div>
+  <p id="restoreHint" class="field-hint"></p>
   <div id="comparisonMetrics" style="margin-top:8px;" hidden></div>
-  <pre id="modelReport" style="white-space:pre-wrap;overflow-wrap:anywhere" tabindex="0" aria-label="Candidate report" hidden></pre>
+  <section id="reportView" aria-labelledby="reportTitle" hidden>
+    <h3 id="reportTitle" tabindex="-1">Candidate report</h3>
+    <div id="reportSummary" class="report-summary"></div>
+    <details id="reportDetails"><summary>Full report (technical)</summary>
+      <pre id="modelReport" style="white-space:pre-wrap;overflow-wrap:anywhere" tabindex="0" aria-label="Full candidate report"></pre>
+    </details>
+  </section>
 </section>
 
 <div id="newProfileDialog" class="dialog-backdrop" hidden>
@@ -510,7 +529,7 @@ function pairedItems(){
 }
 function pairedRequest(split,session){
   const captureVideo=videoRequested();
-  if(captureVideo&&(!signModelInfo||!$('videoConsent').checked))throw Error('Agree to save this trial’s video before recording.');
+  if(captureVideo&&(!signModelInfo||!$('videoConsent').checked))throw Error('Agree to save the video of this try before recording.');
   const label=$('pairedGestureSelect').value,text=$('pairedPromptSelect').value;
   if(!label||!text)throw Error('Choose a sign or gesture and an intended sentence.');
   return {profile:activeProfile.id,label,text,split,session,capture_video:captureVideo,video_consent:captureVideo&&$('videoConsent').checked};
@@ -735,7 +754,7 @@ function render(){
   $('pairedBox').hidden=!isPaired;
   $('pairedCaptureKind').querySelector('[value="video"]').disabled=!signModelInfo;
   $('videoConsentBox').hidden=!videoRequested();
-  $('pairedSignModel').textContent=signModelInfo?`Standard-sign model: ${signModelInfo.language.toUpperCase()} (${signModelInfo.sha256.slice(0,12)}). It lists the signs you can record; it gives no recognition score here.`:'Standard-sign video checks are off because no standard-sign model was set up when QuietBridge started.';
+  $('pairedSignModel').textContent=signModelInfo?`${signModelInfo.language.toUpperCase()} sign model ${signModelInfo.sha256.slice(0,12)} is set up. It only lists the signs you can record here; there is no recognition or scoring while you record.`:'Standard-sign video checks are off because no standard-sign model was set up when QuietBridge started.';
   $('mouthPrompt').hidden=!isLip&&!isPaired;
   $('mouthNote').hidden=!isLip&&!isPaired;
   $('mouthNote').textContent=videoRequested()?'Mouth the sentence while signing. The full video and mouth close-ups are saved only after you agree and choose Finish & save. The microphone is not used.':'Mouth these words silently at a natural pace, facing the camera. Only mouth close-ups are saved; the microphone is not used.';
@@ -1313,7 +1332,23 @@ function modelControls(){
   $('evaluateRecognition').hidden=!isLang;
   $('viewReport').disabled=blocked||!candidate||(!candidate.report&&!candidate.comparison);
   $('promoteModel').disabled=blocked||!candidate||!candidate.promotable;
+  // The server reports whether a rollback point exists; never offer a restore that can only fail.
+  const restore=modelData?.restore?.[kind];
+  $('rollbackModel').disabled=blocked||!restore?.available;
+  $('restoreHint').textContent=restoreHint(restore,$('modelKind').selectedOptions?.[0]?.textContent||kind);
 }
+
+function restoreHint(restore,kindName){
+  if(!modelData)return '';
+  if(!restore)return 'Restore is unavailable: this recorder did not report earlier saved models.';
+  if(!restore.available)return `Nothing to restore: no ${kindName} model has been replaced for this profile yet.`;
+  return restore.restores==='stock'
+    ?`Restore goes back to no saved ${kindName} model, so the main app uses its standard behaviour.`
+    :`Restore brings back the ${kindName} model that was saved before the current one.`;
+}
+
+const STATUS_TEXT={running:'training…',completed:'training finished',failed:'training failed'};
+function candidateName(c,index){return `Candidate ${index+1} (${c.id.slice(0,6)})`;}
 
 function renderModels(){
   const kind=$('modelKind').value, select=$('candidateSelect'), previous=select.value;
@@ -1322,16 +1357,11 @@ function renderModels(){
   if(!candidates.length){
     const option=document.createElement('option'); option.value=''; option.textContent='No trained candidates yet'; select.appendChild(option);
   }
-  candidates.forEach(c=>{
+  candidates.forEach((c,index)=>{
     const option=document.createElement('option'); option.value=c.id;
-    const filename=c.model_path?.split(/[\\/]/).pop()||'no model file';
-    const selection=c.selected===true?'selected by trainer':c.selected===false?'not selected by trainer':'selection unavailable';
-    let label=`${c.id} · ${filename} · ${c.status} · ${selection}`;
-    if(c.kind==='language'){
-      if(c.eval_status==='running') label+=' · evaluating';
-      else if(c.comparison_passed===true) label+=' · gate passed';
-      else if(c.comparison_passed===false) label+=' · gate failed';
-    }
+    let label=`${candidateName(c,index)} · ${STATUS_TEXT[c.status]||c.status}`;
+    if(c.kind==='language'&&c.eval_status==='running') label+=' · checking recognition';
+    else if(c.status==='completed') label+=c.promotable?' · can be saved':' · cannot be saved';
     option.textContent=label; select.appendChild(option);
   });
   if(candidates.some(c=>c.id===previous))select.value=previous;
@@ -1341,22 +1371,43 @@ function renderModels(){
   $('modelStatus').textContent=modelData
     ?`Profile: ${activeProfile.name||activeProfile.id}. Saved ${kindName} model for this profile: ${active?active.split(/[\\/]/).pop():'none saved'}. ${jobs.length?`In progress: ${jobs.join('; ')}.`:'Nothing is training right now.'}`
     :'Model status not loaded.';
-  $('modelReport').hidden=true;
+  $('reportView').hidden=true;
   renderCandidateSummary();
   modelControls();
 }
 
+// Plain-language fact list for a candidate; file paths stay in a collapsed section.
+function fact(label,value){
+  const li=document.createElement('li'),b=document.createElement('strong');
+  b.textContent=label+': '; li.append(b,document.createTextNode(value)); return li;
+}
+function whyNotSavable(c){
+  if(c.status==='running')return 'Training is still running.';
+  if(c.status==='failed')return 'Training failed. Train a new candidate after checking your recordings.';
+  if(c.report?.failures?.length)return 'The report lists problems (see the report).';
+  if(c.kind==='motion'&&!c.report?.validation_trials)return 'It has no results from a “Check on another occasion” session.';
+  if(c.selected===false)return 'It did not do better than the standard model on your “another occasion” recordings.';
+  if(c.kind==='language'&&!c.comparison_passed)return 'Its recognition check has not passed yet.';
+  return 'Its report is missing or incomplete.';
+}
+
 function renderCandidateSummary(){
-  const c=(modelData?.candidates||[]).find(item=>item.id===$('candidateSelect').value && item.kind===$('modelKind').value);
+  const kind=$('modelKind').value;
+  const list=(modelData?.candidates||[]).filter(item=>item.kind===kind);
+  const index=list.findIndex(item=>item.id===$('candidateSelect').value);
+  const c=list[index];
   if(!c){
-    $('candidateSummary').textContent='No candidate selected.';
+    $('candidateSummary').textContent=modelData?'No candidate yet. Record practice and “another occasion” sessions, then train one.':'';
     if($('comparisonMetrics')) $('comparisonMetrics').hidden=true;
     return;
   }
-  const selection=c.selected===true?'Selected by trainer':c.selected===false?'Not selected by trainer':'Trainer selection unavailable';
+  const facts=document.createElement('ul'); facts.className='candidate-facts';
+  facts.append(fact(candidateName(c,index),STATUS_TEXT[c.status]||c.status));
+  if(c.kind!=='motion'&&c.selected!=null)facts.append(fact('Trainer’s choice',c.selected?'better than the standard model on your “another occasion” recordings':'not better than the standard model; the standard model stays'));
+  facts.append(fact('Save for main app',c.promotable?'possible after you review the report':`not possible. ${whyNotSavable(c)}`));
   const failures=c.report?.failures;
   const correctionWarnings=c.report?.corrections?.warnings||[];
-  const details=[`Status: ${c.status}`,selection,`Model file: ${c.model_path||'unavailable'}`,`Report: ${c.report_path||'unavailable'}`,c.error?`Error: ${c.error}`:'',c.comparison_warning||'',correctionWarnings.length?`Correction data: ${correctionWarnings.join(' ')}`:'',failures?.length?`Report failures: ${typeof failures==='string'?failures:JSON.stringify(failures)}`:''];
+  const details=[c.error?`Error: ${c.error}`:'',c.comparison_warning||'',correctionWarnings.length?`Correction data: ${correctionWarnings.join(' ')}`:'',failures?.length?`Report problems: ${typeof failures==='string'?failures:failures.join('; ')}`:'',c.report?.text_overlap?.also_in_training?c.report.text_overlap.note:''];
 
   if(c.kind==='language'){
     if(c.eval_status==='running'){
@@ -1376,8 +1427,13 @@ function renderCandidateSummary(){
     }
   }
 
-  details.push(c.promotable?'Can be saved for the main app':'Cannot be saved for the main app; see its report');
-  $('candidateSummary').textContent=details.filter(Boolean).join(' | ');
+  details.filter(Boolean).forEach(text=>{const li=document.createElement('li');li.textContent=text;facts.append(li);});
+  const files=document.createElement('details'); files.id='candidateFiles';
+  const summary=document.createElement('summary'); summary.textContent='File locations';
+  const paths=document.createElement('ul'); paths.className='candidate-facts';
+  paths.append(fact('Model file',c.model_path||'not written'),fact('Report',c.report_path||'not written'));
+  files.append(summary,paths);
+  $('candidateSummary').replaceChildren(facts,files);
 
   if($('comparisonMetrics')){
     if(c.kind==='language' && c.comparison?.variants){
@@ -1438,20 +1494,58 @@ for(const [id,kind] of [['trainMotion','motion'],['trainVisual','lips'],['trainL
 }
 $('refreshModels').onclick=refreshModelStatus;
 $('modelKind').onchange=()=>{ renderModels(); };
-$('candidateSelect').onchange=()=>{ $('modelReport').hidden=true; renderCandidateSummary(); modelControls() };
+$('candidateSelect').onchange=()=>{ $('reportView').hidden=true; renderCandidateSummary(); modelControls() };
 $('evaluateRecognition').onclick=()=>{
   const candidate_id=$('candidateSelect').value;
   if(!candidate_id)return;
   modelAction('evaluate',{kind:'language',candidate_id});
 };
+// Readable report: counts with their denominators; "not measured" is never shown as 0.
+function ratio(n,d){return d?`${n} of ${d}`:'not measured (no recordings)';}
+function pct(v){return v==null?'not measured':`${(v*100).toFixed(1)}%`;}
+function reportRows(c){
+  const r=c.report||{}, rows=[];
+  if(c.kind==='motion'){
+    rows.push(['Recordings used','practice '+(r.train_trials??'?')+', another occasion '+(r.validation_trials??0)+', final check '+(r.test_trials??0)]);
+    for(const [name,m] of [['Another occasion',r.validation_ungated],['Final check',r.test_ungated]]){
+      if(!m){rows.push([name,'not recorded']);continue;}
+      rows.push([`${name}: gestures recognized`,ratio(m.positive_correct,m.positive_trials)]);
+      rows.push([`${name}: rest stayed silent`,ratio(m.rest_correctly_silent,m.rest_trials)]);
+      rows.push([`${name}: wrong gesture or false alarm`,m.trials?String(m.false_positives):'not measured (no recordings)']);
+    }
+  }else if(c.kind==='lips'){
+    rows.push(['Recordings used',`practice ${r.counts?.train??'?'}, another occasion ${r.counts?.validation??0}, final check ${r.counts?.test??0}`]);
+    for(const [name,split] of [['Another occasion','val'],['Final check','test']]){
+      rows.push([`${name}: word error rate, standard`,pct(r.baseline?.[split]?.metrics?.wer)]);
+      rows.push([`${name}: word error rate, candidate`,pct(r.candidate?.[split]?.metrics?.wer)]);
+    }
+  }else{
+    rows.push(['Phrases used',`practice ${r.counts?.train??'?'}, another occasion ${r.counts?.validation??0}, corrections ${r.counts?.corrections??0}`]);
+    if(r.perplexity)rows.push(['Fit to your “another occasion” phrases (lower is better)',`${r.perplexity.before?.yours?.toFixed?.(1)??'?'} before, ${r.perplexity.after?.yours?.toFixed?.(1)??'?'} after`]);
+    if(r.text_overlap)rows.push(['Same wording in practice and check',`${r.text_overlap.also_in_training} of ${r.text_overlap.validation_phrases} phrases`]);
+  }
+  if(r.selection?.reason)rows.push(['Trainer’s decision',r.selection.reason]);
+  return rows;
+}
 $('viewReport').onclick=()=>{
   const candidate=(modelData?.candidates||[]).find(c=>c.id===$('candidateSelect').value && c.kind===$('modelKind').value);
   if(!candidate?.report && !candidate?.comparison)return;
   const content=candidate.comparison
     ? { training_report: candidate.report, recognition_comparison: candidate.comparison }
     : candidate.report;
+  const table=document.createElement('table'), body=document.createElement('tbody');
+  for(const [label,value] of reportRows(candidate)){
+    const tr=document.createElement('tr'), th=document.createElement('th'), td=document.createElement('td');
+    th.scope='row'; th.textContent=label; td.textContent=value; td.className='num'; tr.append(th,td); body.append(tr);
+  }
+  table.append(body);
+  const note=document.createElement('p'); note.className='field-hint';
+  note.textContent='These counts come from your own recordings. Small numbers are not proof of everyday accuracy.';
+  $('reportSummary').replaceChildren(table,note);
   $('modelReport').textContent=typeof content==='string'?content:JSON.stringify(content,null,2);
-  $('modelReport').hidden=false;
+  $('reportDetails').open=false;
+  $('reportView').hidden=false;
+  $('reportTitle').focus?.();
 };
 $('promoteModel').onclick=()=>{
   const kind=$('modelKind').value,candidate_id=$('candidateSelect').value;
@@ -1481,7 +1575,7 @@ function setupDirty(){
 }
 function confirmDiscardSetup(){
   if(!setupDirty())return true;
-  if(!confirm('Discard unsaved changes to your phrases?'))return false;
+  if(!confirm('Discard your unsaved changes to your name, gestures and phrases?'))return false;
   activeProfile=JSON.parse(setupBaseline);
   renderSetupView();
   return true;
@@ -1515,7 +1609,7 @@ function renderSetupView(){
   (activeProfile.lip_prompts||[]).forEach((p,idx)=>{
     const tr=document.createElement('tr');
     tr.innerHTML=`
-      <td><input type="text" aria-label="Practice phrase ${idx+1}" data-idx="${idx}"></td>
+      <td><input type="text" maxlength="300" aria-label="Practice phrase ${idx+1}" data-idx="${idx}"></td>
       <td><button type="button" class="btn-del-p btn-remove" data-idx="${idx}" aria-label="Remove phrase ${idx+1}">Remove</button></td>
     `;
     tr.querySelector('input').value=p;
@@ -1527,7 +1621,7 @@ function renderSetupView(){
     btn.onclick=()=>{
       const idx=parseInt(btn.getAttribute('data-idx'),10);
       if(activeProfile.gestures.length<=1){
-        alert('Profile must retain at least one gesture definition.');
+        $('setupError').textContent='Keep at least one gesture. Change this one instead of removing it.';
         return;
       }
       collectSetupFields();
@@ -1543,7 +1637,7 @@ function renderSetupView(){
     btn.onclick=()=>{
       const idx=parseInt(btn.getAttribute('data-idx'),10);
       if(activeProfile.lip_prompts.length<=1){
-        alert('Profile must retain at least one lip prompt.');
+        $('setupError').textContent='Keep at least one phrase. Change this one instead of removing it.';
         return;
       }
       collectSetupFields();
@@ -1553,14 +1647,40 @@ function renderSetupView(){
       (inputs[Math.min(idx,inputs.length-1)]||$('btnAddPrompt'))?.focus?.();
     };
   });
+  const count=(activeProfile.lip_prompts||[]).length;
+  $('promptCount').textContent=`(${count} ${count===1?'phrase':'phrases'})`;
   if(!setupBaseline){ collectSetupFields(); setupBaseline=JSON.stringify(activeProfile); }
+}
+
+// A new gesture needs an internal label nobody else uses, even after removals.
+function unusedGestureLabel(gestures){
+  const used=new Set(gestures.map(g=>g.label));
+  let n=gestures.length+1;
+  while(used.has(`GESTURE_${n}`))n++;
+  return n;
+}
+
+// Server messages name internal fields; say what to change on this page instead.
+function setupErrorHelp(message){
+  const hints=[
+    [/Duplicate gesture label '([^']*)'/,m=>`Two gestures use the same internal label ${m[1]}. Open “Advanced” on one of them and give it a different label.`],
+    [/Gesture label '([^']*)' must be/,m=>`The internal label “${m[1]}” can only use capital letters, digits and _ (start with a letter, at most 32). Change it under “Advanced”.`],
+    [/lip_prompts must be a non-empty list/,()=>'Add at least one phrase before saving.'],
+    [/Lip prompt must be 1-(\d+) characters/,m=>`Each phrase must be 1 to ${m[1]} characters long.`],
+    [/Profile name must be 1-(\d+) characters/,m=>`Your name must be 1 to ${m[1]} characters long.`],
+    [/intent_template/,()=>'A sentence template needs exactly one {gesture} slot.'],
+    [/body too large/,()=>'There is too much text to save at once. Remove some phrases and try again.']
+  ];
+  for(const [pattern,help] of hints){const m=message.match(pattern); if(m)return help(m);}
+  return `Could not save: ${message}`;
 }
 
 $('btnAddGesture').onclick=()=>{
   collectSetupFields();
+  const n=unusedGestureLabel(activeProfile.gestures);
   activeProfile.gestures.push({
-    label:`GESTURE_${activeProfile.gestures.length+1}`,
-    display_name:`Gesture ${activeProfile.gestures.length+1}`,
+    label:`GESTURE_${n}`,
+    display_name:`Gesture ${n}`,
     concept:'New concept',
     description:'Describe the physical movement',
     hint:'0.5s pause, move once, 0.5s pause',
@@ -1581,6 +1701,7 @@ $('btnAddPrompt').onclick=()=>{
 };
 
 $('btnSaveProfile').onclick=async()=>{
+  $('setupError').textContent='';
   try{
     activeProfile.name=$('profileDisplayName').value.trim()||activeProfile.id;
     // Collect updated gestures from inputs
@@ -1593,7 +1714,7 @@ $('btnSaveProfile').onclick=async()=>{
       const concept=row.querySelector('[data-field="concept"]').value.trim()||display_name;
       const description=row.querySelector('[data-field="description"]').value.trim();
       const intent_template=row.querySelector('[data-field="intent_template"]').value.trim();
-      if(intent_template && intent_template.split('{gesture}').length!==2)throw Error('Intent template must contain exactly one {gesture} placeholder.');
+      if(intent_template && intent_template.split('{gesture}').length!==2)throw Error('intent_template must contain exactly one {gesture}');
       const gesture={...activeProfile.gestures[index],emoji,label,display_name,concept,description};
       if(intent_template)gesture.intent_template=intent_template; else delete gesture.intent_template;
       newGestures.push(gesture);
@@ -1618,7 +1739,7 @@ $('btnSaveProfile').onclick=async()=>{
     setStage('train');
     note('Saved. Start recording when you are ready.');
   }catch(e){
-    alert('Error saving profile: '+e.message);
+    $('setupError').textContent=setupErrorHelp(e.message);
   }
 };
 

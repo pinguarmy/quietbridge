@@ -415,3 +415,63 @@ def test_save_load_calibrated_model_roundtrip(tmp_path):
 
     trial = make_trial("HELLO", seed=50, session="sess-val")
     assert loaded.predict(trial) == model.predict(trial)
+
+
+# -- audit regressions -------------------------------------------------------
+
+
+def test_nan_on_present_hand_is_rejected_not_silently_dead():
+    trials = make_train()
+    trials[0]["landmarks"][5, 0, 3, 1] = np.nan  # hand_present[5, 0] is True
+    with pytest.raises(MotionModelError, match="non-finite"):
+        MotionModel().fit(trials)
+    model = MotionModel().fit(make_train())
+    bad = make_trial("HELLO", seed=50)
+    bad["landmarks"][0, 0, 0, 0] = np.inf
+    with pytest.raises(MotionModelError, match="non-finite"):
+        model.predict(bad)
+    # NaN in an absent slot is the normal "no hand" encoding and stays valid.
+    assert np.isnan(make_trial("HELLO")["landmarks"][:, 1]).all()
+    assert model.predict(make_trial("HELLO", seed=51))[0] == "HELLO"
+
+
+def test_load_trials_rejects_duplicate_recordings_in_one_split(tmp_path):
+    from hackathon.signs.motion import load_trials
+    folder = tmp_path / "train"
+    folder.mkdir()
+    trial = make_trial("HELLO", trial_id="same-id")
+    np.savez(folder / "a.npz", **trial)
+    np.savez(folder / "b.npz", **trial)  # a copied file: one recording counted twice
+    with pytest.raises(MotionModelError, match="appears twice"):
+        load_trials(tmp_path, "train")
+
+
+@pytest.mark.parametrize("content", [b"PK\x03\x04 truncated", b"not a zip at all"])
+def test_load_trials_names_an_unreadable_file(tmp_path, content):
+    from hackathon.signs.motion import load_trials
+    folder = tmp_path / "train"
+    folder.mkdir()
+    np.savez(folder / "good.npz", **make_trial("HELLO"))
+    (folder / "broken.npz").write_bytes(content)
+    with pytest.raises(MotionModelError, match="broken.npz"):
+        load_trials(tmp_path, "train")
+
+
+def test_load_trials_reports_missing_fields_as_model_error(tmp_path):
+    from hackathon.signs.motion import load_trials
+    folder = tmp_path / "train"
+    folder.mkdir()
+    trial = make_trial("HELLO")
+    del trial["hand_present"]
+    np.savez(folder / "old.npz", **trial)
+    with pytest.raises(MotionModelError, match="old.npz"):
+        load_trials(tmp_path, "train")
+
+
+def test_save_writes_exactly_the_requested_path(tmp_path):
+    model = MotionModel().fit(make_train())
+    target = tmp_path / "candidate.model"
+    assert model.save(target) == target
+    assert target.is_file() and not (tmp_path / "candidate.model.npz").exists()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["candidate.model"]
+    assert MotionModel.load(target).predict(make_trial("HELLO", seed=9))[0] == "HELLO"
