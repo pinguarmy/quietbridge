@@ -236,8 +236,12 @@ function render(s) {
   text('sign-model-status', signModel?.language ? `${signModel.language.toUpperCase()} isolated signs · experimental${signModel.sha256 ? ' · ' + signModel.sha256.slice(0,12) : ''}. Record one sign at a time. Not continuous sentence translation.` : 'Standard sign models are not loaded. The current backend recognizes only its configured gestures.');
   text('profile-name', s.profile_name || 'Stock configuration');
   const profileSelect = $('profile-select');
-  if (profileSelect && profilesLoaded && !profileSelect.matches(':focus') && s.profile_id) {
-    if (profileSelect.value !== s.profile_id) profileSelect.value = s.profile_id;
+  // Follow the running profile only when it changes. Re-syncing on every poll
+  // undid a choice made in the list before the person reached "Use profile",
+  // most easily for keyboard users, whose focus has already left the list.
+  if (profileSelect && profilesLoaded && s.profile_id && syncedProfileId !== s.profile_id) {
+    profileSelect.value = s.profile_id;
+    syncedProfileId = s.profile_id;
   }
   const lipModel = s.lip_model || {};
   const lipPending = s.lips === 'warming' || lipModel.status === 'loading';
@@ -913,7 +917,7 @@ if ($('test-submit')) $('test-submit').onclick = async () => {
   if (!exampleText.trim() && !label) {text('error', 'Add example words or choose a gesture first.'); return;}
   if (await requestAction('rehearse', {text:exampleText, label})) window.location.assign('/');
 };
-let profilesLoaded = false, profilesLoading = false, profilesRetryAt = 0;
+let profilesLoaded = false, profilesLoading = false, profilesRetryAt = 0, syncedProfileId = null;
 const PROFILES_RETRY_MS = 5000;
 function profilePlaceholder(label) {
   const opt = document.createElement('option');
@@ -942,6 +946,7 @@ async function loadProfilesList() {
     text('profile-switch-error', '');
     text('profile-list-status', profiles.length ? '' : 'Create a profile in Personalize to keep your own gestures and phrases.');
     profilesLoaded = true;
+    syncedProfileId = data.active_profile || null;
   } catch (_) {
     profilesRetryAt = Date.now() + PROFILES_RETRY_MS;
     select.replaceChildren(profilePlaceholder('Profiles unavailable'));

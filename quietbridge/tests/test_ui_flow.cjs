@@ -869,6 +869,19 @@ test('long and right-to-left messages stay readable', () => {
   for (const id of ['message', 'corrected-text', 'large-text']) assert.match(html, new RegExp(`id="${id}"[^>]*dir="auto"`));
 });
 
+test('a profile chosen in the list survives polling until the running profile changes', () => {
+  const { elements, context, render } = screen('settings.html');
+  vm.runInContext('profilesLoaded = true', context);
+  render({ profile_id: 'alice', profile_name: 'Alice' });
+  assert.equal(elements.get('profile-select').value, 'alice');
+  elements.get('profile-select').value = 'bob';  // chosen, focus already moved on
+  render({ profile_id: 'alice', profile_name: 'Alice', revision: 2 });
+  render({ profile_id: 'alice', profile_name: 'Alice', revision: 3 });
+  assert.equal(elements.get('profile-select').value, 'bob', 'a poll must not undo the choice before Use profile');
+  render({ profile_id: 'carol', profile_name: 'Carol', revision: 4 });
+  assert.equal(elements.get('profile-select').value, 'carol', 'a real profile change is still shown');
+});
+
 test('a failed or empty profile list is explained, disables switching and retries after polling recovers', async () => {
   const a = screen('settings.html'); let calls = 0;
   a.context.fetch = async url => { if (url === '/api/profiles') { calls++; return { ok: false, json: async () => ({}) }; } return okJson({ ...a.context.sample }); };
