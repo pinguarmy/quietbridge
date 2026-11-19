@@ -25,29 +25,27 @@ _PROFILE_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 _GESTURE_LABEL_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,31}$")
 MAX_PROMPT_LEN = 300
 
+# Starter gestures for a new profile. They are personal movements the user
+# records and trains; none of them is a standard BSL/ASL sign. The wording is
+# shown to the user, so it stays plain. Labels are stable identifiers in saved
+# recordings and models and must never change.
 DEFAULT_GESTURES: list[dict[str, Any]] = [
     {
         "label": "HELLO",
         "display_name": "Hello",
-        "concept": "Hello / Greeting",
+        "concept": "Hello",
         "description": "Raise one open hand. Gently curl your fingers in, then open them once.",
-        "hint": "Start still for 0.5 seconds, do the small comfortable motion once, then return to REST for 0.5 seconds. Aim for 3–5 seconds; finish within 15 seconds.",
+        "hint": ("Your own movement, not a standard sign. Hold still for a moment, make the movement "
+                 "once, then relax your hands. About 3 to 5 seconds is plenty."),
         "emoji": "👋",
-    },
-    {
-        "label": "WELCOME",
-        "display_name": "Welcome",
-        "concept": "Welcome / Inward welcome",
-        "description": "Bring both hands close together in front of your chest, then draw them back toward your chest.",
-        "hint": "This is a fixed custom demo motion, not a standard sign. Start still for 0.5 seconds, do it once, return to REST for 0.5 seconds. Aim for 3–5 seconds.",
-        "emoji": "🫶",
     },
     {
         "label": "WATER",
         "display_name": "Water",
         "concept": "water",
         "description": "Hold one relaxed hand in front of you, then move it toward yourself once.",
-        "hint": "Start still for 0.5 seconds, make one comfortable inward motion, then return to REST. Aim for 3–5 seconds.",
+        "hint": ("Your own movement, not a standard sign. Hold still for a moment, move your hand "
+                 "toward yourself once, then relax. About 3 to 5 seconds is plenty."),
         "emoji": "💧",
     },
     {
@@ -55,7 +53,8 @@ DEFAULT_GESTURES: list[dict[str, Any]] = [
         "display_name": "Yes",
         "concept": "yes",
         "description": "Hold one relaxed fist in front of you and move it down and up once.",
-        "hint": "Start still for 0.5 seconds, make one small nodding motion, then return to REST. Aim for 3–5 seconds.",
+        "hint": ("Your own movement, not a standard sign. Hold still for a moment, make one small "
+                 "nod with your fist, then relax. About 3 to 5 seconds is plenty."),
         "emoji": "✅",
     },
     {
@@ -63,17 +62,36 @@ DEFAULT_GESTURES: list[dict[str, Any]] = [
         "display_name": "No",
         "concept": "no",
         "description": "Hold one open hand in front of you and move it a little to the side and back once.",
-        "hint": "Start still for 0.5 seconds, make one small sideways motion, then return to REST. Aim for 3–5 seconds.",
+        "hint": ("Your own movement, not a standard sign. Hold still for a moment, move your hand "
+                 "to the side and back once, then relax. About 3 to 5 seconds is plenty."),
         "emoji": "🙅",
     },
     {
         "label": "REST",
-        "display_name": "Rest",
-        "concept": "Rest / Relaxed negative class",
-        "description": "Relax into a loose half-fist, or lower your hands. No gesture or command.",
-        "hint": "Record ordinary relaxed moments as the negative class. REST is its own label; it is not NEUTRAL.",
+        "display_name": "Resting",
+        "concept": "Resting (no message)",
+        "description": "Let your hands relax or rest them in your lap. This never adds any words.",
+        "hint": ("Record ordinary moments when you are not gesturing, such as relaxed hands or small "
+                 "everyday movements. These teach the app when to stay silent."),
         "emoji": "😌",
     },
+]
+
+# Only for reading a stored profile.json that has no "gestures" list (never
+# written by this code). Keeps the original label set, including WELCOME, so a
+# model trained on that label still has a matching entry; new profiles do not
+# get WELCOME, which was a fixed demo movement.
+_LEGACY_FALLBACK_GESTURES: list[dict[str, Any]] = [
+    *DEFAULT_GESTURES[:1],
+    {
+        "label": "WELCOME",
+        "display_name": "Welcome",
+        "concept": "Welcome",
+        "description": "Bring both hands close together in front of your chest, then draw them back toward your chest.",
+        "hint": "Your own movement, not a standard sign. Hold still for a moment, make it once, then relax.",
+        "emoji": "🫶",
+    },
+    *DEFAULT_GESTURES[1:],
 ]
 
 DEFAULT_LIP_PROMPTS: list[str] = [
@@ -304,7 +322,7 @@ class ProfileManager:
             root_dir=self.root_dir,
             created_at=data.get("created_at", time.time()),
             updated_at=data.get("updated_at", time.time()),
-            gestures=data.get("gestures", [dict(g) for g in DEFAULT_GESTURES]),
+            gestures=data.get("gestures", [dict(g) for g in _LEGACY_FALLBACK_GESTURES]),
             lip_prompts=data.get("lip_prompts", list(DEFAULT_LIP_PROMPTS)),
         )
 
@@ -384,7 +402,7 @@ class ProfileManager:
                     root_dir=self.root_dir,
                     created_at=data.get("created_at", time.time()),
                     updated_at=data.get("updated_at", time.time()),
-                    gestures=data.get("gestures", [dict(g) for g in DEFAULT_GESTURES]),
+                    gestures=data.get("gestures", [dict(g) for g in _LEGACY_FALLBACK_GESTURES]),
                     lip_prompts=data.get("lip_prompts", list(DEFAULT_LIP_PROMPTS)),
                 )
             except Exception:

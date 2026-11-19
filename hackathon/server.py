@@ -1,4 +1,9 @@
-"""Loopback-only demo server. Run: python -m hackathon.server --rehearsal."""
+"""QuietBridge loopback server.
+
+Run ``python -m hackathon.server`` and open the printed URL: the page asks the
+browser for camera access (the default). ``--rehearsal`` uses synthetic inputs
+only; ``--server-camera`` makes this process open a local camera itself.
+"""
 from __future__ import annotations
 
 import argparse
@@ -425,12 +430,18 @@ def open_in_browser(url, opener=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="QuietBridge loopback server. By default the page uses the browser's camera "
+                    "(the browser asks for permission); recognition runs on this computer.")
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--rehearsal", action="store_true", help="Synthetic inputs only; no camera or model loading")
-    source.add_argument("--browser-camera", action="store_true", help="Receive camera frames from the browser")
+    source.add_argument("--browser-camera", action="store_true",
+                        help="Use the browser's camera (the default; accepted for compatibility)")
+    source.add_argument("--server-camera", action="store_true",
+                        help="Open a camera from this server process through OpenCV instead of the browser")
     parser.add_argument("--sign-only", action="store_true", help="Do not load the lip model")
-    parser.add_argument("--camera", type=int, default=0)
+    parser.add_argument("--camera", type=int, metavar="N",
+                        help="Camera index for --server-camera (default 0)")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--vocabulary", type=Path, help="JSON label-to-phrase mapping, default hackathon/vocabulary.json")
     parser.add_argument("--profile", help="Profile id; also selects its trained custom motion model when present")
@@ -441,6 +452,10 @@ def main():
     parser.add_argument("--open", action="store_true",
                         help="Open the printed loopback URL in the default browser once listening")
     args = parser.parse_args()
+    if args.camera is not None and not args.server_camera:
+        parser.error("--camera selects a camera opened by this server; add --server-camera "
+                     "(by default the page uses the browser's camera)")
+    browser_camera = not (args.rehearsal or args.server_camera)
     from .profiles import (ProfileManager, profile_language_model,
                            profile_lip_model)
     profiles = ProfileManager()
@@ -450,15 +465,19 @@ def main():
     promoted_language = profile_language_model(profile)
     lip_model = args.lip_model or (promoted_lip if promoted_lip.is_file() else None)
     language_model = args.lip_language_model or (promoted_language if promoted_language.is_file() else None)
-    use_profile = args.profile is not None or motion_model is not None or lip_model is not None or language_model is not None
+    # The active profile is always the runtime's profile, also when it has no
+    # promoted model yet (stock models are then used and the warning says so).
+    # Its phrases, correction store and model-change notice then work from the
+    # start, and the shown profile matches what "Reload current models" selects.
     try:
-        runtime = Runtime(rehearsal=args.rehearsal, browser_camera=args.browser_camera,
-                          camera=args.camera, enable_lips=not args.sign_only,
+        runtime = Runtime(rehearsal=args.rehearsal, browser_camera=browser_camera,
+                          camera=args.camera if args.camera is not None else 0,
+                          enable_lips=not args.sign_only,
                           vocabulary=vocabulary, lip_model=lip_model,
                           lip_language_model=language_model,
                           motion_model=motion_model, sign_model=args.sign_model,
-                          profile_name=profile.name if use_profile else None,
-                          profile=profile if use_profile else None,
+                          profile_name=profile.name,
+                          profile=profile,
                           configuration_warning=profile_warning,
                           max_utterance_seconds=args.max_utterance_seconds,
                           profile_manager=profiles,
@@ -472,9 +491,10 @@ def main():
     url = f"http://127.0.0.1:{server.server_port}"
     print(f"QuietBridge: {url}", flush=True)
     print("REHEARSAL — synthetic inputs, no recognition" if args.rehearsal else
-          "BROWSER CAMERA — allow camera access in the browser. Wait for warmup before recording."
-          if args.browser_camera else
-          "LOCAL — no cloud inference. Wait for warmup before recording.", flush=True)
+          "BROWSER CAMERA — open the page and allow camera access there. Recognition runs on "
+          "this computer; wait for warmup before recording." if browser_camera else
+          f"SERVER CAMERA {args.camera or 0} — this process opens the camera itself. Recognition "
+          "runs on this computer; wait for warmup before recording.", flush=True)
     if args.open:
         # The socket is already listening; requests queue until serve_forever runs.
         open_in_browser(url)

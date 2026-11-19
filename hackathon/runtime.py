@@ -4,10 +4,13 @@ from __future__ import annotations
 from collections import deque
 import copy
 from dataclasses import asdict
+import hashlib
 import importlib
+import json
 import os
 from pathlib import Path
 import queue
+import stat
 import threading
 import time
 
@@ -45,6 +48,141 @@ def _motion_vocabulary_error(path):
         f"Custom motion model {path} has no vocabulary. Select the profile that owns it "
         "(--profile) or pass --vocabulary with its label-to-phrase mapping; stock gesture "
         "meanings and fixed phrases are never applied to a custom motion model.")
+
+
+MAX_QUICK_PHRASES = 50
+MAX_PHRASE_CHARS = 2000
+# State is polled several times per second; promoted model files and the
+# profile's phrase list are stat-checked at most this often.
+MODEL_CHECK_INTERVAL_S = 1.0
+_MODEL_SLOT_NAMES = {"motion": "gesture model", "lip": "lip-reading model",
+                     "lm": "lip-reading language model"}
+
+
+def quick_phrases(prompts):
+    """The profile's own practice phrases as typing shortcuts: trimmed, unique, bounded."""
+    phrases = []
+    for prompt in prompts if isinstance(prompts, list) else []:
+        if not isinstance(prompt, str):
+            continue
+        text = prompt.strip()
+        if text and len(text) <= MAX_PHRASE_CHARS and text not in phrases:
+            phrases.append(text)
+            if len(phrases) == MAX_QUICK_PHRASES:
+                break
+    return phrases
+
+
+def _stat_signature(path):
+    try:
+        info = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    if not stat.S_ISREG(info.st_mode):
+        return None
+    return info.st_size, info.st_mtime_ns
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+class _ProfileFileWatch:
+    """Notice promoted profile models and phrase edits made by another process.
+
+    Never reloads anything: it only reports. File I/O happens outside the
+    runtime lock, at most once per interval, by one caller at a time; content
+    is hashed only when a file's size or modification time changed (plus one
+    lazy baseline hash per loaded file).
+    """
+
+    def __init__(self, interval=MODEL_CHECK_INTERVAL_S, clock=time.monotonic):
+        self._interval = interval
+        self._clock = clock
+        self._lock = threading.Lock()        # guards the fields below; never held for I/O
+        self._check_lock = threading.Lock()  # one checker at a time
+        self._generation = 0
+        self._slots = {}
+        self._config_path = None
+        self._config_sig = None
+        self._phrases = []
+        self._result = (False, "")
+        self._next_check = 0.0
+
+    def reset(self, slots, config_path, phrases):
+        """``slots`` maps a slot name to ``(path, loaded_signature)``."""
+        with self._lock:
+            self._generation += 1
+            self._slots = {name: {"path": path, "loaded": loaded, "sha256": None}
+                           for name, (path, loaded) in slots.items()}
+            self._config_path = config_path
+            self._config_sig = _stat_signature(config_path) if config_path is not None else None
+            self._phrases = list(phrases)
+            self._result = (False, "")
+            self._next_check = 0.0
+
+    def check(self):
+        """Return ``(reload_needed, detail, phrases)``; cached between checks."""
+        with self._lock:
+            cached = (*self._result, list(self._phrases))
+            if self._clock() < self._next_check:
+                return cached
+        if not self._check_lock.acquire(blocking=False):
+            return cached
+        try:
+            with self._lock:
+                generation = self._generation
+                slots = {name: dict(slot) for name, slot in self._slots.items()}
+                config_path, config_sig = self._config_path, self._config_sig
+            changes = []
+            for name, slot in slots.items():
+                current = _stat_signature(slot["path"])
+                if current == slot["loaded"]:
+                    if current is not None and slot["sha256"] is None:
+                        digest = _sha256(slot["path"])
+                        if _stat_signature(slot["path"]) == current:
+                            slot["sha256"] = digest
+                    continue
+                if current is None:
+                    changes.append((name, "removed"))
+                elif slot["loaded"] is None:
+                    changes.append((name, "saved"))
+                elif slot["sha256"] is not None and _sha256(slot["path"]) == slot["sha256"]:
+                    slot["loaded"] = current  # touched, same content: nothing to reload
+                else:
+                    changes.append((name, "saved"))
+            phrases = None
+            current_config = _stat_signature(config_path) if config_path is not None else None
+            if current_config is not None and current_config != config_sig:
+                try:
+                    data = json.loads(Path(config_path).read_text(encoding="utf-8"))
+                    phrases = quick_phrases(data.get("lip_prompts")) if isinstance(data, dict) else None
+                except (OSError, ValueError):
+                    phrases = None  # mid-write or damaged: keep the last good list
+                if phrases is None:
+                    current_config = config_sig
+            detail = " ".join(
+                f"A newer {_MODEL_SLOT_NAMES[name]} was saved for this profile." if kind == "saved"
+                else f"The {_MODEL_SLOT_NAMES[name]} this profile was using was removed."
+                for name, kind in changes)
+            with self._lock:
+                if generation == self._generation:
+                    self._slots = slots
+                    self._result = (bool(changes), detail)
+                    if phrases is not None:
+                        self._phrases = phrases
+                        self._config_sig = current_config
+                    self._next_check = self._clock() + self._interval
+                return (*self._result, list(self._phrases))
+        finally:
+            self._check_lock.release()
 
 
 class ProfileSwitchConflict(RuntimeError):
@@ -105,6 +243,10 @@ class Runtime:
         self._worker_stop = threading.Event()
         self._worker_generation = 0
         self._switching_profile = False
+        # Incremented whenever the displayed message context is replaced (profile switch).
+        self._message_epoch = 0
+        # True while a speak action has been validated and the voice is starting.
+        self._speech_dispatching = False
         # Idle preview keeps only the latest frame. Active capture uses a bounded
         # chronological buffer (90 decoded frames) and reports every overflow.
         self.hand_frames = queue.Queue(maxsize=90)
@@ -168,6 +310,36 @@ class Runtime:
             "cleanup": {"status": "disabled", "suggestion": "", "latency_ms": 0,
                         "error": "", "source_revision": 0},
         }
+        self._model_watch = _ProfileFileWatch()
+        self._reset_model_watch()
+
+    def _model_watch_slots(self):
+        """Promoted-model slots this process could reload, with what it loaded.
+
+        A slot pinned by an explicit path (command line, environment or an
+        isolated sign model) or unused (lips disabled) is not watched.
+        """
+        if self.profile is None:
+            return {}
+        from .profiles import profile_language_model, profile_lip_model, profile_motion_model
+        slots = {}
+        for name, path, loaded, pinned in (
+                ("motion", profile_motion_model(self.profile), self.motion_model_path,
+                 self.isolated_sign_model_path is not None or self._explicit_motion_model is not None),
+                ("lip", profile_lip_model(self.profile), self.lip_model_path,
+                 not self.enable_lips or self._explicit_lip_model is not None),
+                ("lm", profile_language_model(self.profile), self.lip_language_model_path,
+                 not self.enable_lips or self._explicit_lip_language_model is not None)):
+            if pinned or (loaded is not None and Path(loaded).expanduser() != path):
+                continue
+            slots[name] = (path, _stat_signature(path) if loaded is not None else None)
+        return slots
+
+    def _reset_model_watch(self):
+        profile = self.profile
+        self._model_watch.reset(self._model_watch_slots(),
+                                profile.config_path if profile is not None else None,
+                                quick_phrases(profile.lip_prompts) if profile is not None else [])
 
     def _rehearsal_lip_model_info(self):
         if self.lip_model_path or self.lip_language_model_path:
@@ -210,7 +382,7 @@ class Runtime:
             thread.start()
 
     def _stop_workers(self, timeout=2.0):
-        if hasattr(self, "_worker_stop") and self._worker_stop is not None:
+        if self._worker_stop is not None:
             self._worker_stop.set()
         threads = list(self.threads)
         self.threads.clear()
@@ -218,6 +390,8 @@ class Runtime:
             thread.join(timeout=timeout)
 
     def snapshot(self):
+        # Stat checks (rarely a hash) run before taking the runtime lock.
+        reload_needed, reload_detail, phrases = self._model_watch.check()
         with self.lock:
             prof_id = self.profile.id if self.profile else "default"
             return copy.deepcopy({**self.state, "profile_id": prof_id, "active_profile": prof_id,
@@ -225,8 +399,12 @@ class Runtime:
                                   "confirmed": self.confirmed_revision == self.revision,
                                   "rehearsal": self.rehearsal, "browser_camera": self.browser_camera,
                                   "speech_available": self.speaker.available,
-                                  "speaking": self._speaker_speaking(),
+                                  "speaking": self._speech_busy(),
                                   "speech_backend": self._speaker_backend(),
+                                  "speech_error": self._speaker_error(),
+                                  "quick_phrases": phrases,
+                                  "models_reload_needed": reload_needed,
+                                  "models_reload_detail": reload_detail,
                                   "vocabulary": self.vocabulary})
 
     def _speaker_speaking(self):
@@ -235,6 +413,17 @@ class Runtime:
             return getattr(self.speaker, "speaking", False) is True
         except Exception:
             return False
+
+    def _speech_busy(self):
+        """A voice is playing, or a validated speak request is starting one."""
+        return self._speech_dispatching or self._speaker_speaking()
+
+    def _speaker_error(self):
+        try:
+            error = getattr(self.speaker, "last_error", "")
+        except Exception:
+            return ""
+        return error if isinstance(error, str) else ""
 
     def _speaker_backend(self):
         try:
@@ -392,211 +581,260 @@ class Runtime:
             # speech process to exit, so it deliberately runs outside the lock.
             self.stop_speaking()
             return
+        if name == "speak":
+            self._action_speak(data)
+            return
+        handler = getattr(self, f"_action_{name}") if name in self._LOCKED_ACTIONS else None
         with self.lock:
-            if getattr(self, "_switching_profile", False):
+            if self._switching_profile:
                 raise ProfileSwitchConflict("A profile switch is in progress")
             self.state["error"] = ""
-            if name == "camera_session":
-                if self.rehearsal or not self.browser_camera:
-                    raise ValueError("Camera sessions require live browser camera mode")
-                active = data.get("active")
-                if not isinstance(active, bool):
-                    raise ValueError("active must be a boolean")
-                if self._camera_session_active is active:
-                    return
-                self._camera_generation += 1
-                self._camera_session_active = active
-                self.state["auto_recognition"] = active
-                self._auto_reset()
-                if active:
-                    # Only an explicit new camera session clears accumulated words.
-                    self.session.reset()
-                    self._session_windows.clear()
-                    self._session_conflict = False
-                    self.session_signs.clear()
-                    self.state["session_gestures"] = []
-                    self.action("cancel", {})
-                    self.state.update(session_active=True, session_finalizing=False,
-                                      session_text="", session_chunks=[])
-                else:
-                    self.state["session_active"] = False
-                    self.state["session_finalizing"] = self.state["phase"] in {"recording", "tail", "decoding"}
-                    # Stop is finalization, not cancellation: decode the buffered tail.
-                    if self.state["phase"] in {"recording", "tail"}:
-                        self.release_ms = self.finish_at = clock_ms()
-                        self.state.update(phase="tail", recording=False)
-                        if self._window_motion:
-                            self.hand_control.put(("finish", self.finish_at, self.record_generation))
-                    elif self.state["phase"] == "idle":
-                        self._publish_session(None)
-                    self.state["camera"] = "waiting"
-                    self.jpeg = None
-                    self.tracking = {"hands": [], "mouth": None}
-                    if not (self.state["session_finalizing"] and self._window_motion):
-                        self.events.clear()
-                    self.state["last_sign"] = None
-                    # The active hand window still needs its queued tail. Idle
-                    # preview frames can be discarded by the worker instead.
-            elif name == "mode":
-                if self.state["phase"] != "idle":
-                    raise ValueError("Finish the current recording before changing mode")
-                if data.get("mode") not in {"signs", "lips", "combined"}:
-                    raise ValueError("Unknown input mode")
-                self.state["mode"] = data["mode"]
-                self._camera_generation += 1  # reset experimental motion windows
-                self.events.clear()
-                self.state["last_sign"] = None
-                self._publish(None, [], clock_ms())
-            elif name == "start":
-                if self.rehearsal:
-                    raise ValueError("Use synthetic input controls in rehearsal mode")
-                mode = self.state["mode"]
-                motion = self.state["sign_input"] in {"motion", "isolated"} and not self._starting_auto_chunk
-                if mode == "signs" and not motion:
-                    raise ValueError("This gesture mode is automatic; only custom window mode uses Record")
-                if self.state["phase"] != "idle":
-                    raise ValueError("A recording or decode is already in progress")
-                if self.state["camera"] != "ready":
-                    raise ValueError("Wait for the camera to be ready")
-                if mode in {"lips", "combined"} and self.state["lips"] != "ready":
-                    raise ValueError("Wait for the lip model to be ready")
-                if mode == "signs" and self.state["signs"] != "ready":
-                    raise ValueError("Wait for the custom gesture model to be ready")
-                self.window_generation += 1
-                self.record_generation = self.window_generation
-                self.record_start = clock_ms()
-                self._record_generation += 1
-                self.release_ms = self.finish_at = None
-                self._window_motion = motion and mode != "lips"
-                self._window_motion_done = not self._window_motion
-                self.events.clear()
-                if not self.state["session_active"]:
-                    self._publish(None, [], self.record_start)
-                self.state.update(phase="recording", recording=True, lip_error="", sign_error="")
-                if self._window_motion:
-                    self.hand_control.put(("start", self.record_start, self.record_generation))
-            elif name == "stop":
-                if self.state["phase"] != "recording":
-                    return  # A late key/pointer release after timeout or cancel is harmless.
-                self.release_ms = clock_ms()
-                self.finish_at = self.release_ms + 400
-                self.state.update(phase="tail", recording=False)
-                if self._window_motion:
-                    self.hand_control.put(("finish", self.finish_at, self.record_generation))
-            elif name == "cancel":
-                boundary = clock_ms()
-                self._lip_cancel_boundary = boundary
-                self._lip_cancel_generation += 1
-                # Producers hold the runtime lock, so removing the cancelled
-                # window here cannot race a newly accepted camera frame.
-                with self.lip_frames.mutex:
-                    retained = [packet for packet in self.lip_frames.queue if packet[1] > boundary]
-                    self.lip_frames.queue.clear()
-                    self.lip_frames.queue.extend(retained)
-                self._record_generation += 1
-                self.state["session_finalizing"] = False
-                self._auto_reset()
-                self.window_generation += 1
-                cancelled_generation = self.record_generation
-                self.record_generation = None
-                if self.state["sign_input"] in {"motion", "isolated"}:
-                    self.hand_control.put(("cancel", None, cancelled_generation))
-                self.record_start = self.release_ms = self.finish_at = None
-                self._window_motion = False
-                self._window_motion_done = False
-                self.state.update(phase="idle", recording=False)
-                self._publish(None, [], clock_ms())
-            elif name == "new_message":
-                self._check_revision(data)
-                if (self.state["session_active"] or self.state["session_finalizing"]
-                        or self.state["phase"] != "idle"
-                        or self._speaker_speaking()):
-                    raise ValueError("Finish the current input or speech before starting a new message")
-                # Cancel publishes a decision, so discard the accumulated session first.
-                self.session.reset()
-                self._session_windows.clear()
-                self._session_conflict = False
-                self.session_signs.clear()
-                self.events.clear()
-                self.seen.clear()
-                self.state.update(session_text="", session_chunks=[], session_gestures=[],
-                                  last_sign=None, last_correction="")
-                self.action("cancel", {})
-            elif name == "correct":
-                self._check_revision(data)
-                if self.state["session_active"] or self.state["session_finalizing"] or self.state["phase"] != "idle":
-                    raise ValueError("Finish the current input before correcting text")
-                corrected = data.get("text", "")
-                if not isinstance(corrected, str) or not corrected.strip() or len(corrected) > 2000:
-                    raise ValueError("Corrected text must contain 1–2000 characters")
-                corrected = corrected.strip()
-                original = self.state["decision"]["text"]
-                if corrected == original:
-                    raise ValueError("The correction does not change the text")
-                learn = data.get("learn", False)
-                if not isinstance(learn, bool):
-                    raise ValueError("learn must be a boolean")
-                if learn:
-                    if self.profile is None:
-                        raise ValueError("Create and select a profile before learning from corrections")
-                    from .corrections import CorrectionStore
-                    CorrectionStore(self.profile).record(
-                        original=original, corrected=corrected,
-                        candidates=list(self.state["alternatives"]), learn=True)
-                if corrected not in self.state["alternatives"]:
-                    self.state["alternatives"].append(corrected)
-                self.state["decision"].update(text=corrected, status="accepted", reason="corrected",
-                                              matched_signs=[])
-                self.revision += 1
-                self.confirmed_revision = self.revision
-                self.state["last_correction"] = "Correction saved for future training" if learn else "Correction applied locally"
-                self._cleanup_generation += 1
-                self.state["cleanup"].update(status="idle" if self.cleanup.public_config()["enabled"] else "disabled",
-                                             suggestion="", error="")
-            elif name == "confirm":
-                self._check_revision(data)
-                text = data.get("text", "")
-                if not text or text not in self.state["alternatives"]:
-                    raise ValueError("Select one of the displayed alternatives")
-                self.state["decision"]["text"] = text
-                self.state["decision"]["status"] = "accepted"
-                self.confirmed_revision = self.revision
-                self._cleanup_generation += 1
-                self.state["cleanup"].update(status="idle" if self.cleanup.public_config()["enabled"] else "disabled",
-                                             suggestion="", error="")
-            elif name == "speak":
-                self._check_revision(data)
-                decision = self.state["decision"]
-                if decision["status"] != "accepted" or not decision["text"]:
-                    raise ValueError("Confirm a displayed alternative before speaking")
-                if data.get("text") != decision["text"]:
-                    raise ValueError("The message changed. Check it again before speaking")
-                started = time.perf_counter()
-                self.speaker.speak(decision["text"])
-                self.state["last_spoken"] = decision["text"]
-                self.state["metrics"]["tts_dispatch_ms"] = round((time.perf_counter() - started) * 1000, 2)
-                self._cleanup_generation += 1
-                self.state["cleanup"].update(status="idle" if self.cleanup.public_config()["enabled"] else "disabled",
-                                             suggestion="", error="")
-            elif name == "rehearse":
-                if not self.rehearsal:
-                    raise ValueError("Synthetic inputs are available only with --rehearsal")
-                text = data.get("text", "")
-                label = data.get("label", "")
-                if not isinstance(text, str) or len(text) > 2000 or label not in {"", *self.vocabulary}:
-                    raise ValueError("Invalid rehearsal input")
-                now = clock_ms()
-                events = [SignEvent(label, 0.95, now - 500, now, True)] if label else []
-                self.state["last_sign"] = asdict(events[0]) if events else None
-                self._publish(LipResult([text], 0) if text.strip() else None, events, now)
-            else:
+            if handler is None:
                 raise ValueError("Unknown action")
+            handler(data)
+
+    # Each _action_* below runs with the runtime lock held, after the switch
+    # check, and either raises before changing state or completes.
+
+    def _action_camera_session(self, data):
+        if self.rehearsal or not self.browser_camera:
+            raise ValueError("Camera sessions require live browser camera mode")
+        active = data.get("active")
+        if not isinstance(active, bool):
+            raise ValueError("active must be a boolean")
+        if self._camera_session_active is active:
+            return
+        self._camera_generation += 1
+        self._camera_session_active = active
+        self.state["auto_recognition"] = active
+        self._auto_reset()
+        if active:
+            # Only an explicit new camera session clears accumulated words.
+            self.session.reset()
+            self._session_windows.clear()
+            self._session_conflict = False
+            self.session_signs.clear()
+            self.state["session_gestures"] = []
+            self._action_cancel({})
+            self.state.update(session_active=True, session_finalizing=False,
+                              session_text="", session_chunks=[])
+            return
+        self.state["session_active"] = False
+        self.state["session_finalizing"] = self.state["phase"] in {"recording", "tail", "decoding"}
+        # Stop is finalization, not cancellation: decode the buffered tail.
+        if self.state["phase"] in {"recording", "tail"}:
+            self.release_ms = self.finish_at = clock_ms()
+            self.state.update(phase="tail", recording=False)
+            if self._window_motion:
+                self.hand_control.put(("finish", self.finish_at, self.record_generation))
+        elif self.state["phase"] == "idle":
+            self._publish_session(None)
+        self.state["camera"] = "waiting"
+        self.jpeg = None
+        self.tracking = {"hands": [], "mouth": None}
+        if not (self.state["session_finalizing"] and self._window_motion):
+            self.events.clear()
+        self.state["last_sign"] = None
+        # The active hand window still needs its queued tail. Idle
+        # preview frames can be discarded by the worker instead.
+
+    def _action_mode(self, data):
+        if self.state["phase"] != "idle":
+            raise ValueError("Finish the current recording before changing mode")
+        if data.get("mode") not in {"signs", "lips", "combined"}:
+            raise ValueError("Unknown input mode")
+        self.state["mode"] = data["mode"]
+        self._camera_generation += 1  # reset experimental motion windows
+        self.events.clear()
+        self.state["last_sign"] = None
+        self._publish(None, [], clock_ms())
+
+    def _action_start(self, data):
+        if self.rehearsal:
+            raise ValueError("Use synthetic input controls in rehearsal mode")
+        mode = self.state["mode"]
+        motion = self.state["sign_input"] in {"motion", "isolated"} and not self._starting_auto_chunk
+        if mode == "signs" and not motion:
+            raise ValueError("This gesture mode is automatic; only custom window mode uses Record")
+        if self.state["phase"] != "idle":
+            raise ValueError("A recording or decode is already in progress")
+        if self.state["camera"] != "ready":
+            raise ValueError("Wait for the camera to be ready")
+        if mode in {"lips", "combined"} and self.state["lips"] != "ready":
+            raise ValueError("Wait for the lip model to be ready")
+        if mode == "signs" and self.state["signs"] != "ready":
+            raise ValueError("Wait for the custom gesture model to be ready")
+        self.window_generation += 1
+        self.record_generation = self.window_generation
+        self.record_start = clock_ms()
+        self._record_generation += 1
+        self.release_ms = self.finish_at = None
+        self._window_motion = motion and mode != "lips"
+        self._window_motion_done = not self._window_motion
+        self.events.clear()
+        if not self.state["session_active"]:
+            self._publish(None, [], self.record_start)
+        self.state.update(phase="recording", recording=True, lip_error="", sign_error="")
+        if self._window_motion:
+            self.hand_control.put(("start", self.record_start, self.record_generation))
+
+    def _action_stop(self, data):
+        if self.state["phase"] != "recording":
+            return  # A late key/pointer release after timeout or cancel is harmless.
+        self.release_ms = clock_ms()
+        self.finish_at = self.release_ms + 400
+        self.state.update(phase="tail", recording=False)
+        if self._window_motion:
+            self.hand_control.put(("finish", self.finish_at, self.record_generation))
+
+    def _action_cancel(self, data):
+        boundary = clock_ms()
+        self._lip_cancel_boundary = boundary
+        self._lip_cancel_generation += 1
+        # Producers hold the runtime lock, so removing the cancelled
+        # window here cannot race a newly accepted camera frame.
+        with self.lip_frames.mutex:
+            retained = [packet for packet in self.lip_frames.queue if packet[1] > boundary]
+            self.lip_frames.queue.clear()
+            self.lip_frames.queue.extend(retained)
+        self._record_generation += 1
+        self.state["session_finalizing"] = False
+        self._auto_reset()
+        self.window_generation += 1
+        cancelled_generation = self.record_generation
+        self.record_generation = None
+        if self.state["sign_input"] in {"motion", "isolated"}:
+            self.hand_control.put(("cancel", None, cancelled_generation))
+        self.record_start = self.release_ms = self.finish_at = None
+        self._window_motion = False
+        self._window_motion_done = False
+        self.state.update(phase="idle", recording=False)
+        self._publish(None, [], clock_ms())
+
+    def _action_new_message(self, data):
+        self._check_revision(data)
+        if (self.state["session_active"] or self.state["session_finalizing"]
+                or self.state["phase"] != "idle"
+                or self._speech_busy()):
+            raise ValueError("Finish the current input or speech before starting a new message")
+        # Cancel publishes a decision, so discard the accumulated session first.
+        self.session.reset()
+        self._session_windows.clear()
+        self._session_conflict = False
+        self.session_signs.clear()
+        self.events.clear()
+        self.seen.clear()
+        self.state.update(session_text="", session_chunks=[], session_gestures=[],
+                          last_sign=None, last_correction="")
+        clear_error = getattr(self.speaker, "clear_error", None)
+        if callable(clear_error):
+            clear_error()  # a failure report belongs to the previous message
+        self._action_cancel({})
+
+    def _action_correct(self, data):
+        self._check_revision(data)
+        if self.state["session_active"] or self.state["session_finalizing"] or self.state["phase"] != "idle":
+            raise ValueError("Finish the current input before correcting text")
+        corrected = data.get("text", "")
+        if not isinstance(corrected, str) or not corrected.strip() or len(corrected) > 2000:
+            raise ValueError("Corrected text must contain 1–2000 characters")
+        corrected = corrected.strip()
+        original = self.state["decision"]["text"]
+        if corrected == original:
+            raise ValueError("The correction does not change the text")
+        learn = data.get("learn", False)
+        if not isinstance(learn, bool):
+            raise ValueError("learn must be a boolean")
+        if learn:
+            if self.profile is None:
+                raise ValueError("Create and select a profile before learning from corrections")
+            from .corrections import CorrectionStore
+            CorrectionStore(self.profile).record(
+                original=original, corrected=corrected,
+                candidates=list(self.state["alternatives"]), learn=True)
+        if corrected not in self.state["alternatives"]:
+            self.state["alternatives"].append(corrected)
+        self.state["decision"].update(text=corrected, status="accepted", reason="corrected",
+                                      matched_signs=[])
+        self.revision += 1
+        self.confirmed_revision = self.revision
+        self.state["last_correction"] = "Correction saved for future training" if learn else "Correction applied locally"
+        self._reset_cleanup_suggestion()
+
+    def _action_confirm(self, data):
+        self._check_revision(data)
+        text = data.get("text", "")
+        if not text or text not in self.state["alternatives"]:
+            raise ValueError("Select one of the displayed alternatives")
+        self.state["decision"]["text"] = text
+        self.state["decision"]["status"] = "accepted"
+        self.confirmed_revision = self.revision
+        self._reset_cleanup_suggestion()
+
+    def _action_rehearse(self, data):
+        if not self.rehearsal:
+            raise ValueError("Synthetic inputs are available only with --rehearsal")
+        text = data.get("text", "")
+        label = data.get("label", "")
+        if not isinstance(text, str) or len(text) > 2000 or label not in {"", *self.vocabulary}:
+            raise ValueError("Invalid rehearsal input")
+        now = clock_ms()
+        events = [SignEvent(label, 0.95, now - 500, now, True)] if label else []
+        self.state["last_sign"] = asdict(events[0]) if events else None
+        self._publish(LipResult([text], 0) if text.strip() else None, events, now)
+
+    # Actions validated and applied entirely under the runtime lock.
+    _LOCKED_ACTIONS = frozenset({"camera_session", "mode", "start", "stop", "cancel",
+                                 "new_message", "correct", "confirm", "rehearse"})
+
+    def _reset_cleanup_suggestion(self):
+        self._cleanup_generation += 1
+        self.state["cleanup"].update(status="idle" if self.cleanup.public_config()["enabled"] else "disabled",
+                                     suggestion="", error="")
+
+    def _action_speak(self, data):
+        """Speak the confirmed text of the requested revision; never while speech is busy.
+
+        Validation is revision-bound and runs under the runtime lock. Starting
+        the voice (process spawn plus the stdin write, which can wait for a
+        slow-starting voice) runs outside it, so polling and the recognition
+        workers are never stalled by speech. A second request while a voice is
+        starting or playing is rejected rather than restarting it: a repeated
+        click or request must not cut off and replay the message.
+        """
+        with self.lock:
+            if self._switching_profile:
+                raise ProfileSwitchConflict("A profile switch is in progress")
+            self.state["error"] = ""
+            self._check_revision(data)
+            decision = self.state["decision"]
+            if decision["status"] != "accepted" or not decision["text"]:
+                raise ValueError("Confirm a displayed alternative before speaking")
+            if data.get("text") != decision["text"]:
+                raise ValueError("The message changed. Check it again before speaking")
+            if self._speech_busy():
+                raise ValueError("Speech is already playing. Stop it before speaking again")
+            text, revision, epoch = decision["text"], self.revision, self._message_epoch
+            self._speech_dispatching = True
+        try:
+            started = time.perf_counter()
+            self.speaker.speak(text)
+            dispatch_ms = round((time.perf_counter() - started) * 1000, 2)
+        finally:
+            with self.lock:
+                self._speech_dispatching = False
+        with self.lock:
+            if epoch != self._message_epoch:
+                return  # profile switched meanwhile; its fresh state stays untouched
+            self.state["last_spoken"] = text
+            self.state["metrics"]["tts_dispatch_ms"] = dispatch_ms
+            if self.revision == revision:
+                self._reset_cleanup_suggestion()
 
     def _auto_reset(self):
         self._auto_open_since = self._auto_quiet_since = None
         self._auto_open_frames = 0
-        if hasattr(self, "_lip_activity"):
-            self._lip_activity.reset()
+        self._lip_activity.reset()
 
     @staticmethod
     def _mouth_open(tracking, aspect=4 / 3):
@@ -720,7 +958,7 @@ class Runtime:
     def receive_frame(self, frame_bgr, timestamp_ms=None):
         """Ingest one browser frame; return False for a repeated timestamp."""
         with self.lock:
-            if getattr(self, "_switching_profile", False):
+            if self._switching_profile:
                 return False
             if self.browser_camera and self._camera_session_active is False:
                 return False
@@ -1085,7 +1323,7 @@ class Runtime:
         profile_id = profile_id.strip()
 
         with self.lock:
-            if getattr(self, "_switching_profile", False):
+            if self._switching_profile:
                 raise ProfileSwitchConflict("A profile switch is already in progress")
             if self.browser_camera and self._camera_session_active is True:
                 raise ProfileSwitchConflict("Cannot switch profile while browser camera is active. Stop camera first.")
@@ -1184,6 +1422,7 @@ class Runtime:
                                            if self.rehearsal else self.vocabulary)
 
                 self.revision += 1
+                self._message_epoch += 1
                 self.confirmed_revision = None
                 self.record_start = self.release_ms = self.finish_at = None
                 self.record_generation = None
@@ -1191,6 +1430,7 @@ class Runtime:
                 self._window_motion_done = False
                 self._auto_reset()
                 self._cleanup_generation += 1
+                self._reset_model_watch()
 
                 self.state.update({
                     "profile_name": new_profile.name,
