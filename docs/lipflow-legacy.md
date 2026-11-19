@@ -215,7 +215,7 @@ uv run pytest             # the paste test is opt-in: LIPFLOW_TEST_PASTE=1
 ```
 
 On Windows: `setup.ps1 -Samples`, then `uv run pytest`. CI runs the whole Windows setup and reads
-a real clip on every push (`.github/workflows/windows.yml`). A headless Linux workflow (`.github/workflows/linux.yml`) runs the suite without models;
+a real clip on pushes to main and on pull requests (`.github/workflows/windows.yml`). A headless Linux workflow (`.github/workflows/linux.yml`) runs the suite without models;
 see [Verification](verification.md).
 
 Code map: `lipflow/face.py` (landmarks → mouth crops), `vsr.py` (model), `camera.py`, `hotkey.py`

@@ -16,7 +16,7 @@ node scripts/check_web.mjs --calibrate
 node scripts/check_web.mjs --keyboard-profile
 ```
 
-`lipflow doctor` checks the legacy Lipflow setup on macOS and Windows. On Linux it currently stops with `ModuleNotFoundError: No module named 'Quartz'`, because the `lipflow` CLI imports its macOS hotkey module outside Windows; the QuietBridge server does not depend on it.
+`lipflow doctor` runs on macOS, Windows and Linux and prints one line per check: PASS, FAIL, WARN, N/A, SKIP or INFO. It checks model files by size, the Python runtime imports, the camera (use `--no-camera` to skip opening it), the stock gesture model and which local speech backend would be used. It exits 1 when a required check fails. A speech PASS means a backend was found, not that sound was played. On Linux the menu-bar dictation app is reported as not applicable.
 
 The `test_lab_*.cjs` glob is quoted so Node expands it itself; this works the same in bash and PowerShell.
 
@@ -24,8 +24,8 @@ The `test_lab_*.cjs` glob is quoted so Node expands it itself; this works the sa
 
 **`uv run pytest`** runs the legacy Lipflow suite in `tests/` and the QuietBridge suites in `quietbridge/`. Tests that need something the host lacks skip with a reason naming it, rather than failing or passing silently:
 
-- macOS-only modules (`Quartz`, `AppKit`) for the native Lipflow app, hotkey, paste and onboarding checks, including the `lipflow run`/`file` CLI wiring, which imports the macOS hotkey module outside Windows;
-- a keyboard backend for `pynput` (on Linux this needs an X display) for the push-to-talk tests;
+- macOS-only modules (`Quartz`, `AppKit`) for the native Lipflow app, hotkey, paste and onboarding checks;
+- a keyboard backend for `pynput` (on Linux this needs an X display, for example under `xvfb-run`) for the two Windows key-mapping tests;
 - downloaded model files, such as `models/lm/unigram5000.model` (run `./setup.sh` or `setup.ps1`), and the sample clips (`./setup.sh --samples`);
 - Windows for the Windows-only checks.
 
@@ -41,9 +41,14 @@ Synthetic checks, fake backends and rehearsal establish integration behavior, no
 
 | Workflow | Runs | Does not run |
 | --- | --- | --- |
-| [`windows.yml`](../.github/workflows/windows.yml) | `setup.ps1 -Samples` (dependencies, models, sample clips, Start-menu shortcut); `uv run pytest`; `node --check`; the Node UI contract tests; the three Chrome browser checks; `lipflow doctor` (print only, no camera); a real sample-clip lip read on the CPU | Camera, audible speech, real users |
-| [`linux.yml`](../.github/workflows/linux.yml) | `node --check` and the Node UI contract tests (before the Python install, so they fail early); `uv sync --frozen`; `uv run quietbridge --help`; the three Chrome browser checks; `uv run pytest` without models | Models, sample clips, macOS/Windows-only tests, camera, audible speech |
+| [`windows.yml`](../.github/workflows/windows.yml) | `node --check` and the Node UI contract tests; `uv sync --frozen`; `setup.ps1 -Samples` (models, sample clips best effort, Start-menu shortcut); `uv run pytest`; the three Chrome browser checks; `lipflow doctor --no-camera` when the models are present; a real sample-clip lip read on the CPU when the clips are present | Camera, audible speech, real users |
+| [`linux.yml`](../.github/workflows/linux.yml) | `node --check` and the Node UI contract tests (before the Python install, so they fail early); `uv sync --frozen`; `uv run quietbridge --help`; `lipflow doctor` (expected to report the missing models and exit 1; a crash or a false pass fails the job); the three Chrome browser checks; `uv run pytest` without models | Models, sample clips, macOS/Windows-only tests, camera, audible speech |
 
-The Linux workflow, and the `node --check`/Node UI steps in the Windows workflow, were added on 2026-11-18. They were validated locally (YAML parse, actionlint, and the Linux commands on a headless Linux host) but have not yet run on GitHub; treat them as unproven until a GitHub run passes.
+Both workflows run on pushes to `main`, on pull requests and on manual dispatch. A branch pushed without a pull request is not run automatically.
 
-Both workflows have read-only repository permissions and cancel superseded runs on the same ref. The Linux job's Python dependencies include the CUDA build of PyTorch that the lockfile resolves for Linux (about 3 GB); it is downloaded on each run rather than cached.
+Models and sample clips are cached separately and saved even when a later step fails. If the sample clips cannot be downloaded, the tests still run, the real-clip test and the end-to-end lip read are reported as SKIPPED with a warning annotation, and that is not a pass. With clips and models present, `LIPFLOW_REQUIRE_SAMPLES=1` makes the real-clip test fail instead of skip.
+
+The setup scripts read their download lists from `scripts/models.txt` and `scripts/samples.txt`, retry with backoff and resume partial files. A failed sample clip is a warning unless `--strict-samples` (`-StrictSamples` on Windows) is given; a failed model download always fails setup. `setup.ps1` could not be executed on the development host and is verified only by the Windows workflow.
+
+The Linux workflow first passed on GitHub on 2026-11-18. The changes to caching, skipping and triggers in both workflows were made after that run and validated locally only (YAML parse, actionlint, shellcheck); check the latest run before relying on them.
+

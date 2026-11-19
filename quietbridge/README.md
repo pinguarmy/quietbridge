@@ -1,6 +1,6 @@
 # `quietbridge/`: QuietBridge application package
 
-Developer notes for the QuietBridge product code. For what QuietBridge is, its status and the quick start, read the [root README](../README.md); for usage, training and checks, see the [documentation index](../docs/README.md). The package name `hackathon` is historical; it is the product package, and it reuses Auto-AVSR and face processing from `lipflow/`.
+Developer notes for the QuietBridge product code. For what QuietBridge is, its status and the quick start, read the [root README](../README.md); for usage, training and checks, see the [documentation index](../docs/README.md). This is the product package; it reuses Auto-AVSR and face processing from `lipflow/`.
 
 ## Surfaces
 

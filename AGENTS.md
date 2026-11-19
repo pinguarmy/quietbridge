@@ -36,6 +36,8 @@ The product lead coordinates architecture and shared files. Delegated work must 
 uv run lipflow doctor
 uv run pytest
 node --check quietbridge/ui/app.js
+node --test quietbridge/tests/test_ui_flow.cjs quietbridge/tests/test_cleanup_settings_ui.cjs "quietbridge/signs/tests/test_lab_*.cjs"
+node scripts/check_web.mjs && node scripts/check_web.mjs --calibrate && node scripts/check_web.mjs --keyboard-profile
 ```
 
 Run focused checks while developing and the full suite before handoff. Synthetic events, fake backends and rehearsal validate contracts, not camera accuracy. Test real camera input, real models and audible speech separately.
@@ -45,6 +47,6 @@ Measure new-session WER, exact intent, key-name/negation/number errors, gesture 
 ## Keep intact
 
 - Project: QuietBridge, https://github.com/pinguarmy/quietbridge.
-- Keep the Python package/CLI `lipflow` and legacy app data paths unchanged. QuietBridge profiles live under `~/.local/share/quietbridge/profiles/`.
+- Product code lives in `quietbridge/` (command `quietbridge`); the lip-reading engine and the original dictation app live in `lipflow/`. Both may be changed when there is a clear benefit; fix an unreasonable earlier choice instead of preserving it. Keep the `lipflow` and `quietbridge` commands and existing users' data readable: legacy app data paths, and QuietBridge profiles under `~/.local/share/quietbridge/profiles/`.
 - Do not commit keys, models, private settings or recordings. Obtain consent before sharing samples.
 - Preserve LICENSE, NOTICE and upstream attribution. LRS3 model weights have non-commercial research-use restrictions.

@@ -44,7 +44,13 @@ Training and promoting candidates is described in [Training and evaluation](trai
 
 Start the camera, then choose **Start lips + gesture recording** for one custom motion and its words. Choose **Finish recording** to decode the shared window. The button is a toggle, so there is no sustained hold requirement; Space from the page background also toggles capture. **Finish message** stops the camera for final review. REST, rejected and cancelled windows emit nothing. Pure lip input and stock gestures retain automatic capture. The main recording limit defaults to 30 seconds and can be changed with `--max-utterance-seconds`.
 
-In browser-camera mode (`--browser-camera`) the preview is the browser's own local video. Frames are also uploaded to the loopback server, for recognition only. Without `--browser-camera`, the server opens the camera itself (`--camera <index>`).
+By default the browser owns the camera: the preview is the browser's own local video, and frames are also uploaded to the loopback server, for recognition only. `--browser-camera` is still accepted and changes nothing. With `--server-camera` (optionally `--camera <index>`) the server opens the host's camera itself.
+
+**Your phrases.** The phrases saved in the active profile appear below the editor. Choosing one makes it the message, exactly like typing it and choosing Use this message; it is never spoken or learned automatically, and it asks before replacing an unfinished edit. Edit the list in Personalize.
+
+**A newer model.** When a model saved in Personalize differs from the one the running app loaded, the page shows a notice with **Reload models**. Reloading clears the current message, keeps an unfinished typed edit, and is unavailable while the camera or a session is active. Nothing reloads by itself.
+
+**If speech fails.** When the voice process reports an error after Speak, the page shows it next to the button and does not present the message as spoken; use Show large or Copy message. A clean exit is not proof that sound was heard.
 
 During a camera session, lip activity starts a chunk, about 700 ms of low activity ends it, and a bounded in-memory pre-roll retains the preceding 300 ms. Chunks accumulate into a session until you stop the camera. Review alternatives replace one window at a time and retain the selected text from every other window; the app does not build every possible cross-window combination. These geometric thresholds are segmentation hints, not speech confidence, and still need real-user validation.
 
