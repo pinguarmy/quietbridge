@@ -69,7 +69,7 @@ header { display: flex; justify-content: space-between; align-items: center; gap
 .header-links a:hover, .settings-link:hover { color: var(--accent); text-decoration: underline; }
 .header-links button { font-size: 15px; }
 .header-links .text-button { color: var(--muted); font-weight: 400; padding: 8px 4px; }
-.intro { padding: 32px 0 20px; }
+.intro { padding: 22px 0 16px; }
 .eyebrow { margin: 0 0 8px; font-size: 13px; font-weight: 650; letter-spacing: .05em; color: var(--accent); }
 h1 { margin: 0 0 10px; font-size: clamp(26px, 3vw, 38px); font-weight: 620; letter-spacing: -1px; line-height: 1.18; }
 .intro > p:not(.eyebrow), .section-copy { margin: 0; color: var(--muted); }
@@ -108,14 +108,14 @@ button.camera-action:hover:not(:disabled), button.speak:hover:not(:disabled) { b
 .record.listening .record-dot { background: var(--danger); }
 .text-button { background: transparent; border-color: transparent; color: var(--accent); padding: 8px 10px; }
 .hint { font-size: 14px; color: var(--muted); margin: 10px 0 0; overflow-wrap: anywhere; }
-.camera-options { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); padding: 8px 0; border-bottom: 1px solid var(--line); }
-.camera-options a { display: inline-flex; align-items: center; min-height: 44px; }
+.camera-options { display: flex; justify-content: space-between; align-items: center; gap: 4px 16px; font-size: 14px; color: var(--muted); padding: 8px 0; border-bottom: 1px solid var(--line); }
+.camera-options a { display: inline-flex; align-items: center; min-height: 44px; flex: 0 0 auto; }
 .tracking-detail { margin-top: 4px; }
 summary { min-height: 44px; padding: 11px 0; color: var(--muted); cursor: pointer; font-size: 15px; }
 .mouth-view { position: relative; max-width: 320px; aspect-ratio: 1.6; overflow: hidden; border-radius: 6px; background: var(--preview-bg); display: grid; place-items: center; }
 .mouth-view canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 #mouth-status { position: absolute; bottom: 7px; left: 7px; padding: 3px 7px; font-size: 13px; background: var(--surface); color: var(--ink); border-radius: 4px; }
-.capability-note { margin: 10px 0 0; color: var(--muted); font-size: 14px; max-width: 420px; }
+.capability-note { margin: 0; color: var(--muted); font-size: 14px; max-width: 420px; overflow-wrap: anywhere; }
 .message-panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 24px 28px 18px; }
 .message-heading { align-items: baseline; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
 .status { color: var(--muted); text-align: right; font-size: 14px; }
@@ -125,6 +125,28 @@ summary { min-height: 44px; padding: 11px 0; color: var(--muted); cursor: pointe
 .message.draft { color: var(--draft-ink); }
 .message.live-draft { text-decoration: underline dotted; text-underline-offset: .18em; }
 .message.cleanup-pending { text-decoration: none; }
+/* Long messages stay readable and scroll inside the panel so Speak stays close. */
+.message.long { font-size: 20px; letter-spacing: 0; line-height: 1.5; max-height: 12.5em; overflow-y: auto; white-space: pre-wrap; padding-right: 4px; }
+h3 { font-size: 15px; font-weight: 650; margin: 0; }
+.speech-error { margin: 10px 0 0; }
+.quick-phrases { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.quick-phrases h3 { color: var(--muted); margin-bottom: 8px; }
+.quick-phrase-list { display: flex; flex-wrap: wrap; gap: 8px; }
+/* One line per phrase; the full text remains the button's accessible name and tooltip. */
+.quick-phrase { min-height: 44px; max-width: min(100%, 24em); padding: 8px 14px; border-radius: 22px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.quick-phrase.current:disabled { opacity: 1; border: 2px solid var(--accent); background: var(--selected); cursor: default; }
+.quick-phrases .text-button { margin-top: 6px; padding-left: 4px; }
+.quick-phrases .hint { margin-top: 6px; }
+.notice { border: 1px solid var(--accent); background: var(--selected); border-radius: 8px; padding: 14px 16px; margin: 0 0 14px; }
+.notice h3 { font-size: 16px; color: var(--ink); margin-bottom: 4px; }
+.notice p { margin: 0 0 10px; font-size: 15px; overflow-wrap: anywhere; }
+.notice .notice-consequence { color: var(--muted); font-size: 14px; }
+.notice .hint { margin: 8px 0 0; }
+button.secondary-button { font-weight: 600; }
+button.reload-needed { background: var(--accent-fill); color: var(--on-accent); border-color: var(--accent-fill); }
+button.reload-needed:hover:not(:disabled) { background: var(--accent-fill-hover); border-color: var(--accent-fill-hover); }
+.reload-area { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.reload-area .notice { margin-bottom: 12px; }
 .draft-label { color: var(--accent); font-size: 14px; font-weight: 600; margin: 14px 0 -10px; }
 .reason { color: var(--muted); font-size: 15px; margin: 0 0 18px; overflow-wrap: anywhere; }
 .alternatives { display: grid; gap: 8px; }
@@ -182,7 +204,6 @@ footer { margin-top: 34px; padding-top: 20px; border-top: 1px solid var(--line);
 .guide-points strong { color: var(--ink); }
 .guide-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .active-input { font-size: 14px; color: var(--muted); margin: 0 0 14px; overflow-wrap: anywhere; }
-.capability-link { font-size: 15px; display: inline-flex; align-items: center; min-height: 44px; }
 #draft-status { color: var(--accent); }
 #corrected-text { scroll-margin-top: 18px; }
 /* Show large: full-viewport, high-contrast message for another person to read. */
@@ -206,7 +227,7 @@ body.large-open { overflow: hidden; }
   .wordmark { font-size: 20px; }
   .intro { padding: 14px 0 12px; }
   .intro .eyebrow { display: none; }
-  h1 { font-size: 24px; margin-bottom: 6px; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
   .intro > p:not(.eyebrow) { font-size: 15px; }
   .first-use-guide { padding: 12px 14px; margin-bottom: 14px; }
   .guide-points { font-size: 15px; padding-left: 18px; margin-bottom: 10px; }
@@ -224,5 +245,24 @@ body.large-open { overflow: hidden; }
   main { padding: 12px; }
   .bridge-mark { display: none; }
   .message-panel { padding: 16px; }
+}
+/* Windows High Contrast / forced colors: custom-drawn indicators keep a visible state. */
+@media (forced-colors: active) {
+  .record-dot, .record.listening .record-dot { forced-color-adjust: none; background: CanvasText; }
+  .flow-steps [aria-current="step"] span { forced-color-adjust: none; background: Highlight; border-color: Highlight; color: HighlightText; }
+  .bridge-mark { border-color: CanvasText; }
+  button:disabled { opacity: 1; color: GrayText; border-color: GrayText; }
+  .alternative.selected, .quick-phrase.current:disabled, .mode-switch button.active { border: 3px solid Highlight; color: CanvasText; }
+  .notice, .first-use-guide, .message-panel { border: 1px solid CanvasText; }
+  :focus-visible { outline: 3px solid Highlight; }
+}
+/* Printing shows only the message itself. */
+@media print {
+  header, nav, .skip-link, .banner, .intro, .first-use-guide, .active-input, .flow-steps, .camera-panel, .message-actions,
+  .quick-phrases, .correction-panel, .alternatives, .reason, .draft-label, .timing-note, footer, #input-warning, .large-display,
+  .message-heading .status, .message-panel .hint, .message-panel .error, .last-spoken { display: none !important; }
+  body, .message-panel { background: #fff; color: #000; border: 0; }
+  .workspace { display: block; }
+  .message.long { max-height: none; overflow: visible; }
 }
 @media (prefers-reduced-motion: no-preference) { button, a { transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease; } }

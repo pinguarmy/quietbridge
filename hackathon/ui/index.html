@@ -13,7 +13,7 @@
     <nav class="header-links" aria-label="Main navigation"><a href="/record">Personalize</a><a href="/settings">Settings</a><button id="open-guide" class="text-button" type="button" aria-controls="first-use-guide" aria-expanded="false">Quick guide</button></nav>
   </header>
   <div id="rehearsal-banner" class="banner" hidden>Preview only. No camera or recognition. <a href="/settings#preview">Try an example</a></div>
-  <section class="intro"><p class="eyebrow">Your words. Your pace.</p><h1>A little space to say it.</h1><p id="entry-hint">Start the camera, build your message, then review it before speaking.</p></section>
+  <section class="intro"><p class="eyebrow">Your words. Your pace.</p><h1>A little space to say it.</h1><p id="entry-hint">Type a message or use the camera. Nothing is spoken until you choose Speak.</p></section>
   <section id="first-use-guide" class="first-use-guide" aria-labelledby="guide-heading" hidden>
     <h2 id="guide-heading" tabindex="-1">Say your first message</h2>
     <ul class="guide-points">
@@ -30,7 +30,7 @@
     <section class="message-panel" aria-labelledby="message-heading">
       <div class="message-heading"><h2 id="message-heading">Your message</h2><span id="decision-status" class="status" role="status">Ready when you are</span></div>
       <p id="draft-label" class="draft-label" hidden>Live draft. Review before speaking.</p>
-      <p id="message" class="message empty" aria-live="polite">Your words will appear here.</p>
+      <p id="message" class="message empty" dir="auto" aria-live="polite">Your words will appear here.</p>
       <p id="reason" class="reason">Nothing is spoken until you choose.</p>
       <div id="alternatives" class="alternatives" role="group" aria-label="Choose the message you intended"></div>
       <div class="message-actions">
@@ -38,16 +38,23 @@
         <button id="stop-speaking" class="stop-speaking" type="button" hidden>Stop speaking</button>
         <button id="show-large" class="text-button" type="button" aria-haspopup="dialog" disabled>Show large</button><button id="new-message" class="text-button" type="button" disabled>New message</button><button id="copy-message" class="text-button" type="button" disabled>Copy message</button>
       </div>
+      <p id="speech-error" class="error speech-error" role="alert"></p>
       <details id="correction-panel" class="correction-panel" open>
         <summary>Edit or type a message</summary>
         <div class="preview-form">
-          <label for="corrected-text">What would you like to say?</label><textarea id="corrected-text" maxlength="2000" rows="3" placeholder="Type here, or edit the recognized words." aria-describedby="editor-hint draft-status"></textarea>
+          <label for="corrected-text">What would you like to say?</label><textarea id="corrected-text" dir="auto" maxlength="2000" rows="3" placeholder="Type here, or edit the recognized words." aria-describedby="editor-hint draft-status"></textarea>
           <label class="check-label"><input id="learn-correction" type="checkbox"> Use this text in future personal training</label>
           <button id="save-correction" type="button" aria-keyshortcuts="Control+Enter Meta+Enter">Use this message</button>
-          <p id="editor-hint" class="hint">Shortcut: Ctrl+Enter (⌘+Enter on Mac) in the text box. Using a message never speaks or trains automatically. Unfinished edits stay in this tab until you use them or start a new message.</p>
+          <p id="editor-hint" class="hint">Ctrl+Enter (⌘+Enter on Mac) also uses the message. Nothing is spoken or learned automatically.</p>
           <p id="draft-status" class="hint" role="status"></p>
         </div>
       </details>
+      <div id="quick-phrases" class="quick-phrases" hidden>
+        <h3 id="quick-phrases-heading">Your phrases</h3>
+        <div id="quick-phrases-list" class="quick-phrase-list" role="group" aria-labelledby="quick-phrases-heading" aria-describedby="quick-phrases-source"></div>
+        <button id="quick-phrases-more" class="text-button" type="button" aria-controls="quick-phrases-list" aria-expanded="false" hidden>Show all phrases</button>
+        <p id="quick-phrases-source" class="hint">Saved in your profile. Choosing one makes it your message; it is not spoken until you choose Speak. Edit them in <a href="/record">Personalize</a>.</p>
+      </div>
       <p id="correction-status" class="hint" role="status"></p>
       <p id="error" class="error" role="alert"></p>
       <p id="result-timing" class="timing-note"></p>
@@ -55,6 +62,13 @@
     </section>
     <section class="camera-panel" aria-labelledby="capture-heading">
       <div class="panel-heading"><h2 id="capture-heading">Your camera</h2><span class="local-note">No microphone</span></div>
+      <section id="models-reload-notice" class="notice" aria-labelledby="models-reload-heading" hidden>
+        <h3 id="models-reload-heading">A newer model is available</h3>
+        <p id="models-reload-detail"></p>
+        <p class="notice-consequence">Reloading clears the current message. An unfinished typed edit stays in this tab. Nothing reloads until you choose.</p>
+        <button id="models-reload-button" type="button" aria-describedby="models-reload-blocked">Reload models</button>
+        <p id="models-reload-blocked" class="hint"></p>
+      </section>
       <div id="camera-preview" class="preview">
         <img id="camera" alt="Your live camera preview" hidden>
         <video id="browser-camera" autoplay playsinline muted aria-label="Your live camera preview, mirrored" hidden></video>
@@ -64,16 +78,15 @@
       </div>
       <div class="record-controls"><button id="browser-camera-button" class="camera-action" type="button">Start camera</button><button id="record" class="record" type="button" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">Start recording</span></button><button id="cancel" class="text-button" type="button" hidden>Cancel</button></div>
       <p id="record-hint" class="hint">Nothing is spoken automatically.</p>
-      <div class="camera-options"><span id="mode-caption">Lips and gestures</span><a href="/settings">Change input</a></div>
+      <div class="camera-options"><p id="capability-note" class="capability-note">Checking supported gestures. No full sign-language translation.</p><a href="/settings">Change input</a></div>
       <details class="tracking-detail"><summary>Check mouth framing</summary><div class="mouth-view"><canvas id="mouth-overlay" width="320" height="200" aria-hidden="true"></canvas><span id="mouth-status">Face not detected</span></div></details>
-      <p id="capability-note" class="capability-note">Checking supported gestures. No full sign-language translation.</p><a class="capability-link" href="/settings#gestures">See supported concepts</a>
     </section>
   </div>
   <footer><span>Video stays on this device. You choose when to speak.</span></footer>
 </main>
 <div id="large-display" class="large-display" role="dialog" aria-modal="true" aria-labelledby="large-display-title" hidden>
   <div class="large-display-bar"><h2 id="large-display-title" class="large-display-title">Message for you</h2><button id="large-close" class="large-close" type="button">Close</button></div>
-  <p id="large-text" class="large-text"></p>
+  <p id="large-text" class="large-text" dir="auto"></p>
 </div>
 <script src="/app.js"></script>
 </body></html>

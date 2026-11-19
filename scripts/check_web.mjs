@@ -6,6 +6,12 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 
+// import.meta.dirname needs Node 20.11+. CI pins Node 24; local runs on Node 22 are supported.
+const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
+if (nodeMajor < 20 || (nodeMajor === 20 && nodeMinor < 11)) {
+  console.error(`check_web.mjs needs Node 20.11 or newer; this is ${process.version}.`);
+  process.exit(2);
+}
 const root = path.resolve(import.meta.dirname, '..');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let deadline;
@@ -22,7 +28,7 @@ function lineProtocol(child) {
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', chunk => { buffer+=chunk; let n; while ((n=buffer.indexOf('\n'))>=0) { const line=buffer.slice(0,n); buffer=buffer.slice(n+1); if(!line.trim()) continue; let msg; try { msg=JSON.parse(line); } catch { continue; } if(msg.ready) ready.push(msg); else if(pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); } } });
   child.stderr.on('data', b => process.stderr.write(`[fixture] ${b}`));
-  return {ready:()=>waitFor(()=>ready.shift(),'fixture ready',10000), async command(op) { const key=++id; const p=new Promise(resolve=>pending.set(key,resolve)); child.stdin.write(JSON.stringify({id:key,op})+'\n'); const result=await Promise.race([p,sleep(5000).then(()=>null)]); expect(result?.ok, `${op} fixture response`,result); return result; }};
+  return {ready:()=>waitFor(()=>ready.shift(),'fixture ready',10000), async command(op,args={}) { const key=++id; const p=new Promise(resolve=>pending.set(key,resolve)); child.stdin.write(JSON.stringify({...args,id:key,op})+'\n'); const result=await Promise.race([p,sleep(5000).then(()=>null)]); expect(result?.ok, `${op} fixture response`,result); return result; }};
 }
 function cdpProtocol(child) {
   let buffer=Buffer.alloc(0), id=0; const pending=new Map(), listeners=new Map();
@@ -36,6 +42,17 @@ async function chromePath() {
   for(const p of choices) try {await access(p);return p;} catch {}
   throw Error('Chrome not found; set CHROME_BIN');
 }
+// Chrome refuses to start its sandbox as root (containers, CI images). Only then,
+// and only for this throwaway headless profile, disable it and say so.
+let sandboxNoticePrinted = false;
+function chromeArgs(profile) {
+  const args=['--headless=new','--remote-debugging-pipe',`--user-data-dir=${profile}`,'--no-first-run','--no-default-browser-check'];
+  if(process.getuid?.()===0) {
+    args.unshift('--no-sandbox');
+    if(!sandboxNoticePrinted) { console.log('Running as root: launching headless Chrome with --no-sandbox for the temporary check profile.'); sandboxNoticePrinted=true; }
+  }
+  return [...args,'about:blank'];
+}
 async function run(variant, coreOnly=false) {
   deadline=Date.now()+85000;
   let fixture, browser, profile, protocol, cdp, session;
@@ -47,7 +64,7 @@ async function run(variant, coreOnly=false) {
     expect(/^http:\/\/127\.0\.0\.1:\d+\/$/.test(origin),'owned loopback URL',origin);
     expect(ready.variant===variant,'requested variant',ready.variant);
     profile=await mkdtemp(path.join(tmpdir(),'quietbridge-web-check-'));
-    browser=spawn(await chromePath(),['--headless=new','--remote-debugging-pipe',`--user-data-dir=${profile}`,'--no-first-run','--no-default-browser-check','about:blank'],{stdio:['ignore','ignore','pipe','pipe','pipe']});
+    browser=spawn(await chromePath(),chromeArgs(profile),{stdio:['ignore','ignore','pipe','pipe','pipe']});
     browser.on('error', e=>process.stderr.write(`Chrome spawn: ${e.message}\n`));
     cdp=cdpProtocol(browser);
     const target=await cdp.send('Target.createTarget',{url:'about:blank'});
@@ -65,6 +82,10 @@ async function run(variant, coreOnly=false) {
     const snap=()=>protocol.command('snapshot');
     const visible=()=>js(()=>({message:document.querySelector('#message')?.textContent,editor:document.querySelector('#corrected-text')?.value,speakDisabled:document.querySelector('#speak')?.disabled,saveDisabled:document.querySelector('#save-correction')?.disabled,error:document.querySelector('#error')?.textContent,alternatives:[...document.querySelectorAll('.alternative')].map(x=>({text:x.dataset.candidate,label:x.textContent,selected:x.getAttribute('aria-pressed')}))}));
     const dialog=async accept=>{await waitFor(()=>dialogs.length,'native confirmation dialog');const d=dialogs.shift();expect(d.type==='confirm','native confirm',d);await send('Page.handleJavaScriptDialog',{accept});};
+    // Test-double state fields from the fixture (see OVERLAY_FIELDS there).
+    const overlay=fields=>protocol.command('overlay',{fields});
+    // While a native confirm is open, page JS cannot be evaluated; wait on CDP events only.
+    const dialogOpened=async ms=>{const end=Date.now()+ms;while(Date.now()<end && !dialogs.length) await sleep(50);return dialogs.length>0;};
     const action=async (name,data)=>evaluate(`(async()=>fetch('/api/action/${name}',{method:'POST',headers:{'Content-Type':'application/json','X-Lipflow-Token':(await fetch('/api/state').then(r=>r.json())).token},body:JSON.stringify(${JSON.stringify(data)})}).then(async r=>({ok:r.ok,body:await r.json()})))()`);
     await send('Page.navigate',{url:origin});
     await waitFor(async()=>{try{return (await state()).token && await js(()=>!!document.querySelector('#corrected-text'));}catch{return false;}},'page and state ready',10000);
@@ -78,7 +99,7 @@ async function run(variant, coreOnly=false) {
     const executedHash=createHash('sha256').update(loaded.scriptSource).digest('hex');
     expect(executedHash===hash,'browser-loaded app.js equals served snapshot',{executedHash,hash});
     const browserVersion=await cdp.send('Browser.getVersion');
-    console.log(JSON.stringify({variant,origin,snapshotID:snapshotId,identity:ready.identity,browser:browserVersion.product,evidence:'real DOM/HTTP; silent speech dispatch; some DOM-dispatched input; no physical capture or audible speech'}));
+    console.log(JSON.stringify({variant,origin,snapshotID:snapshotId,identity:ready.identity,browser:browserVersion.product,node:process.version,evidence:'real DOM/HTTP; silent speech dispatch; some DOM-dispatched input; no physical capture or audible speech'}));
     if(process.argv.includes('--keyboard-profile')) {
       const key=async(name,code=name)=>{
         const virtual={Tab:9,Enter:13}[code];
@@ -128,6 +149,19 @@ async function run(variant, coreOnly=false) {
       await back('other');await waitFor(async()=>{const v=await visible();return v.editor==='Notes belonging only to the other profile' && v.speakDisabled;},'other draft independently restored');
       expect((await snap()).speech_calls.length===1,'navigation and profile changes never dispatch speech',await snap());
       console.log('PASS profile draft isolation and declined switch (DOM-dispatched profile controls; real HTTP and storage)');
+      currentCase='keyboard-quick-phrase';
+      await overlay({quick_phrases:['Thank you, that helps.']});
+      // Wait for this exact list: the runtime may already show the profile's own phrases.
+      await waitFor(()=>evaluate("[...document.querySelectorAll('.quick-phrase')].map(b=>b.textContent).join('|')==='Thank you, that helps.'"),'fixture quick phrase rendered');
+      const spokenBefore=(await snap()).speech_calls.length;
+      await reach(x=>x.text==='Thank you, that helps.');
+      // Enter opens a native confirm (unfinished draft) that blocks the key dispatch until answered.
+      const pressed=key('Enter');
+      expect(await dialogOpened(3000),'unfinished draft makes the phrase ask first',dialogs.length);
+      await dialog(true); await pressed;
+      await waitFor(async()=>(await state()).decision.text==='Thank you, that helps.' && (await visible()).editor==='Thank you, that helps.','keyboard phrase applied');
+      expect((await snap()).speech_calls.length===spokenBefore,'a quick phrase never speaks',await snap());
+      console.log('PASS keyboard quick phrase (CDP Tab/Enter; phrases from the fixture test double)');
       return;
     }
     currentCase='typed-speech';
@@ -181,8 +215,43 @@ async function run(variant, coreOnly=false) {
     const callsAfter=(await snap()).speech_calls;
     expect(callsAfter.length===callsBefore && (await visible()).editor==='New words during confirmation','no old speech after editing during confirmation',{before:callsBefore,after:callsAfter,dom:await visible()},'edited-confirm-dispatch');
     await evaluate('window.fetch=window.__originalFetch');
+    currentCase='quick-phrase';
+    await overlay({quick_phrases:['Please open the window.','Thank you.']});
+    await waitFor(()=>evaluate("!document.querySelector('#quick-phrases').hidden && [...document.querySelectorAll('#quick-phrases-list .quick-phrase')].map(b=>b.textContent).join('|')==='Please open the window.|Thank you.'"),'quick phrases rendered from state');
+    await edit('Unfinished phrase draft');
+    const phraseRevision=(await state()).revision, phraseSpeech=(await snap()).speech_calls.length;
+    await click('.quick-phrase');
+    const asked=await dialogOpened(1500);
+    if(asked) await dialog(false);
+    v=await visible();
+    expect(asked && v.editor==='Unfinished phrase draft' && (await state()).revision===phraseRevision,'phrase asks before replacing an unfinished draft; declining keeps it',{asked,dom:v},'phrase-draft-confirm');
+    await click('.quick-phrase'); await dialog(true);
+    await waitFor(async()=>(await state()).decision.text==='Please open the window.' && (await visible()).editor==='Please open the window.','phrase applied as the message');
+    expect((await snap()).speech_calls.length===phraseSpeech,'applying a phrase never speaks',await snap(),'phrase-no-speech');
+    expect(await evaluate("document.querySelector('.quick-phrase').disabled && !document.querySelector('#speak').disabled"),'current phrase disabled, Speak separate and available',await visible());
+    await click('#speak'); await waitFor(async()=>(await snap()).speech_calls.at(-1)==='Please open the window.' && (await snap()).speech_calls.length===phraseSpeech+1,'Speak dispatches the phrase once');
+    await overlay({quick_phrases:[]});
+    await waitFor(()=>evaluate("document.querySelector('#quick-phrases').hidden"),'an empty phrase list shows nothing');
+    await overlay({quick_phrases:null});
     console.log(`PASS core journeys variant=${variant}`);
     if(coreOnly) return;
+    currentCase='models-reload-notice';
+    await edit('Draft kept across reload');
+    await overlay({models_reload_needed:true,models_reload_detail:'Fixture: promoted gesture model differs from the loaded one.'});
+    await waitFor(()=>evaluate("!document.querySelector('#models-reload-notice').hidden && document.querySelector('#models-reload-detail').textContent.startsWith('Fixture:') && !document.querySelector('#models-reload-button').disabled"),'newer-model notice shown with its detail');
+    await sleep(600);
+    expect((await snap()).state.models_reload_needed===true,'state alone never reloads',(await snap()).state.models_reload_needed);
+    await click('#models-reload-button'); await dialog(true);
+    await waitFor(()=>evaluate("document.querySelector('#models-reload-notice').hidden"),'notice disappears after the explicit reload');
+    v=await visible(); expect(v.editor==='Draft kept across reload' && v.speakDisabled,'reload keeps the unfinished typed edit unapplied',v);
+    currentCase='speech-error';
+    await edit('Speech will fail'); await click('#save-correction');
+    await waitFor(async()=>(await state()).decision.text==='Speech will fail' && !(await visible()).speakDisabled,'message applied for speech failure');
+    await click('#speak'); await waitFor(async()=>(await snap()).speech_calls.at(-1)==='Speech will fail','speech dispatched');
+    await overlay({speech_error:'Fixture: no audio output device.'});
+    await waitFor(()=>evaluate("document.querySelector('#speech-error').textContent.includes('no audio output device') && document.querySelector('#last-spoken').textContent==='' && document.querySelector('#step-speak').getAttribute('aria-current')===null && document.querySelector('#show-large').classList.contains('show-large-primary')"),'failed speech shown at Speak, not presented as spoken');
+    await overlay({speech_error:null});
+    await waitFor(()=>evaluate("document.querySelector('#speech-error').textContent===''"),'speech error clears with state');
     currentCase='empty-draft-navigation';
     await edit('');
     await click('a[href="/settings"]');await waitFor(()=>evaluate("location.pathname==='/settings'"),'Settings for empty draft');
@@ -295,7 +364,7 @@ async function run(variant, coreOnly=false) {
 async function main() {
   if(process.argv.includes('--calibrate')) {
     await run('control',true);
-    for(const [variant,expected,check] of [['conflict-stale','conflict-selection','selected-editor'],['draft-loss','draft-continuity','incoming-draft'],['confirm-edit-stale','pending-confirm-edit','edited-confirm-dispatch'],['choice-label-mismatch','conflict-selection','visible-label']]) {
+    for(const [variant,expected,check] of [['phrase-replaces-draft','quick-phrase','phrase-draft-confirm'],['conflict-stale','conflict-selection','selected-editor'],['draft-loss','draft-continuity','incoming-draft'],['confirm-edit-stale','pending-confirm-edit','edited-confirm-dispatch'],['choice-label-mismatch','conflict-selection','visible-label']]) {
       let found; try {await run(variant,true);} catch(e) {found={caseId:e.caseId,checkId:e.checkId}; console.log(`calibration ${variant}: ${e.message}`);}
       currentCase='calibration'; expect(found?.caseId===expected && found?.checkId===check,`${variant} fails ${expected}/${check}, not a timeout or unrelated assertion`,found);
     }

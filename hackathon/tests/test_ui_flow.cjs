@@ -86,7 +86,7 @@ test('custom gestures retain a usable record control inside a camera session', (
   assert.equal(elements.get('record').hidden, false);
   assert.equal(elements.get('record').disabled, false);
   assert.match(elements.get('record-label').textContent, /lips \+ gesture/);
-  assert.match(elements.get('entry-hint').textContent, /together/);
+  assert.match(elements.get('record-hint').textContent, /together/);
   render({ mode: 'lips', sign_input: 'motion', session_active: true, auto_recognition: true });
   assert.equal(elements.get('record').hidden, true);
 });
@@ -221,15 +221,30 @@ test('record control toggles with one activation, without sustained hold', async
   assert.deepEqual(calls,['start','stop']);
 });
 
-test('guide is dismissible and reopenable without changing message state', () => {
+test('guide starts closed so typing comes first, and opens and closes without changing message state', () => {
   const a=screen(); a.render();
-  assert.equal(a.elements.get('first-use-guide').hidden,false);
-  a.elements.get('guide-dismiss').onclick();
-  assert.equal(a.elements.get('first-use-guide').hidden,true);
+  assert.equal(a.elements.get('first-use-guide').hidden,true,'essentials are one intro line; the editor is not pushed down');
+  assert.equal(a.elements.get('open-guide').attributes['aria-expanded'],'false');
+  assert.match(fs.readFileSync(path.join(__dirname,'../ui/index.html'),'utf8'),/id="entry-hint">Type a message or use the camera\. Nothing is spoken until you choose Speak\./);
   a.elements.get('open-guide').onclick();
   assert.equal(a.elements.get('first-use-guide').hidden,false);
   assert.equal(a.elements.get('guide-heading').focused,true);
+  a.elements.get('guide-dismiss').onclick();
+  assert.equal(a.elements.get('first-use-guide').hidden,true);
+  assert.equal(a.elements.get('open-guide').focused,true);
   assert.equal(a.elements.get('message').textContent,'Your words will appear here.');
+});
+
+test('intro copy stays fixed while session guidance changes inside the camera panel', () => {
+  const a=screen(); a.render();
+  const intro=a.elements.get('entry-hint').textContent;
+  const hints=new Set();
+  for (const extra of [{}, {session_active:true,auto_recognition:true}, {session_finalizing:true}, {lips:'warming'}, {sign_input:'motion',session_active:true}]) {
+    a.render({revision:a.context.sample.revision+1,...extra}); hints.add(a.elements.get('record-hint').textContent);
+    assert.equal(a.elements.get('entry-hint').textContent,intro);
+  }
+  assert.equal(hints.size,5,'each capture state has its own single instruction');
+  assert.doesNotMatch(fs.readFileSync(path.join(__dirname,'../ui/app.js'),'utf8'),/'entry-hint'/,'the intro line is never rewritten at runtime');
 });
 
 test('server restart accepts the new identity and token without replaying stale speech', async () => {
@@ -669,4 +684,223 @@ test('frame upload waits for a new video frame and never overlaps', async () => 
   draws = vm.runInContext('globalThis.__draws||0', a.context);
   assert.equal(draws, 0);
   vm.runInContext('stopBrowserCamera()', a.context);
+});
+
+// ---- Quick phrases, newer-model notice, speech failure, long/RTL text, profile list ----
+const phraseButtons = a => a.elements.get('quick-phrases-list').children;
+function phraseScreen(extra = {}) {
+  const a = screen(); a.render({ server_instance: 'boot', token: 'tok', profile_id: 'sam', profile_name: 'Sam', quick_phrases: ['I need a break, please.', 'Thank you.'], ...extra });
+  return a;
+}
+
+test('quick phrases: none for the stock configuration or older state, a labelled group of full-text buttons otherwise', () => {
+  const a = screen(); a.render();
+  assert.equal(a.elements.get('quick-phrases').hidden, true, 'absent field shows nothing');
+  a.render({ revision: 2, quick_phrases: [] });
+  assert.equal(a.elements.get('quick-phrases').hidden, true, 'no built-in phrases');
+  const long = 'Could you please repeat that more slowly? '.repeat(20).trim();
+  a.render({ revision: 3, quick_phrases: ['Yes.', long, '', 7] });
+  assert.equal(a.elements.get('quick-phrases').hidden, false);
+  const buttons = phraseButtons(a);
+  assert.deepEqual(buttons.map(b => b.textContent), ['Yes.', long], 'full text is the accessible name; invalid entries are skipped');
+  assert.equal(buttons[1].title, long);
+  assert.equal(buttons[1].attributes.dir, 'auto');
+  assert.equal(buttons[0].type, 'button');
+});
+
+test('a quick phrase applies through the typed-message path without speaking or learning', async () => {
+  const a = phraseScreen();
+  a.elements.get('learn-correction').checked = true;
+  const calls = [];
+  a.context.fetch = async (url, options) => { calls.push([url, JSON.parse(options.body)]); return okJson({ ...a.context.sample, revision: 2, decision: { text: 'Thank you.', status: 'accepted', reason: 'corrected' } }); };
+  await phraseButtons(a)[1].onclick(); await settle();
+  assert.deepEqual(calls, [['/api/action/correct', { revision: 1, text: 'Thank you.', learn: false }]]);
+  assert.equal(a.elements.get('message').textContent, 'Thank you.');
+  assert.equal(a.elements.get('corrected-text').value, 'Thank you.');
+  assert.equal(a.elements.get('learn-correction').checked, false);
+  assert.equal(a.elements.get('speak').disabled, false, 'Speak stays a separate explicit action');
+  assert.equal(a.elements.get('speak').focused, true);
+  assert.equal(phraseButtons(a)[1].disabled, true, 'the current message cannot be re-applied');
+  assert.equal(phraseButtons(a)[1].attributes['aria-current'], 'true');
+  assert.equal(phraseButtons(a)[0].disabled, false);
+  await phraseButtons(a)[1].onclick(); await settle();
+  assert.equal(calls.length, 1);
+});
+
+test('a quick phrase asks before replacing an unfinished edit and keeps it on decline or failure', async () => {
+  const a = phraseScreen({ decision: { text: 'Old', status: 'accepted', reason: 'corrected' } });
+  a.elements.get('corrected-text').value = 'My unfinished words'; a.elements.get('corrected-text').listeners.input();
+  let asked = 0; a.context.window.confirm = () => { asked++; return false; };
+  let calls = 0; a.context.fetch = async () => { calls++; throw new Error('Network unavailable'); };
+  await phraseButtons(a)[0].onclick();
+  assert.equal(asked, 1); assert.equal(calls, 0);
+  assert.equal(a.elements.get('corrected-text').value, 'My unfinished words');
+  a.context.window.confirm = () => true;
+  await phraseButtons(a)[0].onclick(); await settle();
+  assert.equal(calls, 1, 'one request, never retried');
+  assert.equal(a.elements.get('corrected-text').value, 'My unfinished words', 'a failed apply keeps the edit');
+  assert.equal(a.sessionValues.get('quietbridge-unsent-v1:sam'), 'My unfinished words');
+  assert.match(a.elements.get('error').textContent, /edit is kept/);
+});
+
+test('words typed while a phrase is applying are not cleared by its success', async () => {
+  const a = phraseScreen();
+  let finish; a.context.fetch = () => new Promise(resolve => { finish = resolve; });
+  const applying = phraseButtons(a)[0].onclick(); await settle();
+  assert.equal(phraseButtons(a)[1].disabled, true, 'phrases wait for the pending action');
+  assert.equal(a.elements.get('save-correction').disabled, true);
+  a.elements.get('corrected-text').value = 'Typed meanwhile'; a.elements.get('corrected-text').listeners.input();
+  finish(okJson({ ...a.context.sample, revision: 2, decision: { text: 'I need a break, please.', status: 'accepted', reason: 'corrected' } }));
+  await applying;
+  assert.equal(a.elements.get('corrected-text').value, 'Typed meanwhile');
+  assert.equal(a.elements.get('speak').disabled, true, 'the newer edit is unapplied, so Speak waits');
+  assert.match(a.elements.get('draft-status').textContent, /newer unfinished edit is kept/);
+});
+
+test('quick phrases are unavailable during sessions, speech and connection loss', async () => {
+  const a = phraseScreen(); const P = { quick_phrases: ['I need a break, please.', 'Thank you.'] };
+  const blocked = () => phraseButtons(a).length === 2 && phraseButtons(a).every(b => b.disabled);
+  assert.equal(blocked(), false);
+  a.render({ ...P, revision: 2, session_active: true, auto_recognition: true }); assert.equal(blocked(), true, 'live session');
+  a.render({ ...P, revision: 3, session_finalizing: true }); assert.equal(blocked(), true, 'finalizing');
+  a.render({ ...P, revision: 4, speaking: true }); assert.equal(blocked(), true, 'device speaking');
+  a.render({ ...P, revision: 5 }); assert.equal(blocked(), false);
+  a.context.fetch = async () => { throw new Error('down'); };
+  await vm.runInContext('poll()', a.context);
+  assert.equal(blocked(), true, 'connection lost');
+  let calls = 0; a.context.fetch = async () => { calls++; return new Promise(() => {}); };
+  await phraseButtons(a)[0].onclick(); assert.equal(calls, 0);
+});
+
+test('a long phrase list starts collapsed and expands on request', () => {
+  const a = screen(); const phrases = Array.from({ length: 30 }, (_, i) => `Phrase ${i + 1}`);
+  a.render({ quick_phrases: phrases });
+  assert.equal(phraseButtons(a).length, 12);
+  const more = a.elements.get('quick-phrases-more');
+  assert.equal(more.hidden, false); assert.match(more.textContent, /Show all 30/); assert.equal(more.attributes['aria-expanded'], 'false');
+  more.onclick();
+  assert.equal(phraseButtons(a).length, 30); assert.equal(more.attributes['aria-expanded'], 'true');
+  a.render({ revision: 2, quick_phrases: ['Only one'] });
+  assert.equal(phraseButtons(a).length, 1); assert.equal(more.hidden, true);
+});
+
+test('newer model notice explains the consequence, is blocked while the camera is in use and never reloads by itself', async () => {
+  const a = screen(); const calls = [];
+  a.context.fetch = async (url, options) => { calls.push([url, options?.body && JSON.parse(options.body)]); return new Promise(() => {}); };
+  a.render({ server_instance: 'boot', token: 'tok', profile_id: 'sam' });
+  assert.equal(a.elements.get('models-reload-notice').hidden, true, 'absent field: no notice');
+  a.render({ server_instance: 'boot', token: 'tok', profile_id: 'sam', revision: 2, models_reload_needed: true, models_reload_detail: 'Promoted gesture model differs.', session_active: true, auto_recognition: true });
+  assert.equal(a.elements.get('models-reload-notice').hidden, false);
+  assert.equal(a.elements.get('models-reload-detail').textContent, 'Promoted gesture model differs.');
+  assert.equal(a.elements.get('models-reload-button').disabled, true);
+  assert.match(a.elements.get('models-reload-blocked').textContent, /stop the camera/);
+  await a.elements.get('models-reload-button').onclick();
+  a.render({ server_instance: 'boot', token: 'tok', profile_id: 'sam', revision: 3, models_reload_needed: true, models_reload_detail: 'Promoted gesture model differs.', phase: 'recording' });
+  assert.equal(a.elements.get('models-reload-button').disabled, true);
+  a.render({ server_instance: 'boot', token: 'tok', profile_id: 'sam', revision: 4, models_reload_needed: true });
+  assert.equal(a.elements.get('models-reload-button').disabled, false);
+  assert.equal(a.elements.get('models-reload-blocked').textContent, '');
+  assert.match(a.elements.get('models-reload-detail').textContent, /differs from the one running/);
+  assert.deepEqual(calls.filter(c => c[0].startsWith('/api/action') || c[0].startsWith('/api/profile')), [], 'state alone never triggers a reload');
+});
+
+test('reloading from the notice confirms when a message would be cleared, keeps the typed edit and hides on fresh state', async () => {
+  const a = screen();
+  a.render({ server_instance: 'boot', token: 'tok', profile_id: 'sam', models_reload_needed: true, models_reload_detail: 'New', decision: { text: 'Current words', status: 'accepted', reason: 'corrected' } });
+  a.elements.get('corrected-text').value = 'Typed edit'; a.elements.get('corrected-text').listeners.input();
+  const calls = []; let asked = 0;
+  a.context.window.confirm = message => { asked++; assert.match(message, /clears the current message.*edit stays/); return false; };
+  a.context.fetch = async (url, options) => { calls.push([url, JSON.parse(options.body)]); return okJson({ ...a.context.sample, revision: 2, models_reload_needed: false, decision: { text: '', status: 'unavailable', reason: 'lip_only' } }); };
+  await a.elements.get('models-reload-button').onclick();
+  assert.equal(asked, 1); assert.deepEqual(calls, []);
+  a.context.window.confirm = () => true;
+  await a.elements.get('models-reload-button').onclick();
+  assert.deepEqual(calls, [['/api/action/profile_select', { id: 'sam' }]]);
+  assert.equal(a.elements.get('models-reload-notice').hidden, true);
+  assert.equal(a.elements.get('corrected-text').value, 'Typed edit');
+  assert.match(a.elements.get('correction-status').textContent, /reloaded/);
+});
+
+test('Settings reflects a newer model next to Reload current models and reloads the running profile', async () => {
+  const a = screen('settings.html');
+  a.render({ token: 'tok', profile_id: 'sam', models_reload_needed: true, models_reload_detail: 'Lip model candidate 2 was promoted.' });
+  assert.equal(a.elements.get('models-reload-notice').hidden, false);
+  assert.equal(a.elements.get('models-reload-detail').textContent, 'Lip model candidate 2 was promoted.');
+  assert.equal(a.elements.get('profile-reload-btn').classList.contains('reload-needed'), true);
+  a.render({ token: 'tok', profile_id: 'sam', revision: 2, session_active: true, models_reload_needed: true });
+  const calls = []; a.context.fetch = async (url, options) => { calls.push(url); return okJson({ ...a.context.sample, revision: 3 }); };
+  await a.elements.get('profile-reload-btn').onclick();
+  assert.deepEqual(calls, [], 'refused while a session is active');
+  assert.match(a.elements.get('profile-switch-error').textContent, /stop the camera/);
+  a.render({ token: 'tok', profile_id: 'sam', revision: 4 });
+  assert.equal(a.elements.get('models-reload-notice').hidden, true);
+  assert.equal(a.elements.get('profile-reload-btn').classList.contains('reload-needed'), false);
+});
+
+test('a speech failure is shown at Speak with fallbacks and is not presented as spoken', () => {
+  const a = screen();
+  const accepted = { text: 'Open the window', status: 'accepted', reason: 'corrected' };
+  a.render({ decision: accepted, last_spoken: 'Open the window' });
+  assert.equal(a.elements.get('step-speak').attributes['aria-current'], 'step');
+  assert.equal(a.elements.get('speech-error').textContent, '');
+  a.render({ revision: 2, decision: accepted, last_spoken: 'Open the window', speech_error: 'No audio output device was found' });
+  assert.match(a.elements.get('speech-error').textContent, /Speech did not play: No audio output device was found\. Use Show large or Copy message/);
+  assert.equal(a.elements.get('last-spoken').textContent, '', 'not listed as spoken');
+  assert.equal(a.elements.get('step-speak').attributes['aria-current'], undefined);
+  assert.equal(a.elements.get('step-review').attributes['aria-current'], 'step');
+  assert.equal(a.elements.get('show-large').classList.contains('show-large-primary'), true);
+  assert.equal(a.elements.get('speak').disabled, false, 'trying again stays an explicit choice');
+  a.render({ revision: 3, decision: accepted, last_spoken: 'Open the window', speech_error: '' });
+  assert.equal(a.elements.get('speech-error').textContent, '');
+  assert.match(a.elements.get('last-spoken').textContent, /Last spoken/);
+});
+
+test('long and right-to-left messages stay readable', () => {
+  const a = screen();
+  const long = 'word '.repeat(400).trim();
+  a.render({ decision: { text: long, status: 'accepted', reason: 'corrected' } });
+  assert.equal(a.elements.get('message').classList.contains('long'), true);
+  assert.equal(a.elements.get('message').attributes.tabindex, '0', 'scrollable message is keyboard reachable');
+  a.render({ revision: 2, decision: { text: 'أحتاج إلى استراحة', status: 'confirmation_needed', reason: 'conflict' }, alternatives: ['أحتاج إلى استراحة', 'No.'] });
+  assert.equal(a.elements.get('message').classList.contains('long'), false);
+  assert.equal(a.elements.get('message').attributes.tabindex, undefined);
+  assert.equal(a.elements.get('alternatives').children[0].attributes.dir, 'auto');
+  const html = fs.readFileSync(path.join(__dirname, '../ui/index.html'), 'utf8');
+  for (const id of ['message', 'corrected-text', 'large-text']) assert.match(html, new RegExp(`id="${id}"[^>]*dir="auto"`));
+});
+
+test('a failed or empty profile list is explained, disables switching and retries after polling recovers', async () => {
+  const a = screen('settings.html'); let calls = 0;
+  a.context.fetch = async url => { if (url === '/api/profiles') { calls++; return { ok: false, json: async () => ({}) }; } return okJson({ ...a.context.sample }); };
+  a.render({ token: 'tok', profile_id: 'default' });
+  await vm.runInContext('profilesLoading = false; loadProfilesList()', a.context);
+  assert.equal(a.elements.get('profile-switch-btn').disabled, true);
+  assert.match(a.elements.get('profile-switch-error').textContent, /Trying again automatically/);
+  assert.equal(a.elements.get('profile-select').children[0].textContent, 'Profiles unavailable');
+  await vm.runInContext('poll()', a.context); await settle();
+  assert.equal(calls, 1, 'retry waits a few seconds');
+  vm.runInContext('profilesRetryAt = 0', a.context);
+  a.context.fetch = async url => url === '/api/profiles' ? okJson({ profiles: [], active_profile: 'default' }) : okJson({ ...a.context.sample });
+  await vm.runInContext('poll()', a.context); await settle();
+  assert.equal(a.elements.get('profile-select').children[0].textContent, 'No saved profiles yet');
+  assert.equal(a.elements.get('profile-switch-error').textContent, '');
+  assert.match(a.elements.get('profile-list-status').textContent, /Personalize/);
+  assert.equal(a.elements.get('profile-reload-btn').disabled, false, 'reloading the running profile does not need the list');
+});
+
+test('no page loads the removed cleanup-display script', () => {
+  const ui = path.join(__dirname, '../ui');
+  assert.equal(fs.existsSync(path.join(ui, 'cleanup-display.js')), false);
+  for (const page of ['index.html', 'settings.html']) assert.doesNotMatch(fs.readFileSync(path.join(ui, page), 'utf8'), /cleanup-display/);
+});
+
+test('without on-device speech the unusable Speak button is hidden and Show large leads', () => {
+  const a = screen(); a.render({ speech_available: false, decision: { text: 'Hello', status: 'accepted', reason: 'corrected' } });
+  assert.equal(a.elements.get('speak').hidden, true);
+  assert.equal(a.elements.get('speak').disabled, true);
+  assert.equal(a.elements.get('show-large').classList.contains('show-large-primary'), true);
+  assert.equal(a.elements.get('show-large').disabled, false);
+  a.render({ revision: 2, speech_available: true, decision: { text: 'Hello', status: 'accepted', reason: 'corrected' } });
+  assert.equal(a.elements.get('speak').hidden, false);
+  assert.equal(a.elements.get('show-large').classList.contains('show-large-primary'), false);
 });

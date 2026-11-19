@@ -61,6 +61,10 @@ def prepare_ui(destination, variant):
         source = replace_once(source,
             "        button.textContent = candidate === s.cleanup?.suggestion && s.cleanup?.status === 'ready' ? `AI suggestion: ${candidate}` : candidate;",
             "        button.textContent = candidate === 'No.' ? 'I am comfortable' : 'No.';")
+    elif variant == 'phrase-replaces-draft':
+        source = replace_once(source,
+            "  if (editorDirty && editor?.value !== phrase && !confirmDiscard('Use this phrase instead of your unfinished edit? The unfinished edit will be replaced.')) return;\n",
+            '')
     elif variant == 'confirm-edit-stale':
         source = replace_once(source,
             "    if (editorDirty || editVersion !== version || editorProfile !== profile || chosenText !== message\n        || state.revision !== revision || state.decision.status !== 'accepted' || state.decision.text !== message) {",
@@ -83,17 +87,52 @@ def identity(ui):
     }
 
 
+# TEST DOUBLE: state fields the browser check drives directly (quick_phrases,
+# models_reload_needed/_detail, speech_error). They override whatever the
+# rehearsal runtime reports, so the UI contract is checked even before or
+# independently of the runtime producing them. A profile reload clears the
+# models_reload_* overlay, as a real reload of the promoted model would.
+OVERLAY_FIELDS = {'quick_phrases', 'models_reload_needed', 'models_reload_detail', 'speech_error'}
+
+
 class Fixture:
     def __init__(self, root):
         self.manager = ProfileManager(root / 'profiles')
         self.manager.ensure_default_profile()
         self.manager.create_profile('other', 'Other test profile')
         self.current = None
+        self.overlay = {}
+
+    def set_overlay(self, fields):
+        unknown = set(fields) - OVERLAY_FIELDS
+        if unknown:
+            raise ValueError(f'Not an overlay field: {sorted(unknown)}')
+        for name, value in fields.items():
+            if value is None:
+                self.overlay.pop(name, None)
+            else:
+                self.overlay[name] = value
+
+    def _install_overlay(self, runtime):
+        snapshot, switch_profile = runtime.snapshot, runtime.switch_profile
+
+        def overlaid_snapshot(*args, **kwargs):
+            return {**snapshot(*args, **kwargs), **self.overlay}
+
+        def reloading_switch_profile(*args, **kwargs):
+            result = switch_profile(*args, **kwargs)
+            self.overlay.pop('models_reload_needed', None)
+            self.overlay.pop('models_reload_detail', None)
+            return result
+
+        runtime.snapshot = overlaid_snapshot
+        runtime.switch_profile = reloading_switch_profile
 
     def start(self, port=0):
         runtime = Runtime(rehearsal=True, profile_manager=self.manager)
         runtime.speaker.close()
         runtime.speaker = SilentSpeaker()
+        self._install_overlay(runtime)
         server = server_module.make_server(runtime, port)
         thread = threading.Thread(target=server.serve_forever,
                                   kwargs={'poll_interval': 0.05}, daemon=True)
@@ -128,7 +167,7 @@ def emit(payload):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--variant', choices=['control', 'conflict-stale', 'draft-loss', 'confirm-edit-stale', 'choice-label-mismatch'], default='control')
+    parser.add_argument('--variant', choices=['control', 'conflict-stale', 'draft-loss', 'confirm-edit-stale', 'choice-label-mismatch', 'phrase-replaces-draft'], default='control')
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='quietbridge-web-check-') as temporary:
         root = Path(temporary)
@@ -148,6 +187,9 @@ def main():
                     emit({'id': request_id, 'ok': True, **fixture.snapshot()})
                 elif operation == 'restart':
                     emit({'id': request_id, 'ok': True, **fixture.restart()})
+                elif operation == 'overlay':
+                    fixture.set_overlay(command.get('fields') or {})
+                    emit({'id': request_id, 'ok': True, 'overlay': fixture.overlay})
                 elif operation == 'diagnostics':
                     faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
                     emit({'id': request_id, 'ok': True})
