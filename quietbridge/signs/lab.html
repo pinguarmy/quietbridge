@@ -4,371 +4,400 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Personalize · QuietBridge</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/design.css">
 <style>
-/* Tokens match the main app (quietbridge/ui/style.css). */
-:root{
-  color-scheme:light;
-  --ink:#182d39;
-  --muted:#536773;
-  --accent:#086b68;
-  --accent-dark:#07524f;
-  --accent-fill:#086b68;
-  --accent-fill-hover:#07524f;
-  --on-accent:#ffffff;
-  --paper:#f3f6f8;
-  --surface:#ffffff;
-  --line:#d8e1e7;
-  --field-line:#a8bbc5;
-  --soft:#e8eff2;
-  --hover:#f1f8f7;
-  --danger:#a73831;
-  --danger-soft:#fbeeed;
-  --focus:#168d99;
-  --scrim:rgba(16,25,30,.5);
-  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  --font-mono:ui-monospace,SFMono-Regular,Consolas,Menlo,monospace;
-}
-@media(prefers-color-scheme:dark){
-  :root{
-    color-scheme:dark;
-    --ink:#e7eef2;
-    --muted:#a5b6c0;
-    --accent:#5cc9c0;
-    --accent-dark:#5cc9c0;
-    --accent-fill:#0f7f7a;
-    --accent-fill-hover:#0b6d69;
-    --paper:#10191e;
-    --surface:#18252d;
-    --line:#2c3c46;
-    --field-line:#4f6672;
-    --soft:#21313a;
-    --hover:#1d2f37;
-    --danger:#ff9d94;
-    --danger-soft:#3a2424;
-    --focus:#5cc9c0;
-    --scrim:rgba(0,0,0,.6);
-  }
-}
-*{box-sizing:border-box}
+/* Personalize layout and page-specific parts. Colour, type, shape and the
+   shared components come from design.css (served by this recorder). */
 [hidden]{display:none!important}
-html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);font:15px/1.55 var(--font);-webkit-font-smoothing:antialiased;max-width:100%;overflow-x:hidden}
-main{max-width:1184px;padding:26px 36px;margin:auto;width:100%}
-a{color:var(--accent);text-underline-offset:4px}
-button,input,select,textarea{font:inherit}
-code{font-family:var(--font-mono);font-size:13px;overflow-wrap:anywhere}
-.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+html,body{max-width:100%;overflow-x:hidden}
+main{display:block}
+main:focus{outline:none}
+code{font-family:var(--font-mono);font-size:var(--text-xs);overflow-wrap:anywhere}
+.ico{flex:none;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 
-/* Header: wordmark + plain text links, as in the main app. */
-header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-bottom:18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-.wordmark{color:var(--ink);font-size:23px;font-weight:750;letter-spacing:-.9px;text-decoration:none;display:inline-flex;align-items:center;gap:10px;min-height:44px}
-.bridge-mark{width:23px;height:14px;border:3px solid var(--accent);border-bottom:0;border-radius:14px 14px 0 0;display:inline-block}
-.page-name{font-size:14px;color:var(--muted);font-weight:600;letter-spacing:0;margin-left:2px}
-.header-links{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
-.header-links a{display:inline-flex;align-items:center;min-height:44px;color:var(--muted);text-decoration:none;font-size:14px}
-.header-links a:hover{color:var(--accent);text-decoration:underline}
+/* ---------- Shell ---------- */
+.brand{display:flex;align-items:center;gap:var(--s-3);flex-wrap:wrap;min-width:0}
+.brand .topbar-context{padding-left:var(--s-3);border-left:1.5px solid var(--line);line-height:1.2}
+.return-link::before{content:"";width:8px;height:8px;border-left:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);margin-left:2px}
+.toolbar{display:flex;align-items:center;gap:var(--s-2) var(--s-3);flex-wrap:wrap;margin:0 0 var(--s-5)}
+.toolbar label{color:var(--muted);font-size:var(--text-s);font-weight:600}
+.toolbar .select{width:auto;min-width:12rem;max-width:min(100%,22rem);min-height:44px;padding-top:8px;padding-bottom:8px;text-overflow:ellipsis}
 
-.toolbar{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:18px 0 0}
-.profile-bar{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}
-.profile-bar label,.tabs-label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
-.profile-field{display:grid;min-width:0}
-.profile-bar select{min-width:200px;max-width:100%}
-.mode-group{display:grid}
-.tabs{display:flex;gap:7px;flex-wrap:wrap}
-.tabs button{font-size:14px;padding:8px 16px}
-.tabs button.selected,.tabs button.selected:hover:not(:disabled){background:var(--ink);border-color:var(--ink);color:var(--paper)}
+/* ---------- Stepper: the spine of the page ---------- */
+.stepper{background:var(--surface);border-radius:var(--radius-l);box-shadow:var(--shadow-1);padding:var(--s-2)}
+.stepper ol{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:var(--s-1);margin:0;padding:0;list-style:none}
+.stepper li{position:relative;min-width:0}
+.stepper li+li::before{content:"";position:absolute;top:calc(var(--s-3) + 15px);left:calc(-50% + 26px);right:calc(50% + 26px);height:2px;border-radius:2px;background:var(--line)}
+.step-btn{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:var(--s-2);width:100%;min-height:44px;height:100%;padding:var(--s-3) var(--s-2);border:0;border-radius:var(--radius-m);background:transparent;color:var(--ink-2);font-size:var(--text-s);font-weight:600;line-height:1.3;text-align:center;cursor:pointer}
+.step-btn:hover:not(:disabled){background:var(--surface-2);color:var(--ink)}
+.step-btn:disabled{cursor:not-allowed;opacity:.55}
+.step-n{display:grid;place-items:center;flex:none;width:32px;height:32px;border-radius:50%;border:2px solid var(--control-line);background:var(--surface);color:var(--ink-2);font-size:var(--text-xs);font-weight:750;font-variant-numeric:tabular-nums}
+.step-btn.done .step-n{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink)}
+.step-btn[aria-current="step"],.step-btn[aria-current="step"]:hover:not(:disabled){background:var(--accent-soft);color:var(--accent-ink);font-weight:700}
+.step-btn[aria-current="step"] .step-n{border-color:var(--accent-fill);background:var(--accent-fill);color:var(--on-accent)}
+.step-label{overflow-wrap:anywhere}
 
-/* Stage navigation */
-.stepper{display:flex;gap:6px;margin:18px 0 16px;background:var(--surface);border:1px solid var(--line);padding:6px;border-radius:10px}
-.step-btn{flex:1 1 0;min-width:0;min-height:44px;padding:8px 10px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--ink);font-size:14px;font-weight:600;text-align:center;line-height:1.3;white-space:normal}
-.step-btn:hover:not(:disabled){background:var(--hover);border-color:var(--line)}
-.step-btn.selected,.step-btn.selected:hover:not(:disabled){background:var(--accent-fill);border-color:var(--accent-fill);color:var(--on-accent)}
-h1{font-size:clamp(26px,3vw,34px);font-weight:620;letter-spacing:-1px;line-height:1.2;margin:14px 0 8px;color:var(--ink)}
-.intro{color:var(--muted);margin:0 0 16px;font-size:15px;max-width:76ch}
+/* ---------- Stage heading ---------- */
+.stage-head{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--s-4) var(--s-6);flex-wrap:wrap;margin:var(--s-8) 0 var(--s-6)}
+.stage-title{display:grid;gap:var(--s-2);min-width:0;flex:1 1 28rem}
+.stage-title h1{font-size:clamp(26px,1.8vw + 17px,38px);overflow-wrap:anywhere}
+.intro{color:var(--muted);font-size:var(--text-m);max-width:64ch}
+.mode-group{display:grid;gap:var(--s-2)}
+.mode-group .eyebrow{display:block}
+/* The shared selected segment is only a slight tint in dark mode; an edge keeps the chosen mode clear (3:1). */
+#modeGroup .segmented button[aria-pressed="true"]{box-shadow:inset 0 0 0 1.5px var(--control-line),var(--shadow-1)}
+#captureUnavailable{margin:0 0 var(--s-6)}
 
-.stage-banner{background:var(--surface);border:1px solid var(--line);padding:10px 16px;border-radius:10px;margin-bottom:18px;font-size:14px}
-.stage-summary{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
-.stage-summary strong{font-size:15px;color:var(--ink)}
-.status-pill{font-size:13px;font-weight:600;padding:3px 10px;border-radius:12px;background:var(--soft);color:var(--accent);border:1px solid var(--line)}
-.status-pill.alert{color:var(--danger);border-color:var(--danger)}
-.advanced-details{margin-top:6px;border-top:1px solid var(--line)}
-summary{min-height:44px;padding:11px 0;cursor:pointer;font-size:14px;color:var(--muted)}
-summary:hover{color:var(--ink)}
-.advanced-content{margin:4px 0 8px;display:grid;gap:8px}
-.session-tag{display:flex;align-items:center;gap:8px;font-size:14px;background:var(--paper);padding:6px 10px;border-radius:6px;border:1px solid var(--line);flex-wrap:wrap}
-.session-tag .split-info{color:var(--muted);font-size:13px}
-.session-tag button{font-size:14px}
+/* ---------- Recording stages ---------- */
+/* Two columns on wide screens; on narrow screens the columns dissolve so the
+   order is prompt, camera, record controls, then capture details. */
+.rec{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(0,1fr);gap:var(--s-6) var(--s-8);align-items:start}
+.rec-media,.rec-side{display:grid;gap:var(--s-6);min-width:0}
+.rec-media{gap:var(--s-4)}
+.lesson{display:grid;gap:var(--s-3);min-width:0;padding-top:var(--s-1)}
+.lesson-controls{display:grid;gap:var(--s-4);min-width:0}
 
-.layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:24px}
-@media(max-width:820px){.layout{grid-template-columns:1fr}}
-.previews{display:grid;gap:14px}
-.preview-card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}
-.preview-title{font-size:13px;font-weight:650;color:var(--muted);margin-bottom:8px}
-.camera{position:relative;aspect-ratio:4/3;background:var(--soft);border-radius:8px;overflow:hidden;display:grid;place-items:center}
-video,canvas{position:absolute;inset:0;width:100%;height:100%}
-video{object-fit:fill;transform:scaleX(-1)}
-canvas{pointer-events:none}
-#placeholder{max-width:260px;text-align:center;color:var(--muted);line-height:1.5;font-size:14px;padding:12px}
-.badge{position:absolute;bottom:10px;left:10px;background:var(--surface);padding:4px 8px;border-radius:6px;font-size:13px;font-weight:600;color:var(--ink)}
-.fps-bar{display:flex;align-items:center;gap:8px;background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+.camera{position:relative;aspect-ratio:4/3;overflow:hidden;display:grid;place-items:center;border-radius:var(--radius-xl);background:var(--surface-3);box-shadow:var(--shadow-2)}
+.camera video,.camera canvas{position:absolute;inset:0;width:100%;height:100%}
+.camera video{object-fit:fill;transform:scaleX(-1)}
+.camera canvas{pointer-events:none}
+#placeholder{position:relative;display:grid;justify-items:center;gap:var(--s-3);max-width:18rem;padding:var(--s-4);color:var(--ink-2);font-size:var(--text-s);line-height:1.5;text-align:center}
+#placeholder .ico{width:36px;height:36px;color:var(--muted)}
+.cam-badges{position:absolute;top:var(--s-3);left:var(--s-3);right:var(--s-3);display:flex;justify-content:space-between;gap:var(--s-2);flex-wrap:wrap;pointer-events:none}
+.cam-badges .badge{background:var(--surface);color:var(--ink);box-shadow:var(--shadow-1);max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.cam-badges .status-pill.alert{background:var(--danger-soft);color:var(--danger)}
+.cam-badges .status-pill.alert::before{opacity:1}
+
+.capture-info{display:grid;gap:var(--s-4)}
+.mouth-row{display:grid;grid-template-columns:minmax(150px,42%) minmax(0,1fr);gap:var(--s-4);align-items:center}
+.mouth-view{position:relative;aspect-ratio:1.6;overflow:hidden;display:grid;place-items:center;border-radius:var(--radius-m);background:var(--surface-3)}
+.mouth-view canvas{position:absolute;inset:0;width:100%;height:100%}
+#mouthPlaceholder{position:relative;padding:var(--s-2) var(--s-3);color:var(--ink-2);font-size:var(--text-xs);line-height:1.4;text-align:center}
+.mouth-text{display:grid;gap:var(--s-1);min-width:0}
+.mouth-text strong{font-size:var(--text-s)}
+.mouth-status{color:var(--muted);font-size:var(--text-s);overflow-wrap:anywhere}
+.privacy{color:var(--muted);font-size:var(--text-xs);line-height:1.55}
+.advanced-details{border-top:1px solid var(--line);padding-top:var(--s-1)}
+.advanced-content{display:grid;gap:var(--s-3);padding:var(--s-1) 0 var(--s-2)}
+.session-tag{display:flex;align-items:center;gap:var(--s-2) var(--s-3);flex-wrap:wrap;font-size:var(--text-s);color:var(--ink-2)}
+.session-tag code{padding:2px var(--s-2);border-radius:var(--radius-s);background:var(--surface-2);color:var(--ink)}
+.split-info{color:var(--muted)}
+.fps-bar{display:flex;flex-wrap:wrap;gap:var(--s-1) var(--s-2);color:var(--muted);font-size:var(--text-xs);font-variant-numeric:tabular-nums}
 .fps-bar strong{color:var(--ink)}
-.fps-note{font-size:13px;color:var(--muted)}
-.mouth-view{position:relative;aspect-ratio:1.6;background:var(--soft);border-radius:8px;overflow:hidden;display:grid;place-items:center}
-.mouth-view canvas{width:100%;height:100%}
-#mouthPlaceholder{color:var(--muted);font-size:14px;padding:12px;text-align:center}
-.mouth-status{display:block;margin-top:6px;font-size:13px;color:var(--muted)}
-.privacy{color:var(--muted);font-size:13px;line-height:1.5;margin:6px 0}
+.fps-note{color:var(--muted);font-size:var(--text-xs)}
 
-.lesson{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:22px;display:flex;flex-direction:column;min-height:440px;min-width:0}
-.kicker{font-size:13px;color:var(--accent);font-weight:650;letter-spacing:.04em}
-.pose{font-size:48px;margin:6px 0 2px}
-.meaning{font-size:24px;font-weight:650;margin:0 0 4px;color:var(--ink);overflow-wrap:anywhere}
-.concept{font-size:15px;color:var(--accent);font-weight:600;margin:0 0 8px}
-.instruction{font-size:15px;line-height:1.5;margin:0 0 8px;color:var(--ink)}
-.hint{color:var(--muted);line-height:1.5;font-size:14px;margin:0 0 12px}
-.mouth-prompt{background:var(--soft);border-left:4px solid var(--accent);padding:12px 14px;border-radius:6px;font-size:18px;font-weight:600;line-height:1.4;margin:10px 0;color:var(--ink);overflow-wrap:anywhere}
-.small{font-size:13px;color:var(--muted);margin:4px 0 10px}
-.meter{font-size:13px;color:var(--muted);margin:0 0 6px;min-height:1.5em;font-variant-numeric:tabular-nums}
-#status{margin-top:auto;padding:10px 12px;border-radius:8px;background:var(--paper);border:1px solid var(--line);font-size:14px;min-height:44px;display:flex;align-items:center;color:var(--ink);overflow-wrap:anywhere}
-#status.error{background:var(--danger-soft);border-color:var(--danger);color:var(--danger)}
-.consent{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin:12px 0 0;min-height:44px;line-height:1.45}
-input[type="checkbox"]{width:20px;height:20px;min-height:20px;margin:2px 0 0;accent-color:var(--accent-fill);flex:0 0 auto}
-.btn-group{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+.round{color:var(--accent-ink)}
+.pose{font-size:56px;line-height:1.1;margin-top:var(--s-1)}
+.meaning{font-size:clamp(30px,2.2vw + 18px,46px);font-weight:750;letter-spacing:-.025em;line-height:1.08;color:var(--ink);overflow-wrap:anywhere}
+.concept{color:var(--accent-ink);font-size:var(--text-l);font-weight:650;overflow-wrap:anywhere}
+.instruction{color:var(--ink-2);font-size:var(--text-l);line-height:1.5;max-width:46ch}
+.lesson .hint{font-size:var(--text-s);max-width:52ch}
+.mouth-prompt{padding:var(--s-5) var(--s-6);border-radius:var(--radius-l);background:var(--accent-soft);color:var(--ink);font-size:clamp(24px,1.5vw + 16px,34px);font-weight:650;letter-spacing:-.015em;line-height:1.25;overflow-wrap:anywhere}
+.note{color:var(--muted);font-size:var(--text-s);line-height:1.5;max-width:56ch}
 
-button{border:1px solid var(--line);border-radius:8px;padding:10px 18px;background:var(--surface);color:var(--ink);font-weight:600;font-size:15px;cursor:pointer;min-height:46px;display:inline-flex;align-items:center;justify-content:center;text-align:center}
-button:hover:not(:disabled){border-color:var(--accent);background:var(--hover)}
-button:disabled{opacity:.48;cursor:not-allowed}
-:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,a:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
-.btn-primary,#record,#btnSaveProfile,#btnConfirmNewProfile,#btnAdvanceStage,#trainMotion,#trainVisual,#trainLanguage,#promoteModel,#evaluateRecognition{background:var(--accent-fill);border-color:var(--accent-fill);color:var(--on-accent)}
-.btn-primary:hover:not(:disabled),#record:hover:not(:disabled),#btnSaveProfile:hover:not(:disabled),#btnConfirmNewProfile:hover:not(:disabled),#btnAdvanceStage:hover:not(:disabled),#trainMotion:hover:not(:disabled),#trainVisual:hover:not(:disabled),#trainLanguage:hover:not(:disabled),#promoteModel:hover:not(:disabled),#evaluateRecognition:hover:not(:disabled){background:var(--accent-fill-hover);border-color:var(--accent-fill-hover)}
-.btn-secondary,.btn-subtle{background:var(--surface);color:var(--ink);border:1px solid var(--line)}
-input[type="text"],select,textarea{background:var(--surface);border:1px solid var(--field-line);border-radius:6px;padding:9px 12px;min-height:46px;color:var(--ink);max-width:100%}
+.pair-picker{display:grid;gap:var(--s-4)}
+.pair-picker .paired-note{color:var(--ink-2);font-size:var(--text-s);line-height:1.5}
+.pair-picker .paired-note strong{color:var(--ink)}
+.pair-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-4)}
+.pair-fields .field-wide{grid-column:1/-1}
 
-#record{flex:2}
-#record.active,#record.active:hover:not(:disabled){background:var(--danger-soft);border-color:var(--danger);color:var(--danger)}
-#discard{flex:1;color:var(--danger)}
-#discard:hover:not(:disabled){border-color:var(--danger);background:var(--danger-soft)}
+.meter{min-height:1.5em;color:var(--muted);font-size:var(--text-s);font-variant-numeric:tabular-nums}
+.meter:empty{display:none}
+#status{display:flex;align-items:center;gap:var(--s-2);min-height:48px;padding:var(--s-3) var(--s-4);border-radius:var(--radius-m);background:var(--surface-2);color:var(--ink);font-size:var(--text-s);line-height:1.45;overflow-wrap:anywhere}
+#status.error{background:var(--danger-soft);color:var(--danger);font-weight:550}
+.consent{margin:0;padding:var(--s-2) 0}
+.consent span{font-size:var(--text-s);line-height:1.5}
+#videoConsentBox{gap:var(--s-2)}
+#videoConsentBox .check{padding:var(--s-2) 0 0}
+#videoConsentBox .check span{color:inherit;font-weight:650}
+#videoConsentBox p{margin:0}
+.consent-lock{display:flex;align-items:center;gap:var(--s-2);font-weight:650}
 
-.progress{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:14px;color:var(--muted)}
-.progress button{flex:0 0 auto;font-size:14px}
-.advance-box{margin-top:12px;padding:12px 14px;background:var(--soft);border-left:3px solid var(--accent);border-radius:6px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.advance-box span{font-size:14px;color:var(--ink)}
-.advance-box button{font-size:14px}
+#record{width:100%}
+#record::before{content:"";flex:none;width:14px;height:14px;border-radius:50%;border:2.5px solid currentColor}
+#record.active,#record.active:hover:not(:disabled){border-color:transparent;background:var(--danger-fill);color:var(--on-accent)}
+#record.active::before{border:0;background:currentColor}
+.secondary-actions{display:flex;flex-wrap:wrap;gap:var(--s-2)}
+.progress{display:flex;align-items:center;justify-content:space-between;gap:var(--s-3);padding-top:var(--s-4);border-top:1px solid var(--line);flex-wrap:wrap}
+#progress{color:var(--muted);font-size:var(--text-s);font-variant-numeric:tabular-nums;flex:1 1 12rem}
+#advanceBox{display:grid}
+.advance-box .btn{justify-self:start}
 
-.setup-panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:24px 26px;margin-top:14px}
-.setup-panel h2{font-size:20px;font-weight:650;margin:0 0 10px;color:var(--ink)}
-.setup-onboarding{background:var(--paper);border-left:3px solid var(--accent);border-radius:6px;padding:14px 16px;margin-bottom:18px}
-.setup-onboarding h3{margin:0 0 4px;font-size:16px;color:var(--ink)}
-.setup-onboarding p{margin:0;font-size:14px;color:var(--muted)}
-.setup-section{margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--line)}
-.section-header{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}
-.section-header h3{margin:0;font-size:16px}
-.table-scroll{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:10px 0;border:1px solid var(--line);border-radius:8px}
-.setup-table{width:100%;border-collapse:collapse;font-size:14px}
-.setup-table th,.setup-table td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line)}
-.setup-table tr:last-child td{border-bottom:0}
-.setup-table th{background:var(--paper);color:var(--muted);font-weight:600;font-size:13px}
-.setup-table input,.setup-table textarea{width:100%;font-size:14px}
-.setup-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:16px;position:sticky;bottom:0;background:var(--surface);padding:14px 0;border-top:1px solid var(--line)}
-#gestureTable,#promptTable{min-width:0;table-layout:fixed}
-#gestureTable td{padding:0;border:0}
-.gesture-definition{border-bottom:1px solid var(--line)}
-#gestureTbody tr:last-child .gesture-definition{border-bottom:0}
-.gesture-definition>summary{min-height:58px;padding:15px 12px;font-weight:600;font-size:15px;display:list-item;list-style-position:inside;color:var(--ink)}
-.gesture-meaning{font-size:14px;color:var(--muted);font-weight:400;float:right;max-width:64%;overflow-wrap:anywhere}
-.gesture-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:12px}
-.gesture-fields label{display:grid;gap:6px;font-size:14px;color:var(--ink)}
-.gesture-fields small{color:var(--muted);font-size:13px}
-.gesture-instruction{grid-column:1/-1}
-.gesture-advanced{margin:0 12px}
-.gesture-advanced>summary{font-size:14px}
-button.btn-remove{background:transparent;border-color:transparent;color:var(--danger);font-size:14px;padding:8px 10px;margin:0 8px 8px}
-button.btn-remove:hover:not(:disabled){background:var(--danger-soft);border-color:var(--danger)}
-#promptTable th:last-child{width:104px}#promptTable td{padding:7px}#promptTable td:last-child button{margin:0}
-@media(max-width:600px){.gesture-fields{grid-template-columns:1fr}.gesture-meaning{float:none;display:block;max-width:none;padding-left:16px}.gesture-definition>summary{padding:12px}.setup-actions{justify-content:stretch}.setup-actions>button{flex:1}.setup-panel{padding:16px}}
+/* ---------- Choose phrases ---------- */
+.setup{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:var(--s-6);align-items:start}
+.setup-onboarding{grid-column:1/-1;display:flex;gap:var(--s-3);align-items:flex-start}
+.setup-onboarding .ico{margin-top:2px}
+.setup-onboarding p{margin:0}
+.setup-col{display:grid;gap:var(--s-6);min-width:0}
+.section-header{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s-2) var(--s-3);flex-wrap:wrap;margin-bottom:var(--s-2)}
+.section-header h2{display:flex;align-items:center;gap:var(--s-3);flex-wrap:wrap}
+.heading-count{font-weight:600}
+.heading-count:empty{display:none}
+.section-hint{color:var(--muted);font-size:var(--text-s);margin-bottom:var(--s-4)}
 
-.dialog-backdrop{position:fixed;inset:0;background:var(--scrim);display:grid;place-items:center;z-index:99;padding:16px}
-.dialog{background:var(--surface);border-radius:10px;padding:22px;width:100%;max-width:440px;box-shadow:0 12px 30px rgba(0,0,0,.2);border:1px solid var(--line)}
-.dialog h3{margin:0 0 14px;font-size:18px;color:var(--ink)}
-.dialog p{font-size:14px;color:var(--muted);margin:0 0 14px}
-.form-field{margin-bottom:14px}
-.form-field label{display:block;font-size:14px;font-weight:600;margin-bottom:4px;color:var(--ink)}
-.form-field input,.form-field select{width:100%}
-.dialog-buttons{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;flex-wrap:wrap}
+.gesture-list,.phrase-list{margin:0;padding:0;list-style:none}
+.gesture-row+.gesture-row{border-top:1px solid var(--line)}
+.gesture-definition>summary{min-height:68px;padding:var(--s-3) var(--s-2);gap:var(--s-3);border-radius:var(--radius-m);color:var(--ink)}
+.gesture-definition>summary::before{display:none}
+.gesture-definition>summary::after{content:"";flex:none;width:9px;height:9px;margin:0 var(--s-2) 0 auto;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg) translateY(-3px)}
+.gesture-definition[open]>summary::after{transform:rotate(-135deg) translateY(-3px)}
+.gesture-definition>summary:hover{background:var(--surface-2)}
+.g-emoji{display:grid;place-items:center;flex:none;width:44px;height:44px;border-radius:var(--radius-m);background:var(--surface-2);font-size:24px;line-height:1}
+.g-text{display:grid;min-width:0}
+.g-name{font-size:var(--text-m);font-weight:650;overflow-wrap:anywhere}
+.gesture-meaning{color:var(--muted);font-size:var(--text-s);font-weight:450;overflow-wrap:anywhere}
+.gesture-body{display:grid;gap:var(--s-3);padding:var(--s-2) var(--s-2) var(--s-5) calc(44px + var(--s-5))}
+.gesture-fields{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s-4)}
+.gesture-fields .field-wide{grid-column:1/-1}
+.gesture-fields .label{font-weight:600}
+.gesture-advanced>summary{font-size:var(--text-s)}
+.gesture-advanced .gesture-fields{padding:var(--s-2) 0 var(--s-2)}
+.btn-remove.btn{justify-self:start}
+.add-row{justify-self:start;margin-top:var(--s-3)}
 
-.paired-box{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:10px 0}
-.paired-box label{display:block;font-size:14px;font-weight:600;color:var(--ink);margin:10px 0 4px}
-.paired-box select{width:100%}
-.paired-note{font-size:14px;color:var(--muted);line-height:1.45;margin:0 0 6px}
-.paired-note strong{color:var(--ink)}
-#videoConsentBox{margin:12px 0;padding:12px;background:var(--surface);border-left:3px solid var(--accent)}
-#videoConsentBox label{display:flex;align-items:flex-start;gap:10px;min-height:44px;font-weight:400;line-height:1.45}
+.phrase-list{display:grid;gap:var(--s-2);counter-reset:phrase}
+.phrase-row{display:grid;grid-template-columns:2rem minmax(0,1fr) 44px;align-items:center;gap:var(--s-2);counter-increment:phrase}
+.phrase-row::before{content:counter(phrase);color:var(--muted);font-size:var(--text-xs);font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+.phrase-row .input{min-height:44px;padding-top:9px;padding-bottom:9px}
+.icon-btn{display:grid;place-items:center;width:44px;min-height:44px;padding:0;border:0;border-radius:var(--radius-m);background:transparent;color:var(--muted);cursor:pointer}
+.icon-btn:hover:not(:disabled){background:var(--danger-soft);color:var(--danger)}
 
-.model-states{display:grid;gap:6px;margin:0 0 14px;padding:12px 14px;background:var(--paper);border-left:3px solid var(--accent);border-radius:6px;font-size:14px;color:var(--muted)}
-.model-states strong{color:var(--ink)}
-#modelStatus{font-size:14px;margin:8px 0;overflow-wrap:anywhere}
-#modelStatus.error,#modelError{color:var(--danger)}
-#modelError{font-size:14px;margin:8px 0;padding:10px 12px;background:var(--danger-soft);border-left:3px solid var(--danger);border-radius:6px;overflow-wrap:anywhere}
-#modelError:empty{display:none}
-#setupError{font-size:14px;margin:0 0 12px;padding:10px 12px;color:var(--danger);background:var(--danger-soft);border-left:3px solid var(--danger);border-radius:6px;overflow-wrap:anywhere}
+#setupError{grid-column:1/-1}
 #setupError:empty{display:none}
-.heading-count{font-size:14px;font-weight:400;color:var(--muted)}
-.field-hint{font-size:14px;color:var(--muted);margin:4px 0 12px}
-.candidate-facts{margin:8px 0 12px;padding:0;list-style:none;display:grid;gap:4px;font-size:15px;overflow-wrap:anywhere}
-.candidate-facts strong{font-weight:600}
-.report-summary{margin:8px 0;overflow-x:auto}
-.report-summary table{border-collapse:collapse;min-width:100%;font-size:14px}
-.report-summary th,.report-summary td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
-.report-summary td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
-#reportDetails summary,#candidateFiles summary{cursor:pointer;min-height:44px;line-height:44px}
-#modelSaveNotice{font-size:14px}
-#modelSaveNotice:empty{display:none}
-#candidateSummary{font-size:14px;color:var(--ink);overflow-wrap:anywhere}
-#comparisonMetrics{font-size:14px;overflow-wrap:anywhere}
-.gate-pass{color:var(--accent);font-weight:700}.gate-fail{color:var(--danger);font-weight:700}
-#modelReport{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:12px;font-size:13px;max-height:420px;overflow:auto}
+.setup-actions{grid-column:1/-1;position:sticky;bottom:var(--s-3);z-index:5;display:flex;justify-content:flex-end;align-items:center;gap:var(--s-3);flex-wrap:wrap;padding:var(--s-3);border-radius:var(--radius-l);background:var(--surface);box-shadow:var(--shadow-3)}
+.setup-actions .actions-note{margin-right:auto;color:var(--muted);font-size:var(--text-s);padding-left:var(--s-2)}
 
-@media(max-width:760px){
-  main{padding:18px 16px}
-  header{gap:6px;padding-bottom:12px}
-  .header-links{gap:16px}
-  .wordmark{font-size:20px}
-  .toolbar{display:grid;grid-template-columns:1fr;gap:12px}
-  .profile-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end}
-  .profile-bar select{min-width:0;width:100%}
-  .tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
-  .tabs button{padding:8px 6px}
-  .lesson{padding:18px}
+/* ---------- Activate ---------- */
+.models{display:grid;gap:var(--s-6)}
+.model-states{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s-5);margin:0;padding:0;list-style:none}
+.model-states li{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);gap:var(--s-1) var(--s-3);align-content:start;padding:var(--s-5);border-radius:var(--radius-l);background:var(--surface);box-shadow:var(--shadow-1)}
+.model-states li+li::before{content:"";position:absolute;left:calc(-1 * var(--s-5) / 2 - 5px);top:50%;width:9px;height:9px;border-top:2px solid var(--muted);border-right:2px solid var(--muted);transform:translateY(-50%) rotate(45deg)}
+.ms-n{grid-row:span 2;display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:var(--surface-2);color:var(--ink-2);font-size:var(--text-xs);font-weight:750}
+.model-states li:last-child .ms-n{background:var(--accent-fill);color:var(--on-accent)}
+.model-states strong{font-size:var(--text-m);color:var(--ink)}
+.model-states .ms-text{color:var(--muted);font-size:var(--text-s);line-height:1.5}
+#modelSaveNotice{display:block}
+#modelSaveNotice:empty{display:none}
+.models-grid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:var(--s-6);align-items:start}
+.models-panel{display:grid;gap:var(--s-4)}
+.models-panel h2{margin-bottom:var(--s-1)}
+#modelStatus{color:var(--ink-2);font-size:var(--text-s);overflow-wrap:anywhere}
+#modelError:empty{display:none}
+.train-actions{display:grid;gap:var(--s-2)}
+.train-actions #refreshModels{justify-self:start}
+.btn-group{display:flex;flex-wrap:wrap;gap:var(--s-2)}
+.field-hint{color:var(--muted);font-size:var(--text-s)}
+.field-hint:empty{display:none}
+#candidateSummary{display:grid;gap:var(--s-4);font-size:var(--text-s);color:var(--ink-2);overflow-wrap:anywhere}
+.candidate-facts{display:grid;gap:var(--s-3);margin:0;padding:0;list-style:none;overflow-wrap:anywhere}
+.candidate-facts li{display:grid;gap:2px;color:var(--ink-2);font-size:var(--text-s)}
+.candidate-facts .fact-label{color:var(--muted);font-size:var(--text-xs);font-weight:600}
+.candidate-facts .fact-value{color:var(--ink);font-size:var(--text-m);font-weight:600}
+.candidate-facts li:first-child .fact-value{font-size:var(--text-l)}
+#candidateFiles .candidate-facts{padding:var(--s-1) 0 var(--s-2)}
+#comparisonMetrics{font-size:var(--text-s);overflow-wrap:anywhere}
+.gate-pass{color:var(--accent-ink);font-weight:700}
+.gate-fail{color:var(--danger);font-weight:700}
+#reportView{display:grid;gap:var(--s-3);padding-top:var(--s-5);border-top:1px solid var(--line)}
+#reportTitle:focus{outline:none}
+#reportTitle:focus-visible{outline:3px solid var(--focus)}
+.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.report-summary table{width:100%;border-collapse:collapse}
+.report-summary th,.report-summary td{padding:var(--s-3) 0;border-bottom:1px solid var(--line);vertical-align:top;font-size:var(--text-s)}
+.report-summary th{width:58%;padding-right:var(--s-4);text-align:left;font-weight:500;color:var(--ink-2)}
+.report-summary td.num{text-align:right;font-weight:700;color:var(--ink);font-size:var(--text-m);font-variant-numeric:tabular-nums;min-width:7rem}
+.report-summary .field-hint{margin-top:var(--s-3)}
+#modelReport{max-height:420px;overflow:auto;margin:var(--s-2) 0 0;padding:var(--s-4);border-radius:var(--radius-m);background:var(--surface-2);color:var(--ink);font:var(--text-xs)/1.5 var(--font-mono);white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* ---------- New profile dialog ---------- */
+.dialog{display:grid;gap:var(--s-4)}
+.dialog h2{font-size:var(--text-xl)}
+.dialog p{color:var(--muted);font-size:var(--text-s)}
+.dialog details .field{padding-top:var(--s-2)}
+.dialog-buttons{display:flex;justify-content:flex-end;gap:var(--s-3);flex-wrap:wrap;margin-top:var(--s-2)}
+
+/* ---------- Responsive ---------- */
+@media (max-width:960px){
+  .rec{grid-template-columns:minmax(0,1fr);gap:var(--s-5)}
+  .rec-media,.rec-side{display:contents}
+  .lesson{order:1}.camera{order:2}.lesson-controls{order:3}.capture-info{order:4}
+  .setup,.models-grid{grid-template-columns:minmax(0,1fr)}
 }
-@media(max-width:600px){
-  /* Two-column grid keeps all five stages visible without sideways scrolling. */
-  .stepper{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
-  .stepper .step-btn:last-child{grid-column:1/-1}
+@media (max-width:760px){
+  .setup-actions .actions-note{display:none}
+  .model-states{grid-template-columns:minmax(0,1fr);gap:var(--s-4)}
+  .model-states li+li::before{left:calc(16px + var(--s-5) - 5px);top:calc(-1 * var(--s-4) / 2 - 6px);transform:rotate(135deg)}
+  .gesture-body{padding-left:var(--s-2)}
 }
-@media(max-width:380px){
-  .bridge-mark{display:none}
+@media (max-width:600px){
+  .stepper ol{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .stepper li+li::before{display:none}
+  .stepper li:last-child{grid-column:1/-1}
+  .step-btn{flex-direction:row;justify-content:flex-start;text-align:left;padding:var(--s-2) var(--s-3);min-height:52px}
+  .stage-head{margin-top:var(--s-6)}
+  .mode-group,.segmented{width:100%}
+  .segmented button{flex:1 1 0;padding:0 var(--s-1);white-space:nowrap}
+  .toolbar label{width:100%}
+  .toolbar .select{flex:1 1 10rem;min-width:0;max-width:none}
+  .mouth-row{grid-template-columns:minmax(0,1fr)}
+  .mouth-view{max-width:280px}
+  .pair-fields,.gesture-fields{grid-template-columns:minmax(0,1fr)}
+  .phrase-row{grid-template-columns:1.5rem minmax(0,1fr) 44px;gap:var(--s-1)}
+  .setup-actions{bottom:var(--s-2)}
+  .setup-actions .btn{flex:1 1 100%}
+  .card{padding:var(--s-4)}
+  .meaning{font-size:34px}
 }
-@media(prefers-reduced-motion:no-preference){button,a{transition:background-color 120ms ease,border-color 120ms ease,color 120ms ease}}
-@media(prefers-reduced-motion:reduce){
-  *,*::before,*::after{
-    animation-duration:0.01ms!important;
-    animation-iteration-count:1!important;
-    transition-duration:0.01ms!important;
-  }
+/* Short viewports (large zoom, landscape phones): the action bar scrolls with the page instead of covering it. */
+@media (max-height:520px){
+  .setup-actions{position:static}
+}
+@media (max-width:380px){
+  .brand .topbar-context{border-left:0;padding-left:0}
+}
+
+/* ---------- Motion and forced colours ---------- */
+@media (prefers-reduced-motion:no-preference){
+  .step-btn,.icon-btn,.gesture-definition>summary{transition:background-color 140ms ease,color 140ms ease}
+  #record.active::before{animation:live-pulse 1.4s ease-in-out infinite}
+  @keyframes live-pulse{0%,100%{opacity:1}50%{opacity:.35}}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:0.01ms!important;animation-iteration-count:1!important;transition-duration:0.01ms!important}
+}
+@media (forced-colors:active){
+  .stepper,.camera,.mouth-view,.model-states li,.setup-actions,.icon-btn,.g-emoji{border:1px solid CanvasText}
+  .step-n{border-color:CanvasText}
+  .step-btn[aria-current="step"]{forced-color-adjust:none;background:Highlight;color:HighlightText}
+  .step-btn[aria-current="step"] .step-n{forced-color-adjust:none;background:HighlightText;color:Highlight;border-color:HighlightText}
+  .step-btn.done .step-n{border-style:double;border-width:4px}
+  #record.active{border:3px solid Highlight}
+  #status.error{border:2px solid CanvasText}
+  .phrase-row::before,.gesture-definition>summary::after{forced-color-adjust:auto}
 }
 </style>
 </head>
 <body>
-<main>
-<header>
-  <a id="brandLink" class="wordmark" href="http://127.0.0.1:8765/">QuietBridge<span class="bridge-mark" aria-hidden="true"></span><span class="page-name">Personalize</span></a>
-  <nav class="header-links" aria-label="Main navigation">
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="page">
+<header class="topbar">
+  <div class="brand">
+    <a id="brandLink" class="wordmark" href="http://127.0.0.1:8765/">QuietBridge<span class="bridge-mark" aria-hidden="true"></span></a>
+    <span class="topbar-context">Personalize</span>
+  </div>
+  <nav class="nav" aria-label="Main navigation">
     <a id="returnLink" class="return-link" href="http://127.0.0.1:8765/">Back to message</a>
     <a id="settingsLink" href="http://127.0.0.1:8765/settings">Settings</a>
   </nav>
 </header>
 
+<main id="main" tabindex="-1">
 <div class="toolbar">
-  <div class="profile-bar">
-    <div class="profile-field">
-      <label for="profileSelect">Profile</label>
-      <select id="profileSelect"></select>
-    </div>
-    <button id="btnNewProfile" type="button">New profile</button>
+  <label for="profileSelect">Profile</label>
+  <select id="profileSelect" class="select"></select>
+  <button id="btnNewProfile" class="btn btn-ghost btn-s" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>New profile</button>
+</div>
+
+<nav class="stepper" aria-label="Personalize steps">
+  <ol>
+    <li><button id="stepSetup" class="step-btn" data-stage="setup" type="button"><span class="step-n">1</span><span class="step-label">Choose phrases</span><span class="step-state sr-only"></span></button></li>
+    <li><button id="stepTrain" class="step-btn selected" data-stage="train" type="button"><span class="step-n">2</span><span class="step-label">Practice</span><span class="step-state sr-only"></span></button></li>
+    <li><button id="stepValidation" class="step-btn" data-stage="validation" type="button"><span class="step-n">3</span><span class="step-label">Check on another occasion</span><span class="step-state sr-only"></span></button></li>
+    <li><button id="stepTest" class="step-btn" data-stage="test" type="button"><span class="step-n">4</span><span class="step-label">Final check</span><span class="step-state sr-only"></span></button></li>
+    <li><button id="stepModels" class="step-btn" data-stage="models" type="button"><span class="step-n">5</span><span class="step-label">Activate</span><span class="step-state sr-only"></span></button></li>
+  </ol>
+</nav>
+
+<div class="stage-head">
+  <div class="stage-title">
+    <h1 id="title">Practice your phrases. Record one try.</h1>
+    <p id="intro" class="intro">Each try saves your hand positions for this profile only. Recordings stay on this computer.</p>
   </div>
   <div id="modeGroup" class="mode-group" role="group" aria-labelledby="modeLabel">
-    <span id="modeLabel" class="tabs-label">What to practise</span>
-    <div class="tabs">
+    <span id="modeLabel" class="eyebrow">What to practise</span>
+    <div class="segmented">
       <button id="gesturesTab" class="selected" type="button" aria-pressed="true">Gestures</button>
       <button id="lipsTab" type="button" aria-pressed="false">Lips</button>
       <button id="pairedTab" type="button" aria-pressed="false">Both together</button>
     </div>
   </div>
 </div>
+<p id="captureUnavailable" class="callout callout-warn" hidden>Preview only: QuietBridge was started in preview mode, so nothing can be recorded here. You can still edit your phrases and review models, or go back and type a message.</p>
 
-<nav class="stepper" aria-label="Personalize steps">
-  <button id="stepSetup" class="step-btn" data-stage="setup" type="button">1. Choose phrases</button>
-  <button id="stepTrain" class="step-btn selected" data-stage="train" type="button">2. Practice</button>
-  <button id="stepValidation" class="step-btn" data-stage="validation" type="button">3. Check on another occasion</button>
-  <button id="stepTest" class="step-btn" data-stage="test" type="button">4. Final check</button>
-  <button id="stepModels" class="step-btn" data-stage="models" type="button">5. Activate</button>
-</nav>
-
-<div class="stage-banner" id="stageBanner">
-  <div class="stage-summary">
-    <div>
-      Stage: <strong id="stageName">2. Practice</strong>
+<div id="recordingLayout" class="rec">
+  <div class="rec-media">
+    <div class="camera">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="overlay" width="640" height="480"></canvas>
+      <div id="placeholder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 8a2 2 0 0 1 2-2h2l2-2h6l2 2h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="4"/></svg><span>Camera opens when you press Start recording.</span></div>
+      <div class="cam-badges">
+        <span id="tracking" class="badge">Camera off</span>
+        <span class="badge status-pill" id="recordingStatePill">Ready</span>
+      </div>
     </div>
-    <span class="status-pill" id="recordingStatePill">Ready</span>
-  </div>
-  <details id="advancedSettings" class="advanced-details">
-    <summary>Session and technical details</summary>
-    <div class="advanced-content">
-      <div class="session-tag">
-        <span>Session:</span>
-        <code id="sessionLabel">s1</code>
-        <span class="split-info">Data set: <strong id="stageSplit">train</strong></span>
-        <button id="btnNewSession" type="button">Start a new session</button>
-      </div>
-      <div class="fps-bar" id="fpsBar">
-        <span>Target: <strong>25 fps</strong></span>
-        <span>·</span>
-        <span>Measured: <strong id="measuredFps">0.0 fps</strong></span>
-        <span>·</span>
-        <span>Duration: <strong id="recordDuration">0.0s</strong></span>
-        <span>·</span>
-        <span>Received: <strong id="receivedFrames">0 frames</strong></span>
-      </div>
-      <div class="fps-note">Frames are sent about 25 times a second. The measured rate shows how many actually arrived; missing frames are not filled in.</div>
-      <p class="privacy">Start a new session whenever you sit down again on a different occasion. A session belongs to one step only, so practice tries never mix with checks. Hand positions and mouth close-ups are saved by default; standard-sign checks can also save local video, only after you agree for that try.</p>
-    </div>
-  </details>
-</div>
-
-<h1 id="title">Practice your phrases. Record one try.</h1>
-<p id="intro" class="intro">Each try saves your hand positions for this profile only. Recordings stay on this computer.</p>
-<p id="captureUnavailable" class="hint" hidden>Preview only: QuietBridge was started in preview mode, so nothing can be recorded here. You can still edit your phrases and review models, or go back and type a message.</p>
-
-<div id="recordingLayout" class="layout">
-  <section>
-    <div class="previews">
-      <div class="preview-card">
-        <div class="preview-title">Hands: full view</div>
-        <div class="camera">
-          <video id="video" autoplay muted playsinline></video>
-          <canvas id="overlay" width="640" height="480"></canvas>
-          <div id="placeholder">Camera opens when you press Start recording.</div>
-          <span id="tracking" class="badge">Camera off</span>
-        </div>
-      </div>
-      <div class="preview-card">
-        <div class="preview-title">Lips: close-up</div>
+    <div class="card card-tight capture-info">
+      <div class="mouth-row">
         <div class="mouth-view">
           <canvas id="mouthPreview" width="320" height="200"></canvas>
           <div id="mouthPlaceholder">A close-up of your mouth appears once the camera is on.</div>
         </div>
-        <span id="mouthTracking" class="mouth-status">Face not detected</span>
+        <div class="mouth-text">
+          <strong>Lips: close-up</strong>
+          <span id="mouthTracking" class="mouth-status">Face not detected</span>
+        </div>
+      </div>
+      <p class="privacy">Gesture tries save hand positions, not video. Lip tries save small close-ups of your mouth. A standard-sign check also saves face, body and hand video, but only when you agree for that try. No sound is recorded, nothing is uploaded and nothing trains automatically.</p>
+      <div class="stage-banner" id="stageBanner">
+        <p class="sr-only">Stage: <strong id="stageName">2. Practice</strong></p>
+        <details id="advancedSettings" class="advanced-details">
+          <summary>Session and technical details</summary>
+          <div class="advanced-content">
+            <div class="session-tag">
+              <span>Session:</span>
+              <code id="sessionLabel">s1</code>
+              <span class="split-info">Data set: <strong id="stageSplit">train</strong></span>
+              <button id="btnNewSession" type="button" class="btn btn-s">Start a new session</button>
+            </div>
+            <div class="fps-bar" id="fpsBar">
+              <span>Target: <strong>25 fps</strong></span>
+              <span aria-hidden="true">·</span>
+              <span>Measured: <strong id="measuredFps">0.0 fps</strong></span>
+              <span aria-hidden="true">·</span>
+              <span>Duration: <strong id="recordDuration">0.0s</strong></span>
+              <span aria-hidden="true">·</span>
+              <span>Received: <strong id="receivedFrames">0 frames</strong></span>
+            </div>
+            <p class="fps-note">Frames are sent about 25 times a second. The measured rate shows how many actually arrived; missing frames are not filled in.</p>
+            <p class="privacy">Start a new session whenever you sit down again on a different occasion. A session belongs to one step only, so practice tries never mix with checks. Hand positions and mouth close-ups are saved by default; standard-sign checks can also save local video, only after you agree for that try.</p>
+          </div>
+        </details>
       </div>
     </div>
-    <p class="privacy">Gesture tries save hand positions, not video. Lip tries save small close-ups of your mouth. A standard-sign check also saves face, body and hand video, but only when you agree for that try. No sound is recorded, nothing is uploaded and nothing trains automatically.</p>
-  </section>
+  </div>
 
+  <div class="rec-side">
   <section class="lesson" aria-label="Current recording lesson">
-    <div id="round" class="kicker">Stage 2 · Practice</div>
-    <div id="pairedBox" class="paired-box" hidden>
+    <div id="round" class="eyebrow round">Stage 2 · Practice</div>
+    <div id="pairedBox" class="card card-tight pair-picker" hidden>
       <p class="paired-note">
         <strong>Gesture and lips together.</strong> Make the gesture while silently mouthing the phrase. This saves practice samples only; it does not recognize or transcribe anything.
       </p>
-      <label for="pairedCaptureKind">What are you recording?</label>
-      <select id="pairedCaptureKind"><option value="personal">Personal gesture with lips (hand positions and mouth close-ups)</option><option value="video" disabled>Standard sign with lips (local video)</option></select>
-      <p id="pairedSignModel" class="paired-note">No standard-sign model configured for this recorder.</p>
-      <div id="videoConsentBox" hidden>
-        <p class="paired-note">Saves your face, upper body and both hands as a small local video (256 × 256), alongside mouth close-ups. Record one sign, at most 240 frames or 10 seconds. No sound and no uploads. Discard saves nothing.</p>
-        <label for="videoConsent"><input id="videoConsent" type="checkbox"> I agree to save the video of this try on this computer.</label>
+      <div class="pair-fields">
+        <div class="field field-wide">
+          <label for="pairedCaptureKind">What are you recording?</label>
+          <select id="pairedCaptureKind" class="select"><option value="personal">Personal gesture with lips (hand positions and mouth close-ups)</option><option value="video" disabled>Standard sign with lips (local video)</option></select>
+          <p id="pairedSignModel" class="hint">No standard-sign model configured for this recorder.</p>
+        </div>
+        <div class="field">
+          <label for="pairedGestureSelect">Gesture or sign (or rest, for “no gesture”)</label>
+          <select id="pairedGestureSelect" class="select"></select>
+        </div>
+        <div class="field">
+          <label for="pairedPromptSelect">Phrase to mouth</label>
+          <select id="pairedPromptSelect" class="select"></select>
+        </div>
       </div>
-      <label for="pairedGestureSelect">Gesture or sign (or rest, for “no gesture”)</label>
-      <select id="pairedGestureSelect"></select>
-      <label for="pairedPromptSelect">Phrase to mouth</label>
-      <select id="pairedPromptSelect"></select>
     </div>
     <div id="pose" class="pose" aria-hidden="true">✋</div>
     <h2 id="meaning" class="meaning">HELLO</h2>
@@ -376,133 +405,141 @@ button.btn-remove:hover:not(:disabled){background:var(--danger-soft);border-colo
     <p id="instruction" class="instruction"></p>
     <p id="hint" class="hint"></p>
     <div id="mouthPrompt" class="mouth-prompt" hidden></div>
-    <p id="mouthNote" class="small" hidden>Mouth these words silently at a natural pace, facing the camera. Only mouth close-ups are saved; the microphone is not used.</p>
-    <p id="trackingNote" class="small">The guide shows tracking only. It is not a transcript or a trained recognizer.</p>
+    <p id="mouthNote" class="note" hidden>Mouth these words silently at a natural pace, facing the camera. Only mouth close-ups are saved; the microphone is not used.</p>
+    <p id="trackingNote" class="note">The guide shows tracking only. It is not a transcript or a trained recognizer.</p>
+  </section>
+
+  <section class="card lesson-controls" aria-label="Recording controls">
     <p id="recordingMeter" class="meter"></p>
     <div id="status" role="status" aria-live="polite">Ready. Press Start recording when you are in view.</div>
-    <label class="consent"><input id="localConsent" type="checkbox"> <span>I agree to save my practice tries on this computer (hand positions and mouth close-ups). Saving video needs separate agreement.</span></label>
-    <div class="btn-group">
-      <button id="record" type="button" disabled>Connecting…</button>
-      <button id="discard" type="button" disabled>Discard</button>
-      <button id="cameraOff" type="button" class="btn-secondary" disabled>Turn camera off</button>
+    <label class="check consent"><input id="localConsent" type="checkbox"> <span>I agree to save my practice tries on this computer (hand positions and mouth close-ups). Saving video needs separate agreement.</span></label>
+    <div id="videoConsentBox" class="callout callout-warn" hidden>
+      <p class="consent-lock"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>This try saves video. Recording stays off until you agree.</p>
+      <p>Saves your face, upper body and both hands as a small local video (256 × 256), alongside mouth close-ups. Record one sign, at most 240 frames or 10 seconds. No sound and no uploads. Discard saves nothing.</p>
+      <label class="check" for="videoConsent"><input id="videoConsent" type="checkbox"> <span>I agree to save the video of this try on this computer.</span></label>
+    </div>
+    <button id="record" class="btn btn-primary btn-hero" type="button" disabled>Connecting…</button>
+    <div class="secondary-actions">
+      <button id="discard" type="button" class="btn btn-danger-quiet btn-s" disabled>Discard</button>
+      <button id="cameraOff" type="button" class="btn btn-ghost btn-s" disabled>Turn camera off</button>
     </div>
     <div class="progress">
       <span id="progress">0 of 5 tries</span>
-      <button id="next" type="button">Next →</button>
+      <button id="next" type="button" class="btn btn-s">Next →</button>
     </div>
-    <div id="advanceBox" class="advance-box" hidden>
+    <div id="advanceBox" class="callout callout-accent advance-box" hidden>
       <span id="advanceMsg">Suggested number of tries reached.</span>
-      <button id="btnAdvanceStage" type="button">Continue to next stage →</button>
+      <button id="btnAdvanceStage" type="button" class="btn btn-primary btn-s">Continue to next stage →</button>
     </div>
   </section>
+  </div>
 </div>
 
-<div id="setupLayout" class="setup-panel" hidden>
-  <div id="setupOnboarding" class="setup-onboarding">
-    <h3>1. Choose your personal phrases</h3>
-    <p>Personal training is optional. You can type messages without it. Review or add phrases if you want to practise, or go back to your message.</p>
-  </div>
-  <h2>Your phrases and gestures</h2>
-  <p class="intro">Start with a few useful phrases. Open a gesture to change what it means and how you make it. These are personal movements, not a BSL or ASL course.</p>
-
-  <div class="setup-section">
-    <h3>About you</h3>
-    <div class="form-field">
-      <label for="profileDisplayName">Your name</label>
-      <input type="text" id="profileDisplayName" maxlength="64">
-    </div>
+<div id="setupLayout" class="setup" hidden>
+  <div id="setupOnboarding" class="callout callout-accent setup-onboarding">
+    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>
+    <p><strong>Choose your personal phrases, only if you want to.</strong> Personal training is optional. You can type messages without it. Review or add phrases if you want to practise, or go back to your message.</p>
   </div>
 
-  <div class="setup-section">
-    <div class="section-header">
-      <h3>Your gestures</h3>
-      <button id="btnAddGesture" type="button" class="btn-subtle">Add a gesture</button>
-    </div>
-    <div class="table-scroll">
-      <table class="setup-table gesture-editor" id="gestureTable" aria-label="Personal gesture definitions">
-        <tbody id="gestureTbody"></tbody>
-      </table>
-    </div>
+  <div class="setup-col">
+    <section class="card" aria-labelledby="aboutTitle">
+      <h2 id="aboutTitle" class="section-header">About you</h2>
+      <div class="field">
+        <label for="profileDisplayName">Your name</label>
+        <input type="text" id="profileDisplayName" class="input" maxlength="64" autocomplete="name">
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="gesturesTitle">
+      <div class="section-header"><h2 id="gesturesTitle">Your gestures</h2></div>
+      <p class="section-hint">Open a gesture to change what it means and how you make it. These are personal movements, not a BSL or ASL course.</p>
+      <div id="gestureTable">
+        <ul class="gesture-list gesture-editor" id="gestureTbody" aria-label="Personal gesture definitions"></ul>
+      </div>
+      <button id="btnAddGesture" type="button" class="btn btn-ghost add-row"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>Add a gesture</button>
+    </section>
   </div>
 
-  <div class="setup-section">
-    <div class="section-header">
-      <h3>Phrases to mouth silently <span id="promptCount" class="heading-count"></span></h3>
-      <button id="btnAddPrompt" type="button" class="btn-subtle">Add a phrase</button>
+  <section class="card" aria-labelledby="phrasesTitle">
+    <div class="section-header"><h2 id="phrasesTitle">Phrases to mouth silently <span id="promptCount" class="badge badge-plain heading-count"></span></h2></div>
+    <p class="section-hint">Start with a few useful phrases you say often. Keep each one short.</p>
+    <div id="promptTable">
+      <ol class="phrase-list" id="promptTbody" aria-label="Phrases to mouth silently"></ol>
     </div>
-    <div class="table-scroll">
-      <table class="setup-table" id="promptTable" aria-label="Phrases to mouth silently">
-        <thead>
-          <tr>
-            <th scope="col">Phrase</th>
-            <th scope="col"><span class="sr-only">Remove</span></th>
-          </tr>
-        </thead>
-        <tbody id="promptTbody"></tbody>
-      </table>
-    </div>
-  </div>
+    <button id="btnAddPrompt" type="button" class="btn btn-ghost add-row"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>Add a phrase</button>
+  </section>
 
-  <div id="setupError" role="alert"></div>
+  <div id="setupError" class="callout callout-danger" role="alert"></div>
   <div class="setup-actions">
-    <button id="btnExitSetup" type="button" class="btn-secondary">Skip to practice</button>
-    <button id="btnSaveProfile" type="button">Save and start practising</button>
+    <span class="actions-note">Nothing is recorded on this step.</span>
+    <button id="btnExitSetup" type="button" class="btn">Skip to practice</button>
+    <button id="btnSaveProfile" type="button" class="btn btn-primary">Save and start practising</button>
   </div>
 </div>
 
-<section id="modelsLayout" class="setup-panel" aria-labelledby="modelsTitle" hidden>
-  <h2 id="modelsTitle">Train, review and save</h2>
-  <div class="model-states">
-    <span><strong>1. Candidate:</strong> training makes a new candidate beside your profile. It is not used by anything yet.</span>
-    <span><strong>2. Saved for this profile:</strong> after you review its report, “Save for main app” makes it this profile’s saved model. The previous one is kept so you can restore it.</span>
-    <span><strong>3. Active in the running app:</strong> only after you stop the camera in the main app and choose Settings → Reload current models. Models chosen when the app was started still take priority.</span>
-  </div>
-  <p class="privacy">Recording tries or finishing training does not show how accurately anything is recognized. Keep practice, “another occasion” and final-check sessions separate.</p>
-  <p id="modelSaveNotice" role="status"></p>
-  <div class="form-field"><label for="modelKind">Model type</label><select id="modelKind"><option value="motion">Gestures (motion)</option><option value="lips">Lip reading (visual)</option><option value="language">Word suggestions (language)</option></select></div>
-  <div class="form-field"><label for="candidateSelect">Candidate</label><select id="candidateSelect"></select></div>
-  <div id="modelStatus" role="status">Loading model status…</div>
-  <div id="modelError" role="alert"></div>
-  <div id="candidateSummary"></div>
-  <div class="btn-group">
-    <button id="trainMotion" type="button">Train a gesture candidate</button>
-    <button id="trainVisual" type="button" hidden>Train a lip-reading candidate</button>
-    <button id="trainLanguage" type="button" hidden>Train a word-suggestion candidate</button>
-    <button id="refreshModels" type="button" class="btn-secondary">Refresh status</button>
-  </div>
-  <div class="btn-group">
-    <button id="viewReport" type="button" class="btn-secondary">View report</button>
-    <button id="evaluateRecognition" type="button">Evaluate recognition</button>
-    <button id="promoteModel" type="button">Save for main app</button>
-    <button id="rollbackModel" type="button" class="btn-secondary" aria-describedby="restoreHint">Restore previous model</button>
-  </div>
-  <p id="restoreHint" class="field-hint"></p>
-  <div id="comparisonMetrics" style="margin-top:8px;" hidden></div>
-  <section id="reportView" aria-labelledby="reportTitle" hidden>
-    <h3 id="reportTitle" tabindex="-1">Candidate report</h3>
-    <div id="reportSummary" class="report-summary"></div>
-    <details id="reportDetails"><summary>Full report (technical)</summary>
-      <pre id="modelReport" style="white-space:pre-wrap;overflow-wrap:anywhere" tabindex="0" aria-label="Full candidate report"></pre>
-    </details>
-  </section>
-</section>
+<section id="modelsLayout" class="models" aria-labelledby="modelsTitle" hidden>
+  <ol class="model-states" aria-label="How a personal model becomes active">
+    <li><span class="ms-n" aria-hidden="true">1</span><strong>Candidate</strong><span class="ms-text">Training makes a new candidate beside your profile. It is not used by anything yet.</span></li>
+    <li><span class="ms-n" aria-hidden="true">2</span><strong>Saved for this profile</strong><span class="ms-text">After you review its report, “Save for main app” makes it this profile’s saved model. The previous one is kept so you can restore it.</span></li>
+    <li><span class="ms-n" aria-hidden="true">3</span><strong>Active in the running app</strong><span class="ms-text">Only after you stop the camera in the main app and choose Settings → Reload current models. Models chosen when the app was started still take priority.</span></li>
+  </ol>
+  <p class="callout">Recording tries or finishing training does not show how accurately anything is recognized. Keep practice, “another occasion” and final-check sessions separate.</p>
+  <p id="modelSaveNotice" class="callout callout-accent" role="status"></p>
 
-<div id="newProfileDialog" class="dialog-backdrop" hidden>
+  <div class="models-grid">
+    <div class="card models-panel">
+      <h2 id="modelsTitle">Train, review and save</h2>
+      <div class="field"><label for="modelKind">Model type</label><select id="modelKind" class="select"><option value="motion">Gestures (motion)</option><option value="lips">Lip reading (visual)</option><option value="language">Word suggestions (language)</option></select></div>
+      <div class="field"><label for="candidateSelect">Candidate</label><select id="candidateSelect" class="select"></select></div>
+      <div id="modelStatus" role="status">Loading model status…</div>
+      <div id="modelError" role="alert" class="callout callout-danger"></div>
+      <div class="train-actions">
+        <button id="trainMotion" type="button" class="btn btn-primary">Train a gesture candidate</button>
+        <button id="trainVisual" type="button" class="btn btn-primary" hidden>Train a lip-reading candidate</button>
+        <button id="trainLanguage" type="button" class="btn btn-primary" hidden>Train a word-suggestion candidate</button>
+        <button id="refreshModels" type="button" class="btn btn-ghost btn-s">Refresh status</button>
+      </div>
+    </div>
+
+    <section class="card models-panel" aria-labelledby="candidateTitle">
+      <h2 id="candidateTitle">Selected candidate</h2>
+      <div id="candidateSummary"></div>
+      <div class="btn-group">
+        <button id="viewReport" type="button" class="btn">View report</button>
+        <button id="evaluateRecognition" type="button" class="btn">Evaluate recognition</button>
+        <button id="promoteModel" type="button" class="btn">Save for main app</button>
+        <button id="rollbackModel" type="button" class="btn btn-ghost" aria-describedby="restoreHint">Restore previous model</button>
+      </div>
+      <p id="restoreHint" class="field-hint"></p>
+      <div id="comparisonMetrics" class="callout" hidden></div>
+      <section id="reportView" aria-labelledby="reportTitle" hidden>
+        <h3 id="reportTitle" tabindex="-1">Candidate report</h3>
+        <div class="table-scroll"><div id="reportSummary" class="report-summary"></div></div>
+        <details id="reportDetails"><summary>Full report (technical)</summary>
+          <pre id="modelReport" tabindex="0" aria-label="Full candidate report"></pre>
+        </details>
+      </section>
+    </section>
+  </div>
+</section>
+</main>
+</div>
+
+<div id="newProfileDialog" class="scrim" hidden>
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle" aria-describedby="dialogDesc">
-    <h3 id="dialogTitle">Create a new profile</h3>
+    <h2 id="dialogTitle">Create a new profile</h2>
     <p id="dialogDesc">A profile keeps one person’s phrases, recordings and models separate from everyone else’s.</p>
-    <div class="form-field"><label for="newProfileName">Your name</label>
-      <input type="text" id="newProfileName" maxlength="64" autocomplete="name"></div>
+    <div class="field"><label for="newProfileName">Your name</label>
+      <input type="text" id="newProfileName" class="input" maxlength="64" autocomplete="name"></div>
     <details><summary>Advanced: folder name</summary>
-      <div class="form-field"><label for="newProfileId">Optional folder name (letters, numbers, - and _)</label>
-      <input type="text" id="newProfileId" maxlength="64" placeholder="Chosen automatically if blank"></div></details>
+      <div class="field"><label for="newProfileId">Optional folder name (letters, numbers, - and _)</label>
+      <input type="text" id="newProfileId" class="input" maxlength="64" placeholder="Chosen automatically if blank"></div></details>
     <div class="dialog-buttons">
-      <button id="btnCancelNewProfile" class="btn-cancel" type="button">Cancel</button>
-      <button id="btnConfirmNewProfile" type="button">Create profile</button>
+      <button id="btnCancelNewProfile" class="btn btn-cancel" type="button">Cancel</button>
+      <button id="btnConfirmNewProfile" class="btn btn-primary" type="button">Create profile</button>
     </div>
   </div>
 </div>
-</main>
 
 <script>
 (()=>{'use strict';
@@ -643,6 +680,19 @@ function hasRecordedSamples(profileId){
   return false;
 }
 
+// Practice / check / final-check steps that already hold saved tries for the active profile.
+function stageHasRecordings(stage){
+  if(!activeProfile?.id||!['train','validation','test'].includes(stage))return false;
+  const prof=allProfiles.find(p=>p.id===activeProfile.id)||activeProfile;
+  for(const cat of Object.values(prof?.stats||{})){
+    if(cat&&typeof cat==='object'&&typeof cat[stage]==='number'&&cat[stage]>0)return true;
+  }
+  for(const [k,v] of Object.entries(progressStore)){
+    if(k.startsWith(`${activeProfile.id}:${stage}:`)&&Array.isArray(v?.counts)&&v.counts.some(c=>c>0))return true;
+  }
+  return false;
+}
+
 const edges=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 
 function note(text,error=false){
@@ -696,6 +746,11 @@ function render(){
   for(const [id,stage] of [['stepSetup','setup'],['stepTrain','train'],['stepValidation','validation'],['stepTest','test'],['stepModels','models']]){
     $(id).classList.toggle('selected',currentStage===stage);
     if(currentStage===stage)$(id).setAttribute('aria-current','step'); else $(id).removeAttribute('aria-current');
+    // A recording step that already holds tries for this profile is marked; this is a count, not a check result.
+    const recorded=stageHasRecordings(stage);
+    $(id).classList.toggle('done',recorded);
+    const state=$(id).querySelector?.('.step-state');
+    if(state)state.textContent=recorded?' (has recordings)':'';
   }
   $('modelsLayout').hidden=currentStage!=='models';
   // Gestures / Lips / Both apply to recording steps only.
@@ -757,7 +812,7 @@ function render(){
   $('pairedSignModel').textContent=signModelInfo?`${signModelInfo.language.toUpperCase()} sign model ${signModelInfo.sha256.slice(0,12)} is set up. It only lists the signs you can record here; there is no recognition or scoring while you record.`:'Standard-sign video checks are off because no standard-sign model was set up when QuietBridge started.';
   $('mouthPrompt').hidden=!isLip&&!isPaired;
   $('mouthNote').hidden=!isLip&&!isPaired;
-  $('mouthNote').textContent=videoRequested()?'Mouth the sentence while signing. The full video and mouth close-ups are saved only after you agree and choose Finish & save. The microphone is not used.':'Mouth these words silently at a natural pace, facing the camera. Only mouth close-ups are saved; the microphone is not used.';
+  $('mouthNote').textContent=videoRequested()?'Mouth the sentence while signing. The full video and mouth close-ups are saved only after you agree and choose Finish and save. The microphone is not used.':'Mouth these words silently at a natural pace, facing the camera. Only mouth close-ups are saved; the microphone is not used.';
   $('trackingNote').hidden=isPaired; // the paired box already says this
   $('trackingNote').textContent=isPaired
     ?'This collects practice samples only. It does not recognize or transcribe anything.'
@@ -906,7 +961,7 @@ $('btnAdvanceStage').onclick=()=>{
 function controls(){
   const b=$('record');
   b.disabled=!captureAvailable||working||!token||currentStage==='setup'||(!recording&&videoRequested()&&(!$('videoConsent').checked||!signModelInfo));
-  b.textContent=working?'Please wait…':recording?'Finish & save':'Start recording';
+  b.textContent=working?'Please wait…':recording?'Finish and save':'Start recording';
   b.classList.toggle('active',recording);
   $('discard').disabled=!recording||working;
   $('cameraOff').disabled=!stream||working;
@@ -1050,7 +1105,7 @@ async function sendFrame(){
       $('recordingMeter').textContent=`Recording: ${seconds} s · ${frames} ${mode==='lips'?'mouth frames':'frames'} received`;
     }
     if(d.mouth?.limit_reached||d.limit_reached){
-      note(activeVideoCapture?'Video limit reached. Discard this try and record a shorter sign.':'Time limit for one try reached. Press Finish & save.',true);
+      note(activeVideoCapture?'Video limit reached. Discard this try and record a shorter sign.':'Time limit for one try reached. Press Finish and save.',true);
     }
   }catch(e){
     stopCamera();
@@ -1092,7 +1147,11 @@ function setStage(stage){
   currentStage=stage;
   if(stage==='models'){
     render();
-    refreshModelStatus();
+    // Step buttons are disabled while status loads, which drops keyboard focus; put it back afterwards.
+    const opener=document.activeElement;
+    Promise.resolve(refreshModelStatus()).then(()=>{
+      if(opener?.classList?.contains('step-btn')&&(!document.activeElement||document.activeElement===document.body))opener.focus?.();
+    });
     return;
   }
   const split=currentStage==='setup'?'setup':(currentStage==='validation'?'validation':(currentStage==='test'?'test':'train'));
@@ -1227,11 +1286,11 @@ $('record').onclick=async()=>{
       started=Date.now();
       recordingStartTime=Date.now();
       if(mode==='lips'){
-        note('Recording. Mouth these words silently at a natural pace, then choose Finish & save.');
+        note('Recording. Mouth these words silently at a natural pace, then choose Finish and save.');
       }else if(mode==='gestures'){
-        note('Recording. Keep still for half a second, make the gesture once, then rest for half a second. Then choose Finish & save.');
+        note('Recording. Keep still for half a second, make the gesture once, then rest for half a second. Then choose Finish and save.');
       }else{
-        note(activeVideoCapture?'Recording local video. Make one sign while silently mouthing the phrase. Finish within 10 seconds.':'Recording. Make the gesture while silently mouthing the phrase, then choose Finish & save.');
+        note(activeVideoCapture?'Recording local video. Make one sign while silently mouthing the phrase. Finish within 10 seconds.':'Recording. Make the gesture while silently mouthing the phrase, then choose Finish and save.');
       }
     }else{
       if(!frames)throw Error('Nothing has been captured yet. Wait until the camera view shows tracking, then save.');
@@ -1378,8 +1437,9 @@ function renderModels(){
 
 // Plain-language fact list for a candidate; file paths stay in a collapsed section.
 function fact(label,value){
-  const li=document.createElement('li'),b=document.createElement('strong');
-  b.textContent=label+': '; li.append(b,document.createTextNode(value)); return li;
+  const li=document.createElement('li'),b=document.createElement('strong'),v=document.createElement('span'),sep=document.createElement('span');
+  b.className='fact-label'; b.textContent=label; sep.className='sr-only'; sep.textContent=': ';
+  v.className='fact-value'; v.textContent=value; b.append(sep); li.append(b,v); return li;
 }
 function whyNotSavable(c){
   if(c.status==='running')return 'Training is still running.';
@@ -1559,14 +1619,14 @@ $('rollbackModel').onclick=()=>{
 // Setup Panel & Customization Logic
 function collectSetupFields(){
   activeProfile.name=$('profileDisplayName').value;
-  $('gestureTbody').querySelectorAll('tr').forEach((row,i)=>{
+  $('gestureTbody').querySelectorAll('li').forEach((row,i)=>{
     const gesture=activeProfile.gestures[i];
     for(const field of ['emoji','label','display_name','concept','description','intent_template']){
       const value=row.querySelector(`[data-field="${field}"]`).value;
       if(field==='intent_template'&&!value)delete gesture[field]; else gesture[field]=value;
     }
   });
-  activeProfile.lip_prompts=Array.from($('promptTbody').querySelectorAll('tr'),row=>row.querySelector('input').value);
+  activeProfile.lip_prompts=Array.from($('promptTbody').querySelectorAll('li'),row=>row.querySelector('input').value);
 }
 function setupDirty(){
   if(currentStage!=='setup'||!setupBaseline)return false;
@@ -1585,21 +1645,24 @@ function renderSetupView(){
   const tbodyG=$('gestureTbody');
   tbodyG.innerHTML='';
   (activeProfile.gestures||[]).forEach((g,idx)=>{
-    const tr=document.createElement('tr');
+    const tr=document.createElement('li');
+    tr.className='gesture-row';
     const escape=value=>String(value||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    tr.innerHTML=`<td><details class="gesture-definition"><summary><span>${escape(g.display_name||g.label)}</span><span class="gesture-meaning">${g.label==='REST'?'No message. Keep ordinary rest silent.':escape(g.concept)}</span></summary>
+    tr.innerHTML=`<details class="gesture-definition"><summary><span class="g-emoji" aria-hidden="true">${escape(g.emoji||'✋')}</span><span class="g-text"><span class="g-name">${escape(g.display_name||g.label)}</span><span class="gesture-meaning">${g.label==='REST'?'No message. Keep ordinary rest silent.':escape(g.concept)}</span></span></summary>
+      <div class="gesture-body">
       <div class="gesture-fields">
-        <label>Gesture name<input type="text" value="${escape(g.display_name)}" data-field="display_name" data-idx="${idx}"></label>
-        <label>Words this gesture means<input type="text" value="${escape(g.concept)}" data-field="concept" data-idx="${idx}"></label>
-        <label class="gesture-instruction">How you make it<textarea rows="2" data-field="description" data-idx="${idx}">${escape(g.description)}</textarea></label>
+        <label class="field"><span class="label">Gesture name</span><input class="input" type="text" value="${escape(g.display_name)}" data-field="display_name" data-idx="${idx}"></label>
+        <label class="field"><span class="label">Words this gesture means</span><input class="input" type="text" value="${escape(g.concept)}" data-field="concept" data-idx="${idx}"></label>
+        <label class="field field-wide"><span class="label">How you make it</span><textarea class="textarea" rows="2" data-field="description" data-idx="${idx}">${escape(g.description)}</textarea></label>
       </div>
       <details class="gesture-advanced"><summary>Advanced: labels and sentence templates</summary><div class="gesture-fields">
-        <label>Internal label<input type="text" value="${escape(g.label)}" data-field="label" data-idx="${idx}"></label>
-        <label>Optional icon<input type="text" value="${escape(g.emoji)}" data-field="emoji" data-idx="${idx}"></label>
-        <label class="gesture-instruction">Sentence template<input type="text" data-field="intent_template" data-idx="${idx}" aria-label="Intent template for gesture ${idx+1}" placeholder="e.g. I need {gesture}"><small>Optional. Use one {gesture} slot. Only exact lip context can fill it.</small></label>
+        <label class="field"><span class="label">Internal label</span><input class="input" type="text" value="${escape(g.label)}" data-field="label" data-idx="${idx}"></label>
+        <label class="field"><span class="label">Optional icon</span><input class="input" type="text" value="${escape(g.emoji)}" data-field="emoji" data-idx="${idx}"></label>
+        <label class="field field-wide"><span class="label">Sentence template</span><input class="input" type="text" data-field="intent_template" data-idx="${idx}" aria-label="Intent template for gesture ${idx+1}" placeholder="e.g. I need {gesture}"><span class="hint">Optional. Use one {gesture} slot. Only exact lip context can fill it.</span></label>
       </div></details>
-      <button type="button" class="btn-del-g btn-remove" data-idx="${idx}" aria-label="Remove gesture: ${escape(g.display_name||g.label)}">Remove gesture</button>
-    </details></td>`;
+      <button type="button" class="btn-del-g btn-remove btn btn-danger-quiet btn-s" data-idx="${idx}" aria-label="Remove gesture: ${escape(g.display_name||g.label)}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>Remove gesture</button>
+      </div>
+    </details>`;
     tr.querySelector('[data-field="intent_template"]').value=g.intent_template||'';
     tbodyG.appendChild(tr);
   });
@@ -1607,11 +1670,9 @@ function renderSetupView(){
   const tbodyP=$('promptTbody');
   tbodyP.innerHTML='';
   (activeProfile.lip_prompts||[]).forEach((p,idx)=>{
-    const tr=document.createElement('tr');
-    tr.innerHTML=`
-      <td><input type="text" maxlength="300" aria-label="Practice phrase ${idx+1}" data-idx="${idx}"></td>
-      <td><button type="button" class="btn-del-p btn-remove" data-idx="${idx}" aria-label="Remove phrase ${idx+1}">Remove</button></td>
-    `;
+    const tr=document.createElement('li');
+    tr.className='phrase-row';
+    tr.innerHTML=`<input class="input" type="text" maxlength="300" aria-label="Practice phrase ${idx+1}" data-idx="${idx}"><button type="button" class="btn-del-p btn-remove icon-btn" data-idx="${idx}" aria-label="Remove phrase ${idx+1}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
     tr.querySelector('input').value=p;
     tr.querySelector('input').placeholder='Type a phrase you often say';
     tbodyP.appendChild(tr);
@@ -1628,7 +1689,7 @@ function renderSetupView(){
       activeProfile.gestures.splice(idx,1);
       renderSetupView();
       // Keep keyboard focus near the removed row instead of dropping it to the page.
-      const rows=$('gestureTbody').querySelectorAll('summary');
+      const rows=$('gestureTbody').querySelectorAll('details.gesture-definition > summary');
       (rows[Math.min(idx,rows.length-1)]||$('btnAddGesture'))?.focus?.();
     };
   });
@@ -1648,7 +1709,7 @@ function renderSetupView(){
     };
   });
   const count=(activeProfile.lip_prompts||[]).length;
-  $('promptCount').textContent=`(${count} ${count===1?'phrase':'phrases'})`;
+  $('promptCount').textContent=`${count} ${count===1?'phrase':'phrases'}`;
   if(!setupBaseline){ collectSetupFields(); setupBaseline=JSON.stringify(activeProfile); }
 }
 
@@ -1705,7 +1766,7 @@ $('btnSaveProfile').onclick=async()=>{
   try{
     activeProfile.name=$('profileDisplayName').value.trim()||activeProfile.id;
     // Collect updated gestures from inputs
-    const gRows=$('gestureTbody').querySelectorAll('tr');
+    const gRows=$('gestureTbody').querySelectorAll('li');
     const newGestures=[];
     gRows.forEach((row,index)=>{
       const emoji=row.querySelector('[data-field="emoji"]').value.trim()||'✋';
@@ -1720,7 +1781,7 @@ $('btnSaveProfile').onclick=async()=>{
       newGestures.push(gesture);
     });
 
-    const pRows=$('promptTbody').querySelectorAll('tr');
+    const pRows=$('promptTbody').querySelectorAll('li');
     const newPrompts=[];
     pRows.forEach(row=>{
       const text=row.querySelector('input').value.trim();
@@ -1854,18 +1915,18 @@ request('/api/state').then(async s=>{
     if(activeVideoCapture)$('pairedCaptureKind').value='video';
     recording=true;
     frames=s.recorded_frames||0;
-    note('An earlier try with both together is still open. Finish & save it, or discard it, before switching.',true);
+    note('An earlier try with both together is still open. Finish and save it, or discard it, before switching.',true);
   }else if(s.mouth?.recording){
     // /api/state.recording is also true for a mouth trial, so check lips first.
     mode='lips';
     recording=true;
     frames=s.mouth.frames||0;
-    note('An earlier lip try is still open. Finish & save it, or discard it, before switching.',true);
+    note('An earlier lip try is still open. Finish and save it, or discard it, before switching.',true);
   }else if(s.recording){
     mode='gestures';
     recording=true;
     frames=s.recorded_frames||0;
-    note('An earlier gesture try is still open. Finish & save it, or discard it, before switching.',true);
+    note('An earlier gesture try is still open. Finish and save it, or discard it, before switching.',true);
   }
 
   // First-time onboarding: if profile has no recorded samples, guide to setup view without opening camera

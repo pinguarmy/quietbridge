@@ -86,11 +86,81 @@ test('user-facing copy avoids developer flags and internal ids', () => {
   assert.match(script, /Nothing is recorded until you start practising/);
 });
 
-test('theme uses shared tokens, has dark mode and keeps a 13px type floor', () => {
-  for (const token of ['--ink:#182d39', '--muted:#536773', '--accent:#086b68', '--paper:#f3f6f8', '--danger:#a73831']) assert.ok(style.includes(token), token);
-  assert.match(style, /@media\(prefers-color-scheme:dark\)\{\s*:root\{[\s\S]*--paper:#10191e/);
-  const sizes = [...style.matchAll(/font-size:(\d+)px/g)].map(m => Number(m[1]));
-  assert.ok(Math.min(...sizes) >= 13, `smallest font-size ${Math.min(...sizes)}px`);
-  // No hard-coded colours remain in inline markup or script-generated HTML.
-  assert.doesNotMatch(script, /#0d9488'\:'#cf222e/);
+test('page uses the shared design system: linked stylesheet, tokens only, dark mode, 14px type floor', () => {
+  assert.match(html, /<link rel="stylesheet" href="\/design.css">/);
+  assert.match(html, /<link rel="icon" href="\/favicon.svg" type="image\/svg\+xml">/);
+  // The page's own styles add layout only: no hard-coded colours (design.css owns light and dark themes).
+  const colours = style.match(/(?:^|[:\s,(])#[0-9a-fA-F]{3,8}(?![\w-])|rgba?\(|hsla?\(/g) || [];
+  assert.deepEqual(colours, []);
+  assert.match(style, /var\(--accent-fill\)/);
+  assert.match(style, /var\(--danger-fill\)/);
+  // No local colour-scheme override that would break the shared dark theme.
+  assert.doesNotMatch(style, /prefers-color-scheme/);
+  const sizes = [...style.matchAll(/font-size:\s*(\d+)px/g)].map(m => Number(m[1]));
+  assert.ok(sizes.every(size => size >= 14), `smallest font-size ${Math.min(...sizes)}px`);
+  assert.doesNotMatch(style, /var\(--text-(?:2xs|xxs)\)/);
+  // No inline style attributes in markup or script-generated HTML.
+  assert.doesNotMatch(html.replace(/<style>[\s\S]*?<\/style>/, ''), /\sstyle="/);
+  assert.match(style, /@media \(forced-colors:active\)/);
+  // Live recording indicator pulses only when the person has not asked for reduced motion.
+  const pulse = style.indexOf('animation:live-pulse');
+  assert.ok(pulse > style.indexOf('@media (prefers-reduced-motion:no-preference)'));
+  assert.ok(pulse < style.indexOf('@media (prefers-reduced-motion:reduce)'));
+});
+
+test('recorded steps are marked from saved tries only, with a text alternative', () => {
+  const source = script.match(/function stageHasRecordings\(stage\)\{[\s\S]*?\n\}/)[0];
+  const context = {activeProfile: {id: 'p'}, allProfiles: [{id: 'p', stats: {sequences: {train: 2, validation: 0, test: 0}, mouths: {train: 0, validation: 0, test: 0}}}],
+    progressStore: {'p:test:lips': {index: 0, counts: [0, 1]}, 'other:validation:gestures': {index: 0, counts: [4]}}};
+  vm.createContext(context); vm.runInContext(source, context);
+  assert.equal(context.stageHasRecordings('train'), true);
+  assert.equal(context.stageHasRecordings('validation'), false);
+  assert.equal(context.stageHasRecordings('test'), true);
+  // Choosing phrases and activating are never shown as "recorded".
+  assert.equal(context.stageHasRecordings('setup'), false);
+  assert.equal(context.stageHasRecordings('models'), false);
+  context.activeProfile = null;
+  assert.equal(context.stageHasRecordings('train'), false);
+  const render = script.slice(script.indexOf('function render(){'), script.indexOf('function checkStageCompletion()'));
+  assert.match(render, /classList\.toggle\('done',recorded\)/);
+  assert.match(render, /' \(has recordings\)'/);
+  assert.equal((html.match(/<span class="step-state sr-only"><\/span>/g) || []).length, 5);
+});
+
+test('record control is one labelled toggle and video consent is stated next to it', () => {
+  const controls = script.match(/function controls\(\)\{[\s\S]*?\n\}/)[0];
+  assert.match(controls, /recording\?'Finish and save':'Start recording'/);
+  assert.match(controls, /videoRequested\(\)&&\(!\$\('videoConsent'\)\.checked\|\|!signModelInfo\)/);
+  assert.ok(!html.includes('Finish &'), 'one spelling of the finish label');
+  const box = html.slice(html.indexOf('id="videoConsentBox"'), html.indexOf('id="record"'));
+  assert.match(box, /Recording stays off until you agree/);
+  assert.match(box, /id="videoConsent" type="checkbox">/);
+  assert.ok(html.indexOf('id="videoConsentBox"') < html.indexOf('id="record"'), 'consent comes before the record button');
+});
+
+test('phrase and gesture rows are list items with labelled controls', () => {
+  assert.match(html, /<ul class="gesture-list gesture-editor" id="gestureTbody" aria-label="Personal gesture definitions"><\/ul>/);
+  assert.match(html, /<ol class="phrase-list" id="promptTbody" aria-label="Phrases to mouth silently"><\/ol>/);
+  const render = script.slice(script.indexOf('function renderSetupView()'), script.indexOf('function unusedGestureLabel('));
+  assert.match(render, /aria-label="Practice phrase \$\{idx\+1\}"/);
+  assert.match(render, /aria-label="Remove phrase \$\{idx\+1\}"/);
+  assert.match(render, /aria-label="Remove gesture: /);
+  // Icons are decorative and never take focus.
+  for (const svg of html.match(/<svg[^>]*>/g)) assert.match(svg, /aria-hidden="true" focusable="false"/, svg);
+  // Removing a gesture moves focus to a row summary, not to a nested "Advanced" summary.
+  assert.match(render, /querySelectorAll\('details\.gesture-definition > summary'\)/);
+  assert.doesNotMatch(script, /createElement\('tr'\);\s*tr\.className='(?:gesture|phrase)-row'/);
+});
+
+test('opening Activate returns keyboard focus to the step after status loads', async () => {
+  const source = script.match(/function setStage\(stage\)\{[\s\S]*?\n\}/)[0];
+  let focused = null;
+  const step = {classList: {contains: c => c === 'step-btn'}, focus() { focused = 'stepModels'; }};
+  const document = {activeElement: step, body: {}};
+  const context = {document, recording: false, working: false, modelBusy: false, currentStage: 'train',
+    confirmDiscardSetup: () => true, render() {}, refreshModelStatus: async () => { document.activeElement = document.body; }};
+  vm.createContext(context); vm.runInContext(source, context);
+  context.setStage('models');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(focused, 'stepModels');
 });

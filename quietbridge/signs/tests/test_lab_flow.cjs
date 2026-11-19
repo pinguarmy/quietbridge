@@ -17,12 +17,15 @@ test('lab.html inline script parses cleanly with vm.Script', () => {
 });
 
 test('stepper labels and stages adhere to simplified copy while preserving split semantics', () => {
-  // Check HTML stepper markup
-  assert.match(rawHtml, /id="stepSetup"[^>]*>1\.\s*Choose phrases<\/button>/);
-  assert.match(rawHtml, /id="stepTrain"[^>]*>2\.\s*Practice<\/button>/);
-  assert.match(rawHtml, /id="stepValidation"[^>]*>3\.\s*Check on another occasion<\/button>/);
-  assert.match(rawHtml, /id="stepTest"[^>]*>4\.\s*Final check<\/button>/);
-  assert.match(rawHtml, /id="stepModels"[^>]*>5\.\s*Activate<\/button>/);
+  // Check HTML stepper markup: a numbered list of buttons, number and label in order.
+  assert.match(rawHtml, /<nav class="stepper" aria-label="Personalize steps">\s*<ol>/);
+  assert.match(rawHtml, /id="stepSetup"[^>]*><span class="step-n">1<\/span><span class="step-label">Choose phrases<\/span>/);
+  assert.match(rawHtml, /id="stepTrain"[^>]*><span class="step-n">2<\/span><span class="step-label">Practice<\/span>/);
+  assert.match(rawHtml, /id="stepValidation"[^>]*><span class="step-n">3<\/span><span class="step-label">Check on another occasion<\/span>/);
+  assert.match(rawHtml, /id="stepTest"[^>]*><span class="step-n">4<\/span><span class="step-label">Final check<\/span>/);
+  assert.match(rawHtml, /id="stepModels"[^>]*><span class="step-n">5<\/span><span class="step-label">Activate<\/span>/);
+  // The step number is not hidden from assistive technology.
+  assert.doesNotMatch(rawHtml, /class="step-n"[^>]*aria-hidden/);
 
   // Check data-stage attributes
   assert.match(rawHtml, /data-stage="setup"/);

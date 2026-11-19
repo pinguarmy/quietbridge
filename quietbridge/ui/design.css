@@ -36,6 +36,7 @@
   /* States */
   --danger: #a32c23;
   --danger-fill: #b3352b;
+  --on-danger: #ffffff;
   --danger-soft: #fbe7e3;
   --warn-soft: #fbf1d8;
   --warn-ink: #5f4300;
@@ -108,7 +109,8 @@
     --accent-ink: #a9ece1;
 
     --danger: #ff9d92;
-    --danger-fill: #c2463b;
+    --danger-fill: #b83d32;
+    --on-danger: #ffffff;
     --danger-soft: #3a1d1a;
     --warn-soft: #33290f;
     --warn-ink: #f2d489;
@@ -249,8 +251,8 @@ button, summary { touch-action: manipulation; }
 .btn-ghost { border-color: transparent; background: transparent; color: var(--accent); padding: 0 var(--s-3); }
 .btn-ghost:hover:not(:disabled) { background: var(--accent-soft); border-color: transparent; color: var(--accent-ink); }
 
-.btn-danger { border-color: transparent; background: var(--danger-fill); color: #ffffff; }
-.btn-danger:hover:not(:disabled) { filter: brightness(.94); border-color: transparent; color: #ffffff; background: var(--danger-fill); }
+.btn-danger { border-color: transparent; background: var(--danger-fill); color: var(--on-danger); }
+.btn-danger:hover:not(:disabled) { filter: brightness(.94); border-color: transparent; color: var(--on-danger); background: var(--danger-fill); }
 .btn-danger-quiet { border-color: transparent; background: transparent; color: var(--danger); padding: 0 var(--s-3); }
 .btn-danger-quiet:hover:not(:disabled) { background: var(--danger-soft); border-color: transparent; color: var(--danger); }
 
@@ -326,7 +328,8 @@ button, summary { touch-action: manipulation; }
 }
 .segmented button:hover:not(:disabled) { background: var(--surface-3); color: var(--ink); }
 .segmented button[aria-pressed="true"], .segmented button.active {
-  background: var(--surface); color: var(--ink); box-shadow: var(--shadow-1);
+  background: var(--surface); color: var(--ink);
+  box-shadow: inset 0 0 0 1.5px var(--control-line), var(--shadow-1);
 }
 .segmented button:disabled { cursor: not-allowed; opacity: .5; }
 
@@ -335,12 +338,12 @@ button, summary { touch-action: manipulation; }
 .steps { display: flex; align-items: center; gap: var(--s-2); margin: 0; padding: 0; list-style: none; flex-wrap: wrap; }
 .steps li {
   display: inline-flex; align-items: center; gap: var(--s-2);
-  min-height: 32px; padding: 0 12px 0 6px; border-radius: var(--radius-pill);
+  min-height: 36px; padding: 0 14px 0 6px; border-radius: var(--radius-pill);
   color: var(--muted); font-size: var(--text-xs); font-weight: 600;
 }
 .steps li > span:first-child, .steps li > .step-n {
-  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
-  border: 1.5px solid var(--control-line); font-size: 12px; font-weight: 700;
+  display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+  border: 1.5px solid var(--control-line); font-size: 13px; font-weight: 700;
 }
 .steps li[aria-current="step"] { background: var(--accent-soft); color: var(--accent-ink); }
 .steps li[aria-current="step"] > span:first-child, .steps li[aria-current="step"] > .step-n {

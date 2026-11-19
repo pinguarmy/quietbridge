@@ -39,6 +39,12 @@ MAX_RECORD_SECONDS = 60.0
 DEFAULT_PORT = 8766
 DEFAULT_DATA_ROOT = Path.home() / ".local" / "share" / "quietbridge" / "sequences"
 LAB_HTML = Path(__file__).with_name("lab.html")
+# Shared design system and icon from the main app's UI folder (read-only here).
+UI_DIR = Path(__file__).resolve().parent.parent / "ui"
+STATIC_FILES = {
+    "/design.css": ("design.css", "text/css; charset=utf-8"),
+    "/favicon.svg": ("favicon.svg", "image/svg+xml"),
+}
 STATE_NOTE = "Loopback lab recorder; recordings stay on this computer, no uploads."
 
 _LABEL_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,31}$")
@@ -204,6 +210,11 @@ class _LabServer(ThreadingHTTPServer):
         # Frame handlers own the engine/tracker under this lock. Stop admission
         # before waiting, then release resources only after active inference ends.
         self._closing = True
+        if getattr(self, "lock", None) is None:
+            # The bind failed before setup finished (e.g. the port is in use):
+            # let the real OSError surface instead of an AttributeError here.
+            super().server_close()
+            return
         with self.lock:
             self.recording = None
             self.paired_recording = None
@@ -496,6 +507,19 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self.send_response(200)
             self._security_headers("text/html; charset=utf-8", len(body))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        static = STATIC_FILES.get(self.path.split("?", 1)[0])
+        if static is not None:
+            name, content_type = static
+            try:
+                body = (UI_DIR / name).read_bytes()
+            except FileNotFoundError:
+                self._error(404, f"{name} not found in the QuietBridge ui folder")
+                return
+            self.send_response(200)
+            self._security_headers(content_type, len(body))
             self.end_headers()
             self.wfile.write(body)
             return

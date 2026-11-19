@@ -20,11 +20,11 @@ test('gesture intent template loads, saves, clears and validates', async () => {
   const tbody = {
     set innerHTML(value) {},
     appendChild(tr) { templateInput = tr.input; },
-    querySelectorAll(selector) { return selector === 'tr' ? rows : []; }
+    querySelectorAll(selector) { return selector === 'li' ? rows : []; }
   };
   const prompts = {
     innerHTML: '', appendChild() {},
-    querySelectorAll(selector) { return selector === 'tr' ? [{querySelector() { return {value: 'Hello'}; }}] : []; }
+    querySelectorAll(selector) { return selector === 'li' ? [{querySelector() { return {value: 'Hello'}; }}] : []; }
   };
   const elements = {profileDisplayName: {value: ''}, gestureTbody: tbody, promptTbody: prompts, btnSaveProfile: {},
     setupError: {textContent: ''}, promptCount: {textContent: ''}};
