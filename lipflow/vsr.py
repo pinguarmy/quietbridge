@@ -24,9 +24,10 @@ from espnet.nets.lm_interface import dynamic_import_lm  # noqa: E402
 from espnet.nets.pytorch_backend.e2e_asr_transformer import E2E  # noqa: E402
 from espnet.nets.scorers.length_bonus import LengthBonus  # noqa: E402
 
+from .paths import MODELS  # noqa: E402  (re-exported: train_lm, train_vsr and av import it from here)
+
 MODEL_FPS = 25
 PERSONAL_LM_WEIGHT = 0.2
-MODELS = os.path.join(ROOT, "models")
 _MEAN, _STD = 0.421, 0.165
 
 
@@ -56,7 +57,8 @@ class LipReader:
             confs = json.load(f)
         args = argparse.Namespace(**(confs if isinstance(confs, dict) else confs[2]))
         units = os.path.join(os.path.dirname(__file__), "unigram5000_units.txt")
-        self.token_list = ["<blank>"] + [l.split()[0] for l in open(units, encoding="utf-8").read().splitlines()] + ["<eos>"]
+        with open(units, encoding="utf-8") as f:
+            self.token_list = ["<blank>"] + [l.split()[0] for l in f.read().splitlines()] + ["<eos>"]
         odim = len(self.token_list)
 
         self.model = E2E(odim, args)
@@ -165,7 +167,10 @@ class LipReader:
     @torch.inference_mode()
     def beam_search(self, enc: torch.Tensor, nbest: int = 1) -> "str | list[str]":
         texts = [item["text"] for item in self.beam_search_details(enc, nbest)]
-        return texts if nbest > 1 else texts[0]
+        if nbest > 1:
+            return texts
+        # ESPnet returns no hypothesis at all when none ended (minlenratio 0): that reads as nothing.
+        return texts[0] if texts else ""
 
     @staticmethod
     def _clean(text: str) -> str:

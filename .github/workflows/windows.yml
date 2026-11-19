@@ -1,7 +1,14 @@
 name: windows
 
+# Windows install and checks: setup.ps1, the Python/Node/browser contract tests, lipflow doctor and,
+# when the public-domain sample clips could be downloaded, one real lip read on the CPU.
+# No camera, no audible speech, no real users: software contracts, not recognition effectiveness.
+
 on:
+  # Pushes to main, and every pull request (which covers its branch). A commit pushed to a branch
+  # without a PR is not run automatically; use "Run workflow" (workflow_dispatch) for that.
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -9,44 +16,117 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # A newer push to a PR supersedes the older run; every commit on main keeps its own result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+    env:
+      LIPFLOW_DOWNLOAD_RETRIES: "6"
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/cache@v4
-        with:
-          path: |
-            models
-            samples
-          key: models-${{ hashFiles('setup.ps1') }}
-      - name: setup.ps1 (dependencies, models, sample clips, Start menu shortcut)
-        shell: pwsh
-        run: ./setup.ps1 -Samples
-      - name: Shortcut points at the venv's pythonw
-        shell: pwsh
-        run: |
-          $lnk = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Lipflow.lnk"
-          $t = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk).TargetPath
-          Write-Host $t
-          if (-not (Test-Path $t)) { throw "shortcut target missing: $t" }
-      - name: Tests (includes reading a real clip on the CPU)
-        run: uv run pytest -q -rs
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+
+      # Fast checks first: they need neither the Python install nor the downloads.
       - name: UI script syntax
         run: node --check hackathon/ui/app.js
       - name: Node UI contract tests
         # pwsh passes the quoted glob through unchanged; Node 24 expands it itself.
         shell: pwsh
         run: node --test hackathon/tests/test_ui_flow.cjs hackathon/tests/test_cleanup_settings_ui.cjs "hackathon/signs/tests/test_lab_*.cjs"
+
+      - uses: astral-sh/setup-uv@v6
+      - name: Install locked dependencies
+        id: sync
+        if: ${{ !cancelled() }}
+        run: uv sync --frozen
+
+      # Models and samples are cached separately, keyed on the download lists, and saved by explicit
+      # steps below even when a later step fails, so one failure doesn't force re-downloading ~1.2 GB.
+      - name: Restore models
+        id: models-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('scripts/models.txt') }}
+      - name: Restore sample clips
+        id: samples-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: samples
+          key: samples-${{ hashFiles('scripts/samples.txt') }}
+
+      - name: setup.ps1 (dependencies, models, sample clips best effort, Start menu shortcut)
+        id: setup
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        shell: pwsh
+        run: ./setup.ps1 -Samples
+
+      - name: Check which downloads are complete
+        id: files
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          function Test-Complete($manifest) {
+            foreach ($line in Get-Content $manifest) {
+              $line = $line.Trim()
+              if (-not $line -or $line.StartsWith("#")) { continue }
+              $url, $dest, $min = -split $line
+              if (-not (Test-Path $dest) -or (Get-Item $dest).Length -lt [long]$min) { return $false }
+            }
+            return $true
+          }
+          $models = Test-Complete "scripts/models.txt"
+          $samples = Test-Complete "scripts/samples.txt"
+          "models=$($models.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          "samples=$($samples.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          Write-Host "models complete: $models; sample clips complete: $samples"
+          if (-not $samples) {
+            Write-Host "::warning::Sample clips are unavailable (download failed, e.g. HTTP 429 from Wikimedia). The real-clip test in tests/test_pipeline.py and the end-to-end lip-read step are SKIPPED in this run."
+          }
+
+      - name: Save models
+        if: ${{ always() && steps.models-cache.outputs.cache-hit != 'true' && steps.files.outputs.models == 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('scripts/models.txt') }}
+      - name: Save sample clips
+        if: ${{ always() && steps.samples-cache.outputs.cache-hit != 'true' && steps.files.outputs.samples == 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: samples
+          key: samples-${{ hashFiles('scripts/samples.txt') }}
+
+      - name: Shortcut points at the venv's pythonw
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $lnk = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Lipflow.lnk"
+          $t = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk).TargetPath
+          Write-Host $t
+          if (-not (Test-Path $t)) { throw "shortcut target missing: $t" }
+
+      # The tests run whenever the dependencies installed, even if a download failed: tests that need a
+      # missing model or clip skip with a reason (shown by -rs). With the clips present, the real-clip
+      # test is required (LIPFLOW_REQUIRE_SAMPLES) so it cannot silently skip.
+      - name: Tests (with the clips, includes reading a real clip on the CPU)
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          if ("${{ steps.files.outputs.samples }}" -eq "true" -and "${{ steps.files.outputs.models }}" -eq "true") {
+            $env:LIPFLOW_REQUIRE_SAMPLES = "1"
+          }
+          uv run pytest -q -rs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Browser contracts and deliberate-fault sensitivity (silent rehearsal)
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
         shell: pwsh
         run: |
           $env:PYTHON_BIN = (Resolve-Path .venv/Scripts/python.exe).Path
@@ -58,8 +138,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/check_web.mjs --keyboard-profile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: lipflow doctor (no camera on CI, so this only prints)
+
+      # With the models downloaded, every required doctor check can pass on a camera-less runner, so
+      # its exit code gates the job (model sizes, runtime imports, pynput hook, gesture-model checksum).
+      - name: lipflow doctor (camera not opened on CI)
+        if: ${{ !cancelled() && steps.files.outputs.models == 'true' }}
         shell: pwsh
-        run: uv run lipflow doctor; exit 0
+        run: |
+          uv run lipflow doctor --no-camera
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Lip-read a sample video end to end
+        if: ${{ !cancelled() && steps.files.outputs.models == 'true' && steps.files.outputs.samples == 'true' }}
         run: uv run lipflow file samples/2016-03-12.mov --start 20.4 --end 28.1 --cleanup basic
+      - name: Lip-read a sample video end to end (SKIPPED, no sample clips)
+        if: ${{ !cancelled() && steps.files.outputs.samples != 'true' }}
+        shell: pwsh
+        run: |
+          Write-Host "::warning::SKIPPED end-to-end lip read: the sample clips could not be downloaded in this run. This is not a pass."

@@ -1,14 +1,12 @@
 """Lipflow: hold a key, mouth the words, let go — the text appears at your cursor."""
 from __future__ import annotations
 
-import json
 import os
 import queue
 import threading
 import time
 from dataclasses import dataclass
 
-import numpy as np
 import objc
 import Quartz
 from AppKit import (
@@ -20,14 +18,12 @@ from PyObjCTools import AppHelper
 
 from .camera import Camera, Recording, mouth_view
 from .cleanup import Cleaner
-from .face import mouth_rois
-from .hotkey import KEYS, PushToTalk
+from .hotkey import PushToTalk
 from .hud import HUD, symbol
 from AppKit import NSFontWeightRegular
 from .paste import copy_text, paste_text
 from .vsr import LipReader
 
-from .paths import HOME
 from .paths import WHO
 
 from .dictation import (  # noqa: F401  (onboarding/settings import the settings helpers from here)

@@ -1,20 +1,15 @@
 """Verify the redesigned onboarding UI, styling, and integration."""
 from __future__ import annotations
 
-import os
 from types import SimpleNamespace
 
 import pytest
 
 pytest.importorskip("AppKit", reason="Native onboarding design checks require macOS AppKit")
-from AppKit import NSColor
 
-from lipflow import onboarding
 from lipflow.cleanup import Cleaner
 from lipflow.onboarding import (
-    COLOR_BG_TINT,
     COLOR_GRAPHITE,
-    COLOR_MOSS,
     Onboarding,
     _ob_text,
     _text,

@@ -1,15 +1,20 @@
 """Push-to-talk timing (shared by macOS and Windows) and the Windows key mapping.
 
-Runs wherever pynput can load a keyboard backend (macOS, Windows, Linux with an X display)."""
+The timing tests are pure Python and run everywhere. The Windows key-mapping tests need real pynput
+key objects, so they run wherever pynput can load a keyboard backend (macOS, Windows, Linux with an
+X display; on headless Linux use `xvfb-run`). pynput's "dummy" backend can't stand in: all its keys
+compare equal."""
 import pytest
 
-try:
-    from pynput.keyboard import Key, KeyCode
-except ImportError as e:  # e.g. headless Linux: pynput's Xorg backend needs a DISPLAY
-    pytest.skip(f"pynput cannot load a keyboard backend on this host (no display?): {e}",
-                allow_module_level=True)
-
 from lipflow.ptt import DOUBLE_TAP, TAP_MAX, PushToTalkState
+
+
+def _pynput_keys():
+    try:
+        from pynput.keyboard import Key, KeyCode
+    except ImportError as e:  # e.g. headless Linux: pynput's Xorg backend needs a DISPLAY
+        pytest.skip(f"pynput cannot load a keyboard backend on this host (no display?): {e}")
+    return Key, KeyCode
 
 T = 1_000_000.0  # a realistic clock: last_tap starts at 0
 
@@ -74,6 +79,7 @@ def test_escape_cancels_hands_free():
 
 
 def test_windows_keys_map_through_pynput(monkeypatch):
+    Key, KeyCode = _pynput_keys()
     from lipflow.win.hotkey import KEYS, PushToTalk
     assert Key.ctrl_r in KEYS["right_control"] and Key.alt_gr in KEYS["right_alt"]
     ptt, log = make(PushToTalk, "right_control")
@@ -89,6 +95,7 @@ def test_windows_keys_map_through_pynput(monkeypatch):
 
 
 def test_windows_altgr_fake_ctrl_does_not_cancel(monkeypatch):
+    Key, _ = _pynput_keys()
     from lipflow.win.hotkey import PushToTalk
     monkeypatch.setattr(PushToTalk, "_mask_alt", staticmethod(lambda: None))  # would inject a real key
     ptt, log = make(PushToTalk, "right_alt")

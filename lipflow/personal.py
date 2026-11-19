@@ -144,7 +144,8 @@ class Personal:
     def __init__(self, path: str = PHRASES):
         self.phrases: list[str] = []
         if os.path.exists(path):
-            self.phrases = [l.strip() for l in open(path, encoding="utf-8") if l.strip()]
+            with open(path, encoding="utf-8") as f:
+                self.phrases = [l.strip() for l in f if l.strip()]
         self.uni, self.bi = Counter(), Counter()
         self.index = []
         for p in self.phrases:

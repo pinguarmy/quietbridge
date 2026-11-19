@@ -7,6 +7,10 @@ import sys
 
 WINDOWS = sys.platform == "win32"
 
+# Shared, downloaded weights (setup.sh / setup.ps1): the repository's models/ folder. Defined here,
+# not only in vsr.py, so `lipflow doctor` can check them without importing torch first.
+MODELS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models")
+
 if WINDOWS:  # %APPDATA%\Lipflow
     _DEFAULT_HOME = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "Lipflow")
 else:

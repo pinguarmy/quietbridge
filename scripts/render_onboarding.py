@@ -5,15 +5,13 @@ Pages supported: welcome, permissions, words, practice, train
 """
 from __future__ import annotations
 
-import os
 import subprocess
-import sys
 from types import SimpleNamespace
 
 from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
 from Foundation import NSDate, NSRunLoop
 
-from lipflow import camera, onboarding
+from lipflow import camera
 from lipflow.cleanup import Cleaner
 from lipflow.onboarding import Onboarding
 

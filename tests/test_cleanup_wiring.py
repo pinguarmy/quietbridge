@@ -35,18 +35,6 @@ def test_explicit_backend_and_style_beat_settings(monkeypatch):
 # -- CLI ------------------------------------------------------------------------
 
 
-def _require_cli_hotkey_backend():
-    """lipflow.__main__.main() imports the platform hotkey module before dispatching run/file:
-    lipflow/win/hotkey.py (pynput) on Windows, lipflow/hotkey.py (macOS Quartz) elsewhere."""
-    if sys.platform == "win32":
-        return
-    try:
-        import Quartz  # noqa: F401
-    except ImportError as e:
-        pytest.skip("lipflow CLI run/file import lipflow/hotkey.py, which needs macOS Quartz "
-                    f"(pyobjc-framework-quartz): {e}")
-
-
 def _capture_app(monkeypatch):
     captured = {}
 
@@ -59,7 +47,6 @@ def _capture_app(monkeypatch):
 
 
 def test_cli_run_passes_cleanup_and_style(monkeypatch):
-    _require_cli_hotkey_backend()
     captured = _capture_app(monkeypatch)
     main(["run", "--cleanup", "gemini", "--cleanup-style", "polish"])
     assert captured["backend"] == "gemini"
@@ -67,15 +54,13 @@ def test_cli_run_passes_cleanup_and_style(monkeypatch):
 
 
 def test_cli_run_defaults_leave_cleanup_to_settings(monkeypatch):
-    _require_cli_hotkey_backend()
     captured = _capture_app(monkeypatch)
     main([])
     assert captured["backend"] == "auto"
     assert captured["style"] is None
 
 
-def test_cli_file_passes_cleanup_style(monkeypatch, capsys):
-    _require_cli_hotkey_backend()
+def test_cli_file_passes_cleanup_style(monkeypatch, capsys, tmp_path):
     made = {}
 
     class FakeCleaner:
@@ -91,13 +76,17 @@ def test_cli_file_passes_cleanup_style(monkeypatch, capsys):
 
     # fake the heavy pipeline modules so the wiring is all that runs
     offline = types.ModuleType("lipflow.offline")
+    offline.ClipError = type("ClipError", (RuntimeError,), {})
     offline.transcribe_file = lambda *a, **k: "RAW WORDS"
     vsr = types.ModuleType("lipflow.vsr")
     vsr.LipReader = lambda beam_size: object()
     monkeypatch.setitem(sys.modules, "lipflow.offline", offline)
     monkeypatch.setitem(sys.modules, "lipflow.vsr", vsr)
     monkeypatch.setattr("lipflow.cleanup.Cleaner", FakeCleaner)
-    main(["file", "clip.mp4", "--cleanup", "gemini", "--cleanup-style", "polish"])
+    monkeypatch.setattr(main_mod, "_missing_models", lambda *rels: [])  # no downloaded weights needed
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"")
+    main(["file", str(clip), "--cleanup", "gemini", "--cleanup-style", "polish"])
     assert made == {"backend": "gemini", "style": "polish"}
     assert "polish" in capsys.readouterr().out
 

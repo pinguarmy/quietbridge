@@ -11,7 +11,6 @@ from pathlib import Path
 import random
 import time
 
-from lipflow.dictation import load_settings
 from lipflow.paths import HOME
 from lipflow.practice import saved_clips
 from lipflow.tune import generate_markdown_report, replay_evaluation

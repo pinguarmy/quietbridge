@@ -76,13 +76,13 @@ def save(rois, pasted: str, corrected: str, raw) -> str:
     os.makedirs(DIR, exist_ok=True)
     path = os.path.join(DIR, f"{int(time.time() * 1000)}.npz")
     np.savez_compressed(path, rois=rois, text=corrected, pasted=pasted, raw=np.array(raw))
-    for f in sorted(os.listdir(DIR))[:-KEEP]:
+    for f in sorted(f for f in os.listdir(DIR) if f.endswith(".npz"))[:-KEEP]:
         os.remove(os.path.join(DIR, f))
     return path
 
 
 def count() -> int:
-    return len(os.listdir(DIR)) if os.path.isdir(DIR) else 0
+    return sum(f.endswith(".npz") for f in os.listdir(DIR)) if os.path.isdir(DIR) else 0
 
 
 def load_all() -> list[dict]:
@@ -90,8 +90,15 @@ def load_all() -> list[dict]:
         return []
     out = []
     for f in sorted(os.listdir(DIR)):
-        d = np.load(os.path.join(DIR, f), allow_pickle=True)
-        out.append({"rois": d["rois"], "text": str(d["text"])})
+        if not f.endswith(".npz"):
+            continue
+        try:
+            # Only plain arrays are read back, so pickled objects are never loaded; `with` closes
+            # each archive (hundreds of them would otherwise stay open until garbage collection).
+            with np.load(os.path.join(DIR, f), allow_pickle=False) as d:
+                out.append({"rois": d["rois"], "text": str(d["text"])})
+        except (OSError, ValueError, KeyError, EOFError) as e:  # an interrupted save, or a stray file
+            print(f"[lipflow] skipping unreadable correction clip {f}: {e.__class__.__name__}")
     return out
 
 

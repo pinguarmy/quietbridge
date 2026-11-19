@@ -7,6 +7,8 @@ from lipflow.face import STABLE_REFERENCE, mouth_rois
 from lipflow.vsr import MODEL_FPS, LipReader
 
 SAMPLE = os.path.join(os.path.dirname(__file__), "..", "samples", "2016-03-12.mov")
+# CI sets this when it downloaded the clips, so a missing or misplaced clip fails instead of skipping.
+REQUIRE_SAMPLES = os.environ.get("LIPFLOW_REQUIRE_SAMPLES") == "1"
 
 
 def test_resample_to_25fps():
@@ -30,7 +32,8 @@ def test_tensor_layout():
     assert tuple(x.shape) == (1, 30, 88, 88)  # (C, T, H, W): the conv3d frontend wants B, C, T, H, W
 
 
-@pytest.mark.skipif(not os.path.exists(SAMPLE), reason="run ./setup.sh --samples")
+@pytest.mark.skipif(not os.path.exists(SAMPLE) and not REQUIRE_SAMPLES,
+                    reason="sample clip missing: run ./setup.sh --samples (Windows: setup.ps1 -Samples)")
 def test_reads_a_real_clip():
     from lipflow.offline import transcribe_file
     text = transcribe_file(SAMPLE, LipReader(beam_size=10), 20.4, 28.1)

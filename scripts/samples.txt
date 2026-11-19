@@ -1,0 +1,8 @@
+# Optional sample clips for setup.sh --samples / setup.ps1 -Samples. One per line:
+#   URL  destination  minimum-bytes
+# Public-domain White House weekly addresses (Wikimedia Commons), used by tests/test_pipeline.py and
+# the Windows CI end-to-end step. Wikimedia rate-limits (HTTP 429), so these are best effort: a failure
+# warns and the sample-dependent checks are skipped, unless --strict-samples / -StrictSamples is given.
+# CI caches samples/ keyed on this file's hash.
+https://upload.wikimedia.org/wikipedia/commons/transcoded/c/ce/2016-03-12_President_Obama%27s_Weekly_Address.webm/2016-03-12_President_Obama%27s_Weekly_Address.webm.360p.mpeg4.mov  samples/2016-03-12.mov  1000000
+https://upload.wikimedia.org/wikipedia/commons/transcoded/2/29/2017-01-07_President_Obama%27s_Weekly_Address.webm/2017-01-07_President_Obama%27s_Weekly_Address.webm.360p.mpeg4.mov  samples/2017-01-07.mov  1000000

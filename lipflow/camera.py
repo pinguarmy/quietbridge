@@ -10,6 +10,7 @@ recording, so the green light isn't on all day.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -19,6 +20,18 @@ import numpy as np
 
 from .face import FaceObs, FaceTracker
 from .paths import WHO, WINDOWS
+
+NO_FRAME_TIMEOUT = 5.0  # seconds of failed reads before an open camera counts as gone (unplugged, taken)
+
+
+def _backend() -> int:
+    """OpenCV capture API: DirectShow on Windows (fast, keeps Windows' camera order), AVFoundation on
+    macOS, and OpenCV's own choice elsewhere (V4L2 on Linux; AVFoundation doesn't exist there)."""
+    if WINDOWS:
+        return cv2.CAP_DSHOW
+    if sys.platform == "darwin":
+        return cv2.CAP_AVFOUNDATION
+    return cv2.CAP_ANY
 
 
 @dataclass
@@ -47,7 +60,7 @@ def list_cameras() -> list[dict]:
     """Cameras in OpenCV's index order. OpenCV's AVFoundation backend sorts devices by uniqueID,
     which is *not* macOS's order, so a Continuity Camera iPhone often lands at index 0.
     On Windows OpenCV can't name cameras, so this is empty and cameras are picked by number."""
-    if WINDOWS:
+    if sys.platform != "darwin":  # only macOS names cameras here (AVFoundation)
         return []
     from AVFoundation import AVCaptureDevice, AVMediaTypeMuxed, AVMediaTypeVideo
     devs = list(AVCaptureDevice.devicesWithMediaType_(AVMediaTypeVideo)) + \
@@ -83,6 +96,7 @@ class Camera:
         self.idle_close = idle_close
         self.on_frame = on_frame  # (bgr, FaceObs | None, recording: bool) -> None
         self._cap = None
+        self._file_fps: "float | None" = None  # set by _open when a video file stands in for the camera
         self._thread = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
@@ -138,18 +152,19 @@ class Camera:
     def _open(self):
         if isinstance(self.index, str) and os.path.exists(self.index):  # a video file standing in for the webcam (testing / demos)
             cap = cv2.VideoCapture(self.index)
-            self._file_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
             if not cap.isOpened():
+                cap.release()
                 raise RuntimeError(f"Could not open {self.index}")
+            self._file_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
             return cap
         self._file_fps = None
         idx = resolve_camera(self.index)
-        # DirectShow opens fast and keeps the order Windows lists cameras in; MSMF can take seconds.
-        cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW if WINDOWS else cv2.CAP_AVFOUNDATION)
+        cap = cv2.VideoCapture(idx, _backend())
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         cap.set(cv2.CAP_PROP_FPS, 30)
         if not cap.isOpened():
+            cap.release()
             if WINDOWS:
                 raise RuntimeError("Could not open the camera. Turn on Settings → Privacy & security → Camera → "
                                    "Let desktop apps access your camera, and close other apps using it")
@@ -157,17 +172,24 @@ class Camera:
                                "Settings → Privacy & Security → Camera")
         return cap
 
+    def _idle(self, now: float) -> bool:
+        return self._rec is None and not self.track_always and now - self._last_used > self.idle_close
+
     def _run(self):
+        cap = None
         try:
-            self._cap = self._open()
+            cap = self._open()
             if self._tracker is None:
                 self._tracker = FaceTracker()
             self.error = None
         except Exception as e:
+            if cap is not None:  # e.g. the face model is missing: don't leave the camera light on
+                cap.release()
             self.error = str(e)
             print(f"[camera] {e}")
             return
-        t0 = time.time()
+        self._cap = cap
+        t0 = last_frame = time.time()
         warm = n_read = 0
         try:
             while not self._stop.is_set():
@@ -177,8 +199,18 @@ class Camera:
                     time.sleep(max(0.0, t0 + n_read / self._file_fps - time.time()))
                 now = time.time()
                 if not ok:
+                    if self._file_fps:  # end of the stand-in video; the next recording reopens it
+                        break
+                    if now - last_frame > NO_FRAME_TIMEOUT:
+                        self.error = ("The camera stopped sending frames. Check that it is connected and "
+                                      "not in use by another app")
+                        print(f"[camera] {self.error}")
+                        break
+                    if self._idle(now):
+                        break
                     time.sleep(0.01)
                     continue
+                last_frame = now
                 warm += 1
                 if warm == 3:  # first frames are often black while exposure settles
                     self.ready.set()
@@ -198,7 +230,7 @@ class Camera:
                         self.on_frame(frame, obs, rec is not None)
                     except Exception as e:  # UI errors must not kill capture
                         print(f"[camera] on_frame: {e}")
-                if rec is None and not self.track_always and now - self._last_used > self.idle_close:
+                if rec is None and self._idle(now):
                     break
         finally:
             self._cap.release()

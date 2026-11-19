@@ -6,37 +6,30 @@ Training holds 6 of them out and only keeps the face model if it reads those bet
 """
 from __future__ import annotations
 
-import glob
 import os
-import random
-import re
 import shlex
 import subprocess
 import threading
-import time
 
-import numpy as np
 import objc
 import Quartz
 from AppKit import (
-    NSApp, NSBackingStoreBuffered, NSButton, NSColor, NSFont, NSFontWeightBold,
+    NSBackingStoreBuffered, NSButton, NSColor, NSFont, NSFontWeightBold,
     NSFontWeightMedium, NSFontWeightRegular, NSFontWeightSemibold, NSImageScaleProportionallyUpOrDown,
     NSImageView, NSMakeRect, NSProgressIndicator, NSTextAlignmentCenter, NSTextField, NSView, NSWindow,
-    NSWindowStyleMaskBorderless, NSWindowStyleMaskClosable, NSWindowStyleMaskFullSizeContentView, NSWindowStyleMaskTitled,
-    NSAttributedString, NSFontAttributeName, NSForegroundColorAttributeName, NSMutableParagraphStyle,
+    NSWindowStyleMaskBorderless, NSAttributedString, NSFontAttributeName, NSForegroundColorAttributeName, NSMutableParagraphStyle,
     NSParagraphStyleAttributeName, NSAppearance,
 )
 from Foundation import NSObject, NSTimer
 from PyObjCTools import AppHelper
 
-from .hud import ACCENT, AMBER, GREEN, _glass, _nsimage, _rgb, symbol
+from .hud import _nsimage, _rgb, symbol
 
-from .paths import HOME as DIR
 from .practice import CLIPS, N_HELD_OUT, N_SENTENCES, practice_sentences, save_clip, saved_clips  # noqa: F401
 
 WW, WH = 620, 600
 
-# Palette - Native Light Solid / Moss (FRONTEND_BRIEF.md)
+# Palette - Native Light Solid / Moss (docs/archive/FRONTEND_BRIEF.md)
 # 雾白 #F5F7F4, 石墨 #202923, 分隔线 #DCE3DC, 苔绿 #356B50, 次要文本 #5A695E
 COLOR_BG_TINT = (0.961, 0.969, 0.957)     # #F5F7F4
 COLOR_GRAPHITE = (0.125, 0.161, 0.137)    # #202923

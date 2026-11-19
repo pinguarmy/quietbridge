@@ -19,7 +19,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .vsr import MODELS, LipReader, _MEAN, _STD
+from .vsr import LipReader, _MEAN, _STD
 
 from .paths import PERSONAL_VSR
 

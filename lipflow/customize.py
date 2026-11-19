@@ -5,7 +5,6 @@ seeding generic starter vocabulary, and updating settings profile options.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 from typing import Any, Iterable

@@ -4,7 +4,10 @@ name: linux
 # software contracts only, never recognition accuracy or real-user effectiveness.
 
 on:
+  # Pushes to main, and every pull request (which covers its branch). A commit pushed to a branch
+  # without a PR is not run automatically; use "Run workflow" (workflow_dispatch) for that.
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -12,8 +15,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # A newer push to a PR supersedes the older run; every commit on main keeps its own result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -41,11 +45,13 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Install locked dependencies
+        id: sync
         run: uv sync --frozen
       - name: Product entry point
         run: uv run quietbridge --help
 
       - name: Browser contracts and deliberate-fault sensitivity (silent rehearsal)
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
         run: |
           CHROME_BIN="$(command -v google-chrome || command -v google-chrome-stable || true)"
           if [ -z "$CHROME_BIN" ]; then echo "Chrome missing; browser contracts were not checked" >&2; exit 1; fi
@@ -56,5 +62,35 @@ jobs:
           node scripts/check_web.mjs --calibrate
           node scripts/check_web.mjs --keyboard-profile
 
-      - name: Tests (headless; platform-, display- and model-dependent tests skip with reasons)
-        run: uv run pytest -q -rs
+      # This runner has no models and no camera, so the doctor must report the models as missing
+      # (exit 1) and the dictation app as not applicable. The step fails if the doctor crashes, misses
+      # the absent models (a false pass), or gives any other exit code; the full report stays in the log.
+      - name: lipflow doctor (reports missing models on this model-less runner)
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        shell: bash
+        run: |
+          set +e
+          uv run lipflow doctor > doctor.txt 2>&1
+          code=$?
+          set -e
+          cat doctor.txt
+          fail() { echo "::error::lipflow doctor: $*"; exit 1; }
+          grep -q '^Summary:' doctor.txt || fail "did not reach its summary (crash?)"
+          if grep -q 'Traceback' doctor.txt; then fail "printed a traceback"; fi
+          grep -q '^  FAIL  models/vsr/model.pth: missing' doctor.txt || fail "did not report the missing models"
+          grep -q '^  N/A   Lipflow menu-bar' doctor.txt || fail "did not mark the dictation app not applicable"
+          grep -Eq '^  (PASS|WARN)  camera' doctor.txt || fail "reported no camera result"
+          [ "$code" -eq 1 ] || fail "expected exit code 1 (models absent by design), got $code"
+          echo "::notice::lipflow doctor: required model files are absent on this runner by design; other results are in the log."
+
+      # Under Xvfb, pynput can load its X backend, so the Windows push-to-talk key-mapping tests run too.
+      - name: Tests (headless; platform- and model-dependent tests skip with reasons)
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        shell: bash
+        run: |
+          if command -v xvfb-run >/dev/null; then
+            xvfb-run -a uv run pytest -q -rs
+          else
+            echo "::warning::xvfb-run is missing; display-dependent tests will skip"
+            uv run pytest -q -rs
+          fi

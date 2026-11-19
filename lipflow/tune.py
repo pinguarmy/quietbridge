@@ -18,7 +18,7 @@ import os
 import re
 import sys
 import time
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 # Lazy imports to ensure --help and metrics can run without heavy models or PyTorch
 def _words_of(text: str) -> list[str]:
@@ -401,7 +401,7 @@ def replay_evaluation(
 def generate_markdown_report(report: dict[str, Any]) -> str:
     """Format evaluation results into a clean, concise Markdown summary."""
     lines = [
-        f"# Lipflow Model Tuning & Replay Report",
+        "# Lipflow Model Tuning & Replay Report",
         "",
         f"- **Backend**: `{report.get('backend')}` (Style: `{report.get('style')}`, Model: `{report.get('model')}`)",
         f"- **Evaluated Samples**: {report.get('sample_count')}",

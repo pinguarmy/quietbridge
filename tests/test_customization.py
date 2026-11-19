@@ -1,9 +1,6 @@
 """Tests for customization, practice corpus generation, tuning replay, and metrics logic."""
 from __future__ import annotations
 
-import json
-import os
-import pytest
 
 from lipflow import customize, dictation, practice, tune
 

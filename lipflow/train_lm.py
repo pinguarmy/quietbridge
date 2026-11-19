@@ -56,6 +56,11 @@ def normalise(line: str) -> list[str]:
 
 class Tok:
     def __init__(self, token_list: list[str]):
+        if not os.path.isfile(SPM):
+            setup = r".\setup.ps1" if os.name == "nt" else "./setup.sh"
+            raise FileNotFoundError(
+                f"SentencePiece tokenizer not found at {SPM}. Training needs it; download the models "
+                f"with {setup} (it fetches models/lm/unigram5000.model), then try again.")
         import sentencepiece as spm
         self.sp = spm.SentencePieceProcessor(model_file=SPM)
         self.id = {t: i for i, t in enumerate(token_list)}
@@ -104,7 +109,6 @@ def train(
 ) -> dict:
     from espnet.asr.asr_utils import get_model_conf, torch_load
     from espnet.nets.lm_interface import dynamic_import_lm
-    from .vsr import LipReader
 
     target_path: Path | None = None
     if output_path is not None:
@@ -115,31 +119,36 @@ def train(
     random.seed(seed)
     torch.manual_seed(seed)
 
-    units = os.path.join(os.path.dirname(__file__), "unigram5000_units.txt")
-    token_list = ["<blank>"] + [l.split()[0] for l in open(units, encoding="utf-8").read().splitlines()] + ["<eos>"]
-    eos = len(token_list) - 1
-    tok = Tok(token_list)
-
+    # Validate the inputs before loading any asset, so bad phrases get the error about phrases.
     if phrases is None:
         if not os.path.exists(PHRASES):
             raise FileNotFoundError("No phrases yet. Run `lipflow import-wispr` first.")
-        tr_sents = sorted({s for line in open(PHRASES, encoding="utf-8") for s in normalise(line)})
+        with open(PHRASES, encoding="utf-8") as f:
+            tr_sents = sorted({s for line in f for s in normalise(line)})
     else:
         tr_sents = [s for line in phrases for s in normalise(line)]
-
+    val_sents = None
     if validation_phrases is not None:
         val_sents = [s for line in validation_phrases for s in normalise(line)]
         if not tr_sents:
             raise ValueError("No valid training sentences after normalization")
         if not val_sents:
             raise ValueError("No valid validation sentences after normalization")
+    elif not tr_sents:
+        raise ValueError("No valid sentences found")
+
+    units = os.path.join(os.path.dirname(__file__), "unigram5000_units.txt")
+    with open(units, encoding="utf-8") as f:
+        token_list = ["<blank>"] + [l.split()[0] for l in f.read().splitlines()] + ["<eos>"]
+    eos = len(token_list) - 1
+    tok = Tok(token_list)
+
+    if val_sents is not None:
         val = [tok(s)[:58] for s in val_sents]
         tr = [tok(s)[:58] for s in tr_sents]
         all_sents = tr_sents + val_sents
     else:
         sents = tr_sents
-        if not sents:
-            raise ValueError("No valid sentences found")
         random.shuffle(sents)
         seqs = [tok(s)[:58] for s in sents]
         n_val = max(20, len(seqs) // 10)

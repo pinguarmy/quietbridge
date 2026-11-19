@@ -3,7 +3,8 @@
 Same vocabulary and language model as the lip reader; the encoder fuses a visual stream (the mouth
 crops) with an audio stream (16 kHz waveform, 640 samples per 25 fps video frame). Audio is
 layer-normalised per clip, so a whisper's low volume doesn't matter, only its shape.
-Weights: nguyenvulebinh/auto_avsr_av_trlrwlrs2lrs3vox2avsp_base (downloaded by setup.sh).
+Weights: nguyenvulebinh/auto_avsr_av_trlrwlrs2lrs3vox2avsp_base (downloaded by the app the first time
+whisper mode is turned on; see download()).
 """
 from __future__ import annotations
 
@@ -24,24 +25,41 @@ SAMPLES_PER_FRAME = 640  # 16 kHz / 25 fps
 URL = "https://huggingface.co/nguyenvulebinh/auto_avsr_av_trlrwlrs2lrs3vox2avsp_base/resolve/main/"
 
 
-def download(progress=None):
-    """Fetch config + weights (1.8 GB) into models/av, resumable via a .part file."""
+def download(progress=None, timeout: float = 60.0):
+    """Fetch config + weights (1.8 GB) into models/av. An interrupted download resumes from its .part
+    file on the next call; files appear under their final names only once complete."""
     import urllib.request
     os.makedirs(AV_DIR, exist_ok=True)
-    urllib.request.urlretrieve(URL + "config.json", os.path.join(AV_DIR, "config.json"))
+    headers = {"User-Agent": "lipflow/0.1"}
+    config = os.path.join(AV_DIR, "config.json")
+    if not os.path.exists(config):
+        req = urllib.request.Request(URL + "config.json", headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as r, open(config + ".part", "wb") as f:
+            f.write(r.read())
+        os.replace(config + ".part", config)
     dest = os.path.join(AV_DIR, "model.safetensors")
     part = dest + ".part"
-    with urllib.request.urlopen(URL + "model.safetensors") as r, open(part, "wb") as f:
-        total = int(r.headers.get("Content-Length") or 0)
-        done = 0
-        while True:
-            buf = r.read(1 << 20)
-            if not buf:
-                break
-            f.write(buf)
-            done += len(buf)
-            if progress and total and done % (50 << 20) < (1 << 20):
-                progress(100 * done / total)
+    offset = os.path.getsize(part) if os.path.exists(part) else 0
+    req = urllib.request.Request(URL + "model.safetensors",
+                                 headers=headers | ({"Range": f"bytes={offset}-"} if offset else {}))
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        resume = offset and r.status == 206 and \
+            r.headers.get("Content-Range", "").startswith(f"bytes {offset}-")
+        done = offset if resume else 0
+        total = done + int(r.headers.get("Content-Length") or 0)
+        next_report = done
+        with open(part, "ab" if resume else "wb") as f:
+            while True:
+                buf = r.read(1 << 20)
+                if not buf:
+                    break
+                f.write(buf)
+                done += len(buf)
+                if progress and total and done >= next_report:
+                    progress(100 * done / total)
+                    next_report = done + (50 << 20)
+    if total and done != total:
+        raise OSError(f"model.safetensors download ended early ({done} of {total} bytes); retry to resume")
     os.replace(part, dest)
 
 
@@ -54,11 +72,16 @@ class AVReader(LipReader):
     the AV model's own decoder and CTC head replace the lip-only ones."""
 
     def __init__(self, beam_size: int = 4, **kw):
+        try:
+            from safetensors.torch import load_file
+        except ImportError as e:  # a dependency of mlx-lm, so only macOS installs have it today
+            raise RuntimeError("Whisper mode needs the safetensors package, which this install lacks "
+                               "(add it with `uv add safetensors`)") from e
         super().__init__(beam_size=beam_size, **kw)
-        from safetensors.torch import load_file
         from espnet.nets.pytorch_backend.e2e_asr_transformer_av import E2E as AVE2E
         from espnet.nets.scorers.ctc import CTCPrefixScorer
-        cfg = json.load(open(os.path.join(AV_DIR, "config.json"), encoding="utf-8"))
+        with open(os.path.join(AV_DIR, "config.json"), encoding="utf-8") as f:
+            cfg = json.load(f)
         args = argparse.Namespace(**cfg, report_cer=False, report_wer=False, char_list=None,
                                   sym_space=" ", sym_blank="<blank>")
         av = AVE2E(cfg["odim"], args)
@@ -113,16 +136,15 @@ class AVReader(LipReader):
 def load_audio(path: str, start: float, end: float) -> np.ndarray:
     """16 kHz mono float32 audio from a video file (for tests and evaluation)."""
     import av as pyav
-    c = pyav.open(path)
     rs = pyav.AudioResampler(format="flt", layout="mono", rate=16000)
     chunks = []
-    for frame in c.decode(audio=0):
-        t = float(frame.pts * frame.time_base)
-        if t > end + 0.5:
-            break
-        for f in rs.resample(frame):
-            chunks.append(f.to_ndarray().reshape(-1))
-    c.close()
+    with pyav.open(path) as c:
+        for frame in c.decode(audio=0):
+            t = float(frame.pts * frame.time_base)
+            if t > end + 0.5:
+                break
+            for f in rs.resample(frame):
+                chunks.append(f.to_ndarray().reshape(-1))
     wave = np.concatenate(chunks) if chunks else np.zeros(0, np.float32)
     s = int(start * 16000)
     return wave[s:s + int((end - start) * 16000)]
