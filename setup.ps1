@@ -7,7 +7,8 @@
 #
 # Downloads come from scripts/models.txt and scripts/samples.txt (shared with setup.sh). Each is retried
 # with backoff (honouring Retry-After) and resumed from its .part file. Tunables for CI:
-#   LIPFLOW_DOWNLOAD_RETRIES (default 6), LIPFLOW_DOWNLOAD_BACKOFF (first wait in seconds, default 5).
+#   LIPFLOW_DOWNLOAD_RETRIES (default 6), LIPFLOW_DOWNLOAD_BACKOFF (first wait in seconds, default 5),
+#   LIPFLOW_DOWNLOAD_MAX_WAIT (longest single wait in seconds, default 60, also caps Retry-After).
 param([switch]$Samples, [switch]$StrictSamples, [switch]$NoShortcut)
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"  # Invoke-WebRequest is 10x slower with the progress bar
@@ -19,7 +20,7 @@ if ($StrictSamples) { $Samples = $true }
 $UA = "lipflow-setup/0.1 (model and sample downloader; curl)"
 $Retries = if ($env:LIPFLOW_DOWNLOAD_RETRIES) { [int]$env:LIPFLOW_DOWNLOAD_RETRIES } else { 6 }
 $Backoff = if ($env:LIPFLOW_DOWNLOAD_BACKOFF) { [int]$env:LIPFLOW_DOWNLOAD_BACKOFF } else { 5 }
-$MaxWait = 300
+$MaxWait = if ($env:LIPFLOW_DOWNLOAD_MAX_WAIT) { [int]$env:LIPFLOW_DOWNLOAD_MAX_WAIT } else { 60 }
 
 function Write-SetupWarning($msg) {
     Write-Warning $msg

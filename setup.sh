@@ -9,14 +9,15 @@
 #
 # Downloads come from scripts/models.txt and scripts/samples.txt. Each is retried with backoff
 # (honouring Retry-After) and resumed from its .part file. Tunables for CI and tests:
-#   LIPFLOW_DOWNLOAD_RETRIES (default 6), LIPFLOW_DOWNLOAD_BACKOFF (first wait in seconds, default 5).
+#   LIPFLOW_DOWNLOAD_RETRIES (default 6), LIPFLOW_DOWNLOAD_BACKOFF (first wait in seconds, default 5),
+#   LIPFLOW_DOWNLOAD_MAX_WAIT (longest single wait in seconds, default 60, also caps Retry-After).
 set -euo pipefail
 
 # A generic, descriptive client name: Wikimedia throttles default library user agents.
 UA="lipflow-setup/0.1 (model and sample downloader; curl)"
 RETRIES="${LIPFLOW_DOWNLOAD_RETRIES:-6}"
 BACKOFF="${LIPFLOW_DOWNLOAD_BACKOFF:-5}"
-MAX_WAIT=300
+MAX_WAIT="${LIPFLOW_DOWNLOAD_MAX_WAIT:-60}"
 
 warn() {
   echo "WARNING: $*" >&2

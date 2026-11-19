@@ -25,7 +25,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     env:
-      LIPFLOW_DOWNLOAD_RETRIES: "6"
+      # Bounded so a rate-limited sample clip costs about a minute, not the job's time limit.
+      LIPFLOW_DOWNLOAD_RETRIES: "4"
+      LIPFLOW_DOWNLOAD_MAX_WAIT: "20"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
