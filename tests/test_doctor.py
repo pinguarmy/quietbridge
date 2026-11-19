@@ -76,10 +76,10 @@ def _fake_quietbridge(monkeypatch, tmp_path, *, model_bytes=None, backend=None):
     path = tmp_path / "gesture_recognizer.task"
     if model_bytes is not None:
         path.write_bytes(model_bytes)
-    assets = types.ModuleType("hackathon.signs.assets")
+    assets = types.ModuleType("quietbridge.signs.assets")
     assets.MODEL_SHA256 = "0" * 64
     assets.default_model_path = lambda: path
-    monkeypatch.setitem(sys.modules, "hackathon.signs.assets", assets)
+    monkeypatch.setitem(sys.modules, "quietbridge.signs.assets", assets)
 
     class Speaker:
         def __init__(self):
@@ -91,9 +91,9 @@ def _fake_quietbridge(monkeypatch, tmp_path, *, model_bytes=None, backend=None):
         def _unavailable_message(self):
             return "install espeak-ng."
 
-    speech = types.ModuleType("hackathon.speech")
+    speech = types.ModuleType("quietbridge.speech")
     speech.Speaker = Speaker
-    monkeypatch.setitem(sys.modules, "hackathon.speech", speech)
+    monkeypatch.setitem(sys.modules, "quietbridge.speech", speech)
 
 
 def test_quietbridge_missing_gesture_model_and_speech_warn(monkeypatch, tmp_path):
@@ -101,7 +101,7 @@ def test_quietbridge_missing_gesture_model_and_speech_warn(monkeypatch, tmp_path
     rep = _report()
     doctor.check_quietbridge(rep)
     out = rep.out.getvalue()
-    assert "WARN  stock gesture model: missing" in out and "hackathon.signs.assets --download" in out
+    assert "WARN  stock gesture model: missing" in out and "quietbridge.signs.assets --download" in out
     assert "WARN  local speech: no backend found" in out and "install espeak-ng." in out
     assert not rep.failures
 

@@ -22,7 +22,7 @@ The BSL-1K exporter consumes an externally installed upstream source, checkpoint
 Start the local recording lab with the **same trusted bundle**:
 
 ```sh
-uv run python -m hackathon.signs.lab \
+uv run python -m quietbridge.signs.lab \
   --sign-model /absolute/path/to/bsl-bundle/manifest.json
 ```
 
@@ -31,7 +31,7 @@ In **Paired**, choose **Standard sign + lips · local video**. Select an enabled
 Use separate recording occasions for practice, validation and final test. Then compare lips-only, signs-only and fusion on the same video pairs:
 
 ```sh
-uv run python -m hackathon.evaluate_fusion \
+uv run python -m quietbridge.evaluate_fusion \
   --profile alice --split validation \
   --sign-model /absolute/path/to/bsl-bundle/manifest.json \
   --output /absolute/path/to/new-sign-comparison.json

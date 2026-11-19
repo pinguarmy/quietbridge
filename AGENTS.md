@@ -20,7 +20,7 @@ The product lead coordinates architecture and shared files. Delegated work must 
 
 ## Recognition architecture
 
-- Reuse Auto-AVSR and face processing from `lipflow/`; keep product work in `hackathon/`.
+- Reuse Auto-AVSR and face processing from `lipflow/`; keep product work in `quietbridge/`.
 - One camera feeds independent workers. Idle preview keeps only the latest frame; active capture uses a bounded 90-frame chronological buffer and reports overflow drops. Record actual input fps, raw frame count and gaps; resampling to 25 fps does not create missing motion.
 - Lip results retain ordered candidates, decoder scores and capture timing. Decoder scores are not calibrated probabilities. Camera sessions use mouth-activity endpoints with bounded pre-roll; geometric mouth opening is a segmentation hint, not speech confidence.
 - Explicit `--sign-model` selects a local, hashed isolated-sign bundle instead of stock/personal gestures. Use language-specific class ordering and preprocessing. Standard signs share an explicit window with lips and always need confirmation. Do not download, redistribute or activate artifacts without checking their separate source/weight/data rights. A high softmax score is not an UNKNOWN/REST guarantee.
@@ -35,7 +35,7 @@ The product lead coordinates architecture and shared files. Delegated work must 
 ```sh
 uv run lipflow doctor
 uv run pytest
-node --check hackathon/ui/app.js
+node --check quietbridge/ui/app.js
 ```
 
 Run focused checks while developing and the full suite before handoff. Synthetic events, fake backends and rehearsal validate contracts, not camera accuracy. Test real camera input, real models and audible speech separately.

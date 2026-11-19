@@ -38,12 +38,12 @@ Install [uv](https://docs.astral.sh/uv/), clone this repository, then from the c
 
 ```sh
 uv sync --frozen                                   # Python dependencies (large: includes PyTorch)
-uv run python -m hackathon.assets --download       # lip-reading and face models, ~1.2 GB (LRS3: non-commercial research use)
-uv run python -m hackathon.signs.assets --download # stock MediaPipe gesture model
+uv run python -m quietbridge.assets --download       # lip-reading and face models, ~1.2 GB (LRS3: non-commercial research use)
+uv run python -m quietbridge.signs.assets --download # stock MediaPipe gesture model
 uv run quietbridge --browser-camera --open         # serves http://127.0.0.1:8765 and opens it
 ```
 
-The two downloads are needed only for camera input: without them the server still starts, typing works and lip reading is reported as unavailable. `quietbridge` is the same as `python -m hackathon.server`; `uv run quietbridge --help` lists every option. Without `--open`, visit <http://127.0.0.1:8765> yourself. To look at the page with synthetic inputs and no camera or model loading, run `uv run quietbridge --rehearsal`; rehearsal does not validate recognition. Stock models and gestures are the default; select a profile explicitly with `--profile alice`.
+The two downloads are needed only for camera input: without them the server still starts, typing works and lip reading is reported as unavailable. `quietbridge` is the same as `python -m quietbridge.server`; `uv run quietbridge --help` lists every option. Without `--open`, visit <http://127.0.0.1:8765> yourself. To look at the page with synthetic inputs and no camera or model loading, run `uv run quietbridge --rehearsal`; rehearsal does not validate recognition. Stock models and gestures are the default; select a profile explicitly with `--profile alice`.
 
 ## Using the page
 
@@ -69,7 +69,7 @@ Details, including recording windows, profiles, model reloads, corrections and t
 | [Verification](docs/verification.md) | Test commands, CI, and what each does and does not prove |
 | [Review protocol](docs/review-protocol.md) | How the product is reviewed; current evidence and gaps |
 | [Recognition audit](docs/recognition-audit.md) | Capabilities, fixed defects and what would establish an accuracy gain |
-| [hackathon/README.md](hackathon/README.md) | Developer notes: contracts and runtime invariants |
+| [quietbridge/README.md](quietbridge/README.md) | Developer notes: contracts and runtime invariants |
 | [docs/README.md](docs/README.md) | Index of all docs, including archived history |
 
 ## References, licensing and privacy

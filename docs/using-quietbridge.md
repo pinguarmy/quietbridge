@@ -1,6 +1,6 @@
 # Using QuietBridge
 
-Reference for the main communication page, profiles and personalization. Start with the [README quick start](../README.md#quick-start). Command examples use `uv run quietbridge`, which is the same as `uv run python -m hackathon.server`.
+Reference for the main communication page, profiles and personalization. Start with the [README quick start](../README.md#quick-start). Command examples use `uv run quietbridge`, which is the same as `uv run python -m quietbridge.server`.
 
 ## Profiles and data
 
@@ -31,7 +31,7 @@ Choose **Personalize** in the main app to create a profile, customize gestures a
 You can still run the recording lab separately:
 
 ```sh
-uv run python -m hackathon.signs.lab
+uv run python -m quietbridge.signs.lab
 ```
 
 Open <http://127.0.0.1:8766>, or choose **Personalize** in the main app. New profiles begin with **Choose phrases**, then **Practice**, **Check on another occasion**, **Final check** and **Activate**. These remain separate train, validation and test recording sessions. Gesture details expand individually; internal labels and sentence templates stay under Advanced. Capture statistics and session IDs are optional details. The model page shows one training action for the selected model type and preserves explicit activation and rollback.

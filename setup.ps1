@@ -145,6 +145,6 @@ if (-not $NoShortcut) {
 Write-Host ""
 Write-Host "Done. Open Lipflow from the Start menu (it lives in the system tray, next to the clock)."
 Write-Host "The first launch walks you through your Wispr Flow words and ~24 practice sentences."
-Write-Host "QuietBridge: uv run quietbridge   Optional stock gesture model: uv run python -m hackathon.signs.assets --download"
+Write-Host "QuietBridge: uv run quietbridge   Optional stock gesture model: uv run python -m quietbridge.signs.assets --download"
 Write-Host "Check everything with:  uv run lipflow doctor"
 if ($sampleProblem -and $StrictSamples) { exit 1 }

@@ -64,9 +64,9 @@ class Report:
 
 def _setup_hint(rel: str = "") -> str:
     script = r"run .\setup.ps1" if sys.platform == "win32" else "run ./setup.sh"
-    if rel == "lm/unigram5000.model":  # hackathon.assets does not fetch the tokenizer
+    if rel == "lm/unigram5000.model":  # quietbridge.assets does not fetch the tokenizer
         return script
-    return script + " (or: uv run python -m hackathon.assets --download)"
+    return script + " (or: uv run python -m quietbridge.assets --download)"
 
 
 def _mb(n: float) -> str:
@@ -182,14 +182,14 @@ def check_dictation_app(rep: Report):
 
 
 def check_quietbridge(rep: Report):
-    """Prerequisites the QuietBridge app (hackathon/) points its users at this command for."""
+    """Prerequisites the QuietBridge app (quietbridge/) points its users at this command for."""
     try:
-        from hackathon.signs.assets import MODEL_SHA256, default_model_path
+        from quietbridge.signs.assets import MODEL_SHA256, default_model_path
     except Exception as e:  # noqa: BLE001
-        rep.add("SKIP", f"stock gesture model: could not import hackathon.signs.assets ({e})")
+        rep.add("SKIP", f"stock gesture model: could not import quietbridge.signs.assets ({e})")
     else:
         path = default_model_path()
-        download = "uv run python -m hackathon.signs.assets --download"
+        download = "uv run python -m quietbridge.signs.assets --download"
         if not path.is_file():
             rep.add("WARN", f"stock gesture model: missing at {path}; typing and lip reading work without it",
                     download)
@@ -203,11 +203,11 @@ def check_quietbridge(rep: Report):
                                                          else "SHA-256 differs from the pinned version"),
                       f"move the file away, then {download}")
     try:
-        from hackathon.speech import Speaker
+        from quietbridge.speech import Speaker
         speaker = Speaker()
         backend = speaker.backend
     except Exception as e:  # noqa: BLE001
-        rep.add("SKIP", f"local speech: could not query hackathon.speech.Speaker ({e})")
+        rep.add("SKIP", f"local speech: could not query quietbridge.speech.Speaker ({e})")
         return
     if backend:
         exe = getattr(speaker, "_resolve", lambda: (backend, None))()[1]

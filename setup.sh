@@ -138,7 +138,7 @@ main() {
     echo "Done. Start QuietBridge with: uv run quietbridge"
     echo "(The Lipflow menu-bar dictation app is macOS/Windows only; \`uv run lipflow file VIDEO\` works here.)"
   fi
-  echo "Optional stock gesture model: uv run python -m hackathon.signs.assets --download"
+  echo "Optional stock gesture model: uv run python -m quietbridge.signs.assets --download"
   echo "Check everything with: uv run lipflow doctor"
 }
 

@@ -19,9 +19,9 @@ import threading
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from hackathon.profiles import ProfileManager
-from hackathon.runtime import Runtime
-from hackathon import server as server_module
+from quietbridge.profiles import ProfileManager
+from quietbridge.runtime import Runtime
+from quietbridge import server as server_module
 
 
 class SilentSpeaker:
@@ -44,7 +44,7 @@ def replace_once(source, old, new):
 
 
 def prepare_ui(destination, variant):
-    shutil.copytree(ROOT / 'hackathon/ui', destination)
+    shutil.copytree(ROOT / 'quietbridge/ui', destination)
     app = destination / 'app.js'
     source = app.read_text()
     if variant == 'conflict-stale':
@@ -74,8 +74,8 @@ def prepare_ui(destination, variant):
 
 def identity(ui):
     source_paths = [
-        'hackathon/server.py', 'hackathon/runtime.py', 'hackathon/speech.py',
-        'hackathon/signs/lab.py', 'hackathon/signs/lab.html',
+        'quietbridge/server.py', 'quietbridge/runtime.py', 'quietbridge/speech.py',
+        'quietbridge/signs/lab.py', 'quietbridge/signs/lab.html',
         'scripts/check_web.mjs', 'scripts/web_check_fixture.py',
     ]
     return {

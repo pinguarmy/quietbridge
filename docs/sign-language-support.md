@@ -10,7 +10,7 @@ The BSL-1K path uses the official 1,064-class I3D checkpoint and exact class ord
 
 Only explicitly enabled concepts can contribute text. The adapter ranks the **whole classifier head** before checking the enabled set; it never chooses the best of four enabled words when the actual best prediction is another class. Low score, low margin, unmapped class, insufficient capture, large frame gaps, nonfinite output or buffer overflow produce no event. A prediction always requires user confirmation. A high softmax score still cannot prove that an arbitrary movement is a valid sign: this classifier has no trained REST/unknown class.
 
-Implementation: [video adapter](../hackathon/signs/isolated.py), [BSL exporter](../hackathon/signs/export_bsl1k.py), [shared workers](../hackathon/runtime.py), [worker regressions](../hackathon/tests/test_sign_window_runtime.py).
+Implementation: [video adapter](../quietbridge/signs/isolated.py), [BSL exporter](../quietbridge/signs/export_bsl1k.py), [shared workers](../quietbridge/runtime.py), [worker regressions](../quietbridge/tests/test_sign_window_runtime.py).
 
 ## How to enable it
 
@@ -19,7 +19,7 @@ Implementation: [video adapter](../hackathon/signs/isolated.py), [BSL exporter](
 3. Export into a new local directory. Run the acknowledgement flag only if you actually hold the required rights:
 
 ```sh
-uv run python -m hackathon.signs.export_bsl1k \
+uv run python -m quietbridge.signs.export_bsl1k \
   --source /absolute/path/to/external/bsl1k \
   --checkpoint /absolute/path/to/bsl1k.pth.tar \
   --labels /absolute/path/to/class-ordered.json \
@@ -27,7 +27,7 @@ uv run python -m hackathon.signs.export_bsl1k \
   --enable water --enable apple \
   --acknowledge-model-terms
 
-uv run python -m hackathon.server --browser-camera \
+uv run python -m quietbridge.server --browser-camera \
   --sign-model /absolute/path/to/new-bsl-bundle/manifest.json
 ```
 
@@ -77,7 +77,7 @@ The lab now accepts `--sign-model` and checks the local artifact identity withou
 Run the lab with the trusted manifest, record independent sessions, then run:
 
 ```sh
-uv run python -m hackathon.evaluate_fusion \
+uv run python -m quietbridge.evaluate_fusion \
   --profile alice --split validation \
   --sign-model /absolute/path/to/bsl-bundle/manifest.json \
   --output /absolute/path/to/new-sign-report.json
@@ -92,7 +92,7 @@ Actual engineering checks used the existing public demo, not a new signer benchm
 - The real lip model and real BSL bundle then read those saved files through both the evaluator function and command-line path. Lips returned `HOW MUCH`, signs returned `apple` (score `0.9643`), and fusion kept `HOW MUCH` as **conflict / confirmation needed**, rather than fabricating a combined sentence. Sign inference took about `496 ms` in that one four-thread CPU run; three-path evaluation took `1.21 s`, excluding model load and capture.
 - The recording's intended sentence was a placeholder from the default profile, **not the video's verified transcript**. Its WER/exact metrics must not be reported as accuracy. It proves capture-to-replay integration and conflict handling only. Cached recordings/reports remain outside Git. No private samples, camera, speech or paid AI calls were used.
 
-Implementation: [paired recorder](../hackathon/signs/lab.py), [consent controls](../hackathon/signs/lab.html), [three-path evaluator](../hackathon/evaluate_fusion.py), [capture tests](../hackathon/signs/tests/test_sign_video_capture.py), [evaluation tests](../hackathon/tests/test_evaluate_sign_fusion.py).
+Implementation: [paired recorder](../quietbridge/signs/lab.py), [consent controls](../quietbridge/signs/lab.html), [three-path evaluator](../quietbridge/evaluate_fusion.py), [capture tests](../quietbridge/signs/tests/test_sign_video_capture.py), [evaluation tests](../quietbridge/tests/test_evaluate_sign_fusion.py).
 
 ## AI text repair: actual problems and current boundary
 
@@ -110,7 +110,7 @@ This intentionally **does not repair wrong recognized words or translate a sign 
 
 Provider calls were tested with fake HTTP responses and timeout injection, not a paid live provider. The app's six-second timeout remains. The separate legacy `lipflow doctor` reported a configured local cleanup backend; that does not mean the main app's optional OpenAI-compatible API is enabled or connected.
 
-Implementation: [cleanup client](../hackathon/cleanup.py), [safety checks](../hackathon/tests/test_cleanup_safety.py), [runtime checks](../hackathon/tests/test_cleanup_runtime.py).
+Implementation: [cleanup client](../quietbridge/cleanup.py), [safety checks](../quietbridge/tests/test_cleanup_safety.py), [runtime checks](../quietbridge/tests/test_cleanup_runtime.py).
 
 ## Whole-runtime portability checks
 

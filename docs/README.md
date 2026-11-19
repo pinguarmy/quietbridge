@@ -14,7 +14,7 @@ Start with the [project README](../README.md) for what QuietBridge is, its hones
 | [recognition-audit.md](recognition-audit.md) | Recognition audit (2026-11-03, with later follow-ups): capability table, fixed defects, how lips and hands should cooperate, what would establish an accuracy gain |
 | [review-protocol.md](review-protocol.md) | Review protocol v2: how the product is reviewed, the current evidence record and remaining gaps. Required for any review report |
 | [lipflow-legacy.md](lipflow-legacy.md) | The original Lipflow silent-dictation app (`lipflow` package and command): setup, use and historical benchmarks |
-| [../hackathon/README.md](../hackathon/README.md) | Developer notes for the `hackathon/` package: contracts and runtime invariants |
+| [../quietbridge/README.md](../quietbridge/README.md) | Developer notes for the `quietbridge/` package: contracts and runtime invariants |
 
 ## Historical evidence records
 
@@ -37,7 +37,7 @@ Superseded hackathon-era and legacy material in [archive/](archive/). Each file 
 | [archive/FRONTEND_BRIEF.md](archive/FRONTEND_BRIEF.md) | Dated UI design briefs and an earlier native Lipflow brief |
 | [archive/personalization.md](archive/personalization.md) | Legacy Lipflow personalization guide for one person's setup (Chinese) |
 | [archive/session-next.md](archive/session-next.md) | Legacy Lipflow personalization session notes (Chinese) |
-| [archive/signs-README.md](archive/signs-README.md) | Hackathon-era notes for `hackathon/signs/` |
+| [archive/signs-README.md](archive/signs-README.md) | Hackathon-era notes for `quietbridge/signs/` |
 | [archive/signs-PERSONALIZATION.md](archive/signs-PERSONALIZATION.md) | Hackathon-era personal data and demo status, 1 November 2026 |
 | [archive/signs-SAM_HANDOFF.md](archive/signs-SAM_HANDOFF.md) | Hackathon demo handoff, 1 November 2026 |
 

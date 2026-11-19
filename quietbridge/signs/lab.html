@@ -1,0 +1,1884 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Personalize · QuietBridge</title>
+<style>
+/* Tokens match the main app (quietbridge/ui/style.css). */
+:root{
+  color-scheme:light;
+  --ink:#182d39;
+  --muted:#536773;
+  --accent:#086b68;
+  --accent-dark:#07524f;
+  --accent-fill:#086b68;
+  --accent-fill-hover:#07524f;
+  --on-accent:#ffffff;
+  --paper:#f3f6f8;
+  --surface:#ffffff;
+  --line:#d8e1e7;
+  --field-line:#a8bbc5;
+  --soft:#e8eff2;
+  --hover:#f1f8f7;
+  --danger:#a73831;
+  --danger-soft:#fbeeed;
+  --focus:#168d99;
+  --scrim:rgba(16,25,30,.5);
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,Consolas,Menlo,monospace;
+}
+@media(prefers-color-scheme:dark){
+  :root{
+    color-scheme:dark;
+    --ink:#e7eef2;
+    --muted:#a5b6c0;
+    --accent:#5cc9c0;
+    --accent-dark:#5cc9c0;
+    --accent-fill:#0f7f7a;
+    --accent-fill-hover:#0b6d69;
+    --paper:#10191e;
+    --surface:#18252d;
+    --line:#2c3c46;
+    --field-line:#4f6672;
+    --soft:#21313a;
+    --hover:#1d2f37;
+    --danger:#ff9d94;
+    --danger-soft:#3a2424;
+    --focus:#5cc9c0;
+    --scrim:rgba(0,0,0,.6);
+  }
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);font:15px/1.55 var(--font);-webkit-font-smoothing:antialiased;max-width:100%;overflow-x:hidden}
+main{max-width:1184px;padding:26px 36px;margin:auto;width:100%}
+a{color:var(--accent);text-underline-offset:4px}
+button,input,select,textarea{font:inherit}
+code{font-family:var(--font-mono);font-size:13px;overflow-wrap:anywhere}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* Header: wordmark + plain text links, as in the main app. */
+header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-bottom:18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.wordmark{color:var(--ink);font-size:23px;font-weight:750;letter-spacing:-.9px;text-decoration:none;display:inline-flex;align-items:center;gap:10px;min-height:44px}
+.bridge-mark{width:23px;height:14px;border:3px solid var(--accent);border-bottom:0;border-radius:14px 14px 0 0;display:inline-block}
+.page-name{font-size:14px;color:var(--muted);font-weight:600;letter-spacing:0;margin-left:2px}
+.header-links{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+.header-links a{display:inline-flex;align-items:center;min-height:44px;color:var(--muted);text-decoration:none;font-size:14px}
+.header-links a:hover{color:var(--accent);text-decoration:underline}
+
+.toolbar{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:18px 0 0}
+.profile-bar{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}
+.profile-bar label,.tabs-label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+.profile-field{display:grid;min-width:0}
+.profile-bar select{min-width:200px;max-width:100%}
+.mode-group{display:grid}
+.tabs{display:flex;gap:7px;flex-wrap:wrap}
+.tabs button{font-size:14px;padding:8px 16px}
+.tabs button.selected,.tabs button.selected:hover:not(:disabled){background:var(--ink);border-color:var(--ink);color:var(--paper)}
+
+/* Stage navigation */
+.stepper{display:flex;gap:6px;margin:18px 0 16px;background:var(--surface);border:1px solid var(--line);padding:6px;border-radius:10px}
+.step-btn{flex:1 1 0;min-width:0;min-height:44px;padding:8px 10px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--ink);font-size:14px;font-weight:600;text-align:center;line-height:1.3;white-space:normal}
+.step-btn:hover:not(:disabled){background:var(--hover);border-color:var(--line)}
+.step-btn.selected,.step-btn.selected:hover:not(:disabled){background:var(--accent-fill);border-color:var(--accent-fill);color:var(--on-accent)}
+h1{font-size:clamp(26px,3vw,34px);font-weight:620;letter-spacing:-1px;line-height:1.2;margin:14px 0 8px;color:var(--ink)}
+.intro{color:var(--muted);margin:0 0 16px;font-size:15px;max-width:76ch}
+
+.stage-banner{background:var(--surface);border:1px solid var(--line);padding:10px 16px;border-radius:10px;margin-bottom:18px;font-size:14px}
+.stage-summary{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.stage-summary strong{font-size:15px;color:var(--ink)}
+.status-pill{font-size:13px;font-weight:600;padding:3px 10px;border-radius:12px;background:var(--soft);color:var(--accent);border:1px solid var(--line)}
+.status-pill.alert{color:var(--danger);border-color:var(--danger)}
+.advanced-details{margin-top:6px;border-top:1px solid var(--line)}
+summary{min-height:44px;padding:11px 0;cursor:pointer;font-size:14px;color:var(--muted)}
+summary:hover{color:var(--ink)}
+.advanced-content{margin:4px 0 8px;display:grid;gap:8px}
+.session-tag{display:flex;align-items:center;gap:8px;font-size:14px;background:var(--paper);padding:6px 10px;border-radius:6px;border:1px solid var(--line);flex-wrap:wrap}
+.session-tag .split-info{color:var(--muted);font-size:13px}
+.session-tag button{font-size:14px}
+
+.layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:24px}
+@media(max-width:820px){.layout{grid-template-columns:1fr}}
+.previews{display:grid;gap:14px}
+.preview-card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}
+.preview-title{font-size:13px;font-weight:650;color:var(--muted);margin-bottom:8px}
+.camera{position:relative;aspect-ratio:4/3;background:var(--soft);border-radius:8px;overflow:hidden;display:grid;place-items:center}
+video,canvas{position:absolute;inset:0;width:100%;height:100%}
+video{object-fit:fill;transform:scaleX(-1)}
+canvas{pointer-events:none}
+#placeholder{max-width:260px;text-align:center;color:var(--muted);line-height:1.5;font-size:14px;padding:12px}
+.badge{position:absolute;bottom:10px;left:10px;background:var(--surface);padding:4px 8px;border-radius:6px;font-size:13px;font-weight:600;color:var(--ink)}
+.fps-bar{display:flex;align-items:center;gap:8px;background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+.fps-bar strong{color:var(--ink)}
+.fps-note{font-size:13px;color:var(--muted)}
+.mouth-view{position:relative;aspect-ratio:1.6;background:var(--soft);border-radius:8px;overflow:hidden;display:grid;place-items:center}
+.mouth-view canvas{width:100%;height:100%}
+#mouthPlaceholder{color:var(--muted);font-size:14px;padding:12px;text-align:center}
+.mouth-status{display:block;margin-top:6px;font-size:13px;color:var(--muted)}
+.privacy{color:var(--muted);font-size:13px;line-height:1.5;margin:6px 0}
+
+.lesson{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:22px;display:flex;flex-direction:column;min-height:440px;min-width:0}
+.kicker{font-size:13px;color:var(--accent);font-weight:650;letter-spacing:.04em}
+.pose{font-size:48px;margin:6px 0 2px}
+.meaning{font-size:24px;font-weight:650;margin:0 0 4px;color:var(--ink);overflow-wrap:anywhere}
+.concept{font-size:15px;color:var(--accent);font-weight:600;margin:0 0 8px}
+.instruction{font-size:15px;line-height:1.5;margin:0 0 8px;color:var(--ink)}
+.hint{color:var(--muted);line-height:1.5;font-size:14px;margin:0 0 12px}
+.mouth-prompt{background:var(--soft);border-left:4px solid var(--accent);padding:12px 14px;border-radius:6px;font-size:18px;font-weight:600;line-height:1.4;margin:10px 0;color:var(--ink);overflow-wrap:anywhere}
+.small{font-size:13px;color:var(--muted);margin:4px 0 10px}
+.meter{font-size:13px;color:var(--muted);margin:0 0 6px;min-height:1.5em;font-variant-numeric:tabular-nums}
+#status{margin-top:auto;padding:10px 12px;border-radius:8px;background:var(--paper);border:1px solid var(--line);font-size:14px;min-height:44px;display:flex;align-items:center;color:var(--ink);overflow-wrap:anywhere}
+#status.error{background:var(--danger-soft);border-color:var(--danger);color:var(--danger)}
+.consent{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin:12px 0 0;min-height:44px;line-height:1.45}
+input[type="checkbox"]{width:20px;height:20px;min-height:20px;margin:2px 0 0;accent-color:var(--accent-fill);flex:0 0 auto}
+.btn-group{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+
+button{border:1px solid var(--line);border-radius:8px;padding:10px 18px;background:var(--surface);color:var(--ink);font-weight:600;font-size:15px;cursor:pointer;min-height:46px;display:inline-flex;align-items:center;justify-content:center;text-align:center}
+button:hover:not(:disabled){border-color:var(--accent);background:var(--hover)}
+button:disabled{opacity:.48;cursor:not-allowed}
+:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,a:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
+.btn-primary,#record,#btnSaveProfile,#btnConfirmNewProfile,#btnAdvanceStage,#trainMotion,#trainVisual,#trainLanguage,#promoteModel,#evaluateRecognition{background:var(--accent-fill);border-color:var(--accent-fill);color:var(--on-accent)}
+.btn-primary:hover:not(:disabled),#record:hover:not(:disabled),#btnSaveProfile:hover:not(:disabled),#btnConfirmNewProfile:hover:not(:disabled),#btnAdvanceStage:hover:not(:disabled),#trainMotion:hover:not(:disabled),#trainVisual:hover:not(:disabled),#trainLanguage:hover:not(:disabled),#promoteModel:hover:not(:disabled),#evaluateRecognition:hover:not(:disabled){background:var(--accent-fill-hover);border-color:var(--accent-fill-hover)}
+.btn-secondary,.btn-subtle{background:var(--surface);color:var(--ink);border:1px solid var(--line)}
+input[type="text"],select,textarea{background:var(--surface);border:1px solid var(--field-line);border-radius:6px;padding:9px 12px;min-height:46px;color:var(--ink);max-width:100%}
+
+#record{flex:2}
+#record.active,#record.active:hover:not(:disabled){background:var(--danger-soft);border-color:var(--danger);color:var(--danger)}
+#discard{flex:1;color:var(--danger)}
+#discard:hover:not(:disabled){border-color:var(--danger);background:var(--danger-soft)}
+
+.progress{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:14px;color:var(--muted)}
+.progress button{flex:0 0 auto;font-size:14px}
+.advance-box{margin-top:12px;padding:12px 14px;background:var(--soft);border-left:3px solid var(--accent);border-radius:6px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.advance-box span{font-size:14px;color:var(--ink)}
+.advance-box button{font-size:14px}
+
+.setup-panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:24px 26px;margin-top:14px}
+.setup-panel h2{font-size:20px;font-weight:650;margin:0 0 10px;color:var(--ink)}
+.setup-onboarding{background:var(--paper);border-left:3px solid var(--accent);border-radius:6px;padding:14px 16px;margin-bottom:18px}
+.setup-onboarding h3{margin:0 0 4px;font-size:16px;color:var(--ink)}
+.setup-onboarding p{margin:0;font-size:14px;color:var(--muted)}
+.setup-section{margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--line)}
+.section-header{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+.section-header h3{margin:0;font-size:16px}
+.table-scroll{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:10px 0;border:1px solid var(--line);border-radius:8px}
+.setup-table{width:100%;border-collapse:collapse;font-size:14px}
+.setup-table th,.setup-table td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line)}
+.setup-table tr:last-child td{border-bottom:0}
+.setup-table th{background:var(--paper);color:var(--muted);font-weight:600;font-size:13px}
+.setup-table input,.setup-table textarea{width:100%;font-size:14px}
+.setup-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:16px;position:sticky;bottom:0;background:var(--surface);padding:14px 0;border-top:1px solid var(--line)}
+#gestureTable,#promptTable{min-width:0;table-layout:fixed}
+#gestureTable td{padding:0;border:0}
+.gesture-definition{border-bottom:1px solid var(--line)}
+#gestureTbody tr:last-child .gesture-definition{border-bottom:0}
+.gesture-definition>summary{min-height:58px;padding:15px 12px;font-weight:600;font-size:15px;display:list-item;list-style-position:inside;color:var(--ink)}
+.gesture-meaning{font-size:14px;color:var(--muted);font-weight:400;float:right;max-width:64%;overflow-wrap:anywhere}
+.gesture-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:12px}
+.gesture-fields label{display:grid;gap:6px;font-size:14px;color:var(--ink)}
+.gesture-fields small{color:var(--muted);font-size:13px}
+.gesture-instruction{grid-column:1/-1}
+.gesture-advanced{margin:0 12px}
+.gesture-advanced>summary{font-size:14px}
+button.btn-remove{background:transparent;border-color:transparent;color:var(--danger);font-size:14px;padding:8px 10px;margin:0 8px 8px}
+button.btn-remove:hover:not(:disabled){background:var(--danger-soft);border-color:var(--danger)}
+#promptTable th:last-child{width:104px}#promptTable td{padding:7px}#promptTable td:last-child button{margin:0}
+@media(max-width:600px){.gesture-fields{grid-template-columns:1fr}.gesture-meaning{float:none;display:block;max-width:none;padding-left:16px}.gesture-definition>summary{padding:12px}.setup-actions{justify-content:stretch}.setup-actions>button{flex:1}.setup-panel{padding:16px}}
+
+.dialog-backdrop{position:fixed;inset:0;background:var(--scrim);display:grid;place-items:center;z-index:99;padding:16px}
+.dialog{background:var(--surface);border-radius:10px;padding:22px;width:100%;max-width:440px;box-shadow:0 12px 30px rgba(0,0,0,.2);border:1px solid var(--line)}
+.dialog h3{margin:0 0 14px;font-size:18px;color:var(--ink)}
+.dialog p{font-size:14px;color:var(--muted);margin:0 0 14px}
+.form-field{margin-bottom:14px}
+.form-field label{display:block;font-size:14px;font-weight:600;margin-bottom:4px;color:var(--ink)}
+.form-field input,.form-field select{width:100%}
+.dialog-buttons{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;flex-wrap:wrap}
+
+.paired-box{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:10px 0}
+.paired-box label{display:block;font-size:14px;font-weight:600;color:var(--ink);margin:10px 0 4px}
+.paired-box select{width:100%}
+.paired-note{font-size:14px;color:var(--muted);line-height:1.45;margin:0 0 6px}
+.paired-note strong{color:var(--ink)}
+#videoConsentBox{margin:12px 0;padding:12px;background:var(--surface);border-left:3px solid var(--accent)}
+#videoConsentBox label{display:flex;align-items:flex-start;gap:10px;min-height:44px;font-weight:400;line-height:1.45}
+
+.model-states{display:grid;gap:6px;margin:0 0 14px;padding:12px 14px;background:var(--paper);border-left:3px solid var(--accent);border-radius:6px;font-size:14px;color:var(--muted)}
+.model-states strong{color:var(--ink)}
+#modelStatus{font-size:14px;margin:8px 0;overflow-wrap:anywhere}
+#modelStatus.error,#modelError{color:var(--danger)}
+#modelError{font-size:14px;margin:8px 0;padding:10px 12px;background:var(--danger-soft);border-left:3px solid var(--danger);border-radius:6px;overflow-wrap:anywhere}
+#modelError:empty{display:none}
+#setupError{font-size:14px;margin:0 0 12px;padding:10px 12px;color:var(--danger);background:var(--danger-soft);border-left:3px solid var(--danger);border-radius:6px;overflow-wrap:anywhere}
+#setupError:empty{display:none}
+.heading-count{font-size:14px;font-weight:400;color:var(--muted)}
+.field-hint{font-size:14px;color:var(--muted);margin:4px 0 12px}
+.candidate-facts{margin:8px 0 12px;padding:0;list-style:none;display:grid;gap:4px;font-size:15px;overflow-wrap:anywhere}
+.candidate-facts strong{font-weight:600}
+.report-summary{margin:8px 0;overflow-x:auto}
+.report-summary table{border-collapse:collapse;min-width:100%;font-size:14px}
+.report-summary th,.report-summary td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+.report-summary td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+#reportDetails summary,#candidateFiles summary{cursor:pointer;min-height:44px;line-height:44px}
+#modelSaveNotice{font-size:14px}
+#modelSaveNotice:empty{display:none}
+#candidateSummary{font-size:14px;color:var(--ink);overflow-wrap:anywhere}
+#comparisonMetrics{font-size:14px;overflow-wrap:anywhere}
+.gate-pass{color:var(--accent);font-weight:700}.gate-fail{color:var(--danger);font-weight:700}
+#modelReport{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:12px;font-size:13px;max-height:420px;overflow:auto}
+
+@media(max-width:760px){
+  main{padding:18px 16px}
+  header{gap:6px;padding-bottom:12px}
+  .header-links{gap:16px}
+  .wordmark{font-size:20px}
+  .toolbar{display:grid;grid-template-columns:1fr;gap:12px}
+  .profile-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end}
+  .profile-bar select{min-width:0;width:100%}
+  .tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+  .tabs button{padding:8px 6px}
+  .lesson{padding:18px}
+}
+@media(max-width:600px){
+  /* Two-column grid keeps all five stages visible without sideways scrolling. */
+  .stepper{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .stepper .step-btn:last-child{grid-column:1/-1}
+}
+@media(max-width:380px){
+  .bridge-mark{display:none}
+}
+@media(prefers-reduced-motion:no-preference){button,a{transition:background-color 120ms ease,border-color 120ms ease,color 120ms ease}}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:0.01ms!important;
+    animation-iteration-count:1!important;
+    transition-duration:0.01ms!important;
+  }
+}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <a id="brandLink" class="wordmark" href="http://127.0.0.1:8765/">QuietBridge<span class="bridge-mark" aria-hidden="true"></span><span class="page-name">Personalize</span></a>
+  <nav class="header-links" aria-label="Main navigation">
+    <a id="returnLink" class="return-link" href="http://127.0.0.1:8765/">Back to message</a>
+    <a id="settingsLink" href="http://127.0.0.1:8765/settings">Settings</a>
+  </nav>
+</header>
+
+<div class="toolbar">
+  <div class="profile-bar">
+    <div class="profile-field">
+      <label for="profileSelect">Profile</label>
+      <select id="profileSelect"></select>
+    </div>
+    <button id="btnNewProfile" type="button">New profile</button>
+  </div>
+  <div id="modeGroup" class="mode-group" role="group" aria-labelledby="modeLabel">
+    <span id="modeLabel" class="tabs-label">What to practise</span>
+    <div class="tabs">
+      <button id="gesturesTab" class="selected" type="button" aria-pressed="true">Gestures</button>
+      <button id="lipsTab" type="button" aria-pressed="false">Lips</button>
+      <button id="pairedTab" type="button" aria-pressed="false">Both together</button>
+    </div>
+  </div>
+</div>
+
+<nav class="stepper" aria-label="Personalize steps">
+  <button id="stepSetup" class="step-btn" data-stage="setup" type="button">1. Choose phrases</button>
+  <button id="stepTrain" class="step-btn selected" data-stage="train" type="button">2. Practice</button>
+  <button id="stepValidation" class="step-btn" data-stage="validation" type="button">3. Check on another occasion</button>
+  <button id="stepTest" class="step-btn" data-stage="test" type="button">4. Final check</button>
+  <button id="stepModels" class="step-btn" data-stage="models" type="button">5. Activate</button>
+</nav>
+
+<div class="stage-banner" id="stageBanner">
+  <div class="stage-summary">
+    <div>
+      Stage: <strong id="stageName">2. Practice</strong>
+    </div>
+    <span class="status-pill" id="recordingStatePill">Ready</span>
+  </div>
+  <details id="advancedSettings" class="advanced-details">
+    <summary>Session and technical details</summary>
+    <div class="advanced-content">
+      <div class="session-tag">
+        <span>Session:</span>
+        <code id="sessionLabel">s1</code>
+        <span class="split-info">Data set: <strong id="stageSplit">train</strong></span>
+        <button id="btnNewSession" type="button">Start a new session</button>
+      </div>
+      <div class="fps-bar" id="fpsBar">
+        <span>Target: <strong>25 fps</strong></span>
+        <span>·</span>
+        <span>Measured: <strong id="measuredFps">0.0 fps</strong></span>
+        <span>·</span>
+        <span>Duration: <strong id="recordDuration">0.0s</strong></span>
+        <span>·</span>
+        <span>Received: <strong id="receivedFrames">0 frames</strong></span>
+      </div>
+      <div class="fps-note">Frames are sent about 25 times a second. The measured rate shows how many actually arrived; missing frames are not filled in.</div>
+      <p class="privacy">Start a new session whenever you sit down again on a different occasion. A session belongs to one step only, so practice tries never mix with checks. Hand positions and mouth close-ups are saved by default; standard-sign checks can also save local video, only after you agree for that try.</p>
+    </div>
+  </details>
+</div>
+
+<h1 id="title">Practice your phrases. Record one try.</h1>
+<p id="intro" class="intro">Each try saves your hand positions for this profile only. Recordings stay on this computer.</p>
+<p id="captureUnavailable" class="hint" hidden>Preview only: QuietBridge was started in preview mode, so nothing can be recorded here. You can still edit your phrases and review models, or go back and type a message.</p>
+
+<div id="recordingLayout" class="layout">
+  <section>
+    <div class="previews">
+      <div class="preview-card">
+        <div class="preview-title">Hands: full view</div>
+        <div class="camera">
+          <video id="video" autoplay muted playsinline></video>
+          <canvas id="overlay" width="640" height="480"></canvas>
+          <div id="placeholder">Camera opens when you press Start recording.</div>
+          <span id="tracking" class="badge">Camera off</span>
+        </div>
+      </div>
+      <div class="preview-card">
+        <div class="preview-title">Lips: close-up</div>
+        <div class="mouth-view">
+          <canvas id="mouthPreview" width="320" height="200"></canvas>
+          <div id="mouthPlaceholder">A close-up of your mouth appears once the camera is on.</div>
+        </div>
+        <span id="mouthTracking" class="mouth-status">Face not detected</span>
+      </div>
+    </div>
+    <p class="privacy">Gesture tries save hand positions, not video. Lip tries save small close-ups of your mouth. A standard-sign check also saves face, body and hand video, but only when you agree for that try. No sound is recorded, nothing is uploaded and nothing trains automatically.</p>
+  </section>
+
+  <section class="lesson" aria-label="Current recording lesson">
+    <div id="round" class="kicker">Stage 2 · Practice</div>
+    <div id="pairedBox" class="paired-box" hidden>
+      <p class="paired-note">
+        <strong>Gesture and lips together.</strong> Make the gesture while silently mouthing the phrase. This saves practice samples only; it does not recognize or transcribe anything.
+      </p>
+      <label for="pairedCaptureKind">What are you recording?</label>
+      <select id="pairedCaptureKind"><option value="personal">Personal gesture with lips (hand positions and mouth close-ups)</option><option value="video" disabled>Standard sign with lips (local video)</option></select>
+      <p id="pairedSignModel" class="paired-note">No standard-sign model configured for this recorder.</p>
+      <div id="videoConsentBox" hidden>
+        <p class="paired-note">Saves your face, upper body and both hands as a small local video (256 × 256), alongside mouth close-ups. Record one sign, at most 240 frames or 10 seconds. No sound and no uploads. Discard saves nothing.</p>
+        <label for="videoConsent"><input id="videoConsent" type="checkbox"> I agree to save the video of this try on this computer.</label>
+      </div>
+      <label for="pairedGestureSelect">Gesture or sign (or rest, for “no gesture”)</label>
+      <select id="pairedGestureSelect"></select>
+      <label for="pairedPromptSelect">Phrase to mouth</label>
+      <select id="pairedPromptSelect"></select>
+    </div>
+    <div id="pose" class="pose" aria-hidden="true">✋</div>
+    <h2 id="meaning" class="meaning">HELLO</h2>
+    <div id="concept" class="concept">Hello</div>
+    <p id="instruction" class="instruction"></p>
+    <p id="hint" class="hint"></p>
+    <div id="mouthPrompt" class="mouth-prompt" hidden></div>
+    <p id="mouthNote" class="small" hidden>Mouth these words silently at a natural pace, facing the camera. Only mouth close-ups are saved; the microphone is not used.</p>
+    <p id="trackingNote" class="small">The guide shows tracking only. It is not a transcript or a trained recognizer.</p>
+    <p id="recordingMeter" class="meter"></p>
+    <div id="status" role="status" aria-live="polite">Ready. Press Start recording when you are in view.</div>
+    <label class="consent"><input id="localConsent" type="checkbox"> <span>I agree to save my practice tries on this computer (hand positions and mouth close-ups). Saving video needs separate agreement.</span></label>
+    <div class="btn-group">
+      <button id="record" type="button" disabled>Connecting…</button>
+      <button id="discard" type="button" disabled>Discard</button>
+      <button id="cameraOff" type="button" class="btn-secondary" disabled>Turn camera off</button>
+    </div>
+    <div class="progress">
+      <span id="progress">0 of 5 tries</span>
+      <button id="next" type="button">Next →</button>
+    </div>
+    <div id="advanceBox" class="advance-box" hidden>
+      <span id="advanceMsg">Suggested number of tries reached.</span>
+      <button id="btnAdvanceStage" type="button">Continue to next stage →</button>
+    </div>
+  </section>
+</div>
+
+<div id="setupLayout" class="setup-panel" hidden>
+  <div id="setupOnboarding" class="setup-onboarding">
+    <h3>1. Choose your personal phrases</h3>
+    <p>Personal training is optional. You can type messages without it. Review or add phrases if you want to practise, or go back to your message.</p>
+  </div>
+  <h2>Your phrases and gestures</h2>
+  <p class="intro">Start with a few useful phrases. Open a gesture to change what it means and how you make it. These are personal movements, not a BSL or ASL course.</p>
+
+  <div class="setup-section">
+    <h3>About you</h3>
+    <div class="form-field">
+      <label for="profileDisplayName">Your name</label>
+      <input type="text" id="profileDisplayName" maxlength="64">
+    </div>
+  </div>
+
+  <div class="setup-section">
+    <div class="section-header">
+      <h3>Your gestures</h3>
+      <button id="btnAddGesture" type="button" class="btn-subtle">Add a gesture</button>
+    </div>
+    <div class="table-scroll">
+      <table class="setup-table gesture-editor" id="gestureTable" aria-label="Personal gesture definitions">
+        <tbody id="gestureTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="setup-section">
+    <div class="section-header">
+      <h3>Phrases to mouth silently <span id="promptCount" class="heading-count"></span></h3>
+      <button id="btnAddPrompt" type="button" class="btn-subtle">Add a phrase</button>
+    </div>
+    <div class="table-scroll">
+      <table class="setup-table" id="promptTable" aria-label="Phrases to mouth silently">
+        <thead>
+          <tr>
+            <th scope="col">Phrase</th>
+            <th scope="col"><span class="sr-only">Remove</span></th>
+          </tr>
+        </thead>
+        <tbody id="promptTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="setupError" role="alert"></div>
+  <div class="setup-actions">
+    <button id="btnExitSetup" type="button" class="btn-secondary">Skip to practice</button>
+    <button id="btnSaveProfile" type="button">Save and start practising</button>
+  </div>
+</div>
+
+<section id="modelsLayout" class="setup-panel" aria-labelledby="modelsTitle" hidden>
+  <h2 id="modelsTitle">Train, review and save</h2>
+  <div class="model-states">
+    <span><strong>1. Candidate:</strong> training makes a new candidate beside your profile. It is not used by anything yet.</span>
+    <span><strong>2. Saved for this profile:</strong> after you review its report, “Save for main app” makes it this profile’s saved model. The previous one is kept so you can restore it.</span>
+    <span><strong>3. Active in the running app:</strong> only after you stop the camera in the main app and choose Settings → Reload current models. Models chosen when the app was started still take priority.</span>
+  </div>
+  <p class="privacy">Recording tries or finishing training does not show how accurately anything is recognized. Keep practice, “another occasion” and final-check sessions separate.</p>
+  <p id="modelSaveNotice" role="status"></p>
+  <div class="form-field"><label for="modelKind">Model type</label><select id="modelKind"><option value="motion">Gestures (motion)</option><option value="lips">Lip reading (visual)</option><option value="language">Word suggestions (language)</option></select></div>
+  <div class="form-field"><label for="candidateSelect">Candidate</label><select id="candidateSelect"></select></div>
+  <div id="modelStatus" role="status">Loading model status…</div>
+  <div id="modelError" role="alert"></div>
+  <div id="candidateSummary"></div>
+  <div class="btn-group">
+    <button id="trainMotion" type="button">Train a gesture candidate</button>
+    <button id="trainVisual" type="button" hidden>Train a lip-reading candidate</button>
+    <button id="trainLanguage" type="button" hidden>Train a word-suggestion candidate</button>
+    <button id="refreshModels" type="button" class="btn-secondary">Refresh status</button>
+  </div>
+  <div class="btn-group">
+    <button id="viewReport" type="button" class="btn-secondary">View report</button>
+    <button id="evaluateRecognition" type="button">Evaluate recognition</button>
+    <button id="promoteModel" type="button">Save for main app</button>
+    <button id="rollbackModel" type="button" class="btn-secondary" aria-describedby="restoreHint">Restore previous model</button>
+  </div>
+  <p id="restoreHint" class="field-hint"></p>
+  <div id="comparisonMetrics" style="margin-top:8px;" hidden></div>
+  <section id="reportView" aria-labelledby="reportTitle" hidden>
+    <h3 id="reportTitle" tabindex="-1">Candidate report</h3>
+    <div id="reportSummary" class="report-summary"></div>
+    <details id="reportDetails"><summary>Full report (technical)</summary>
+      <pre id="modelReport" style="white-space:pre-wrap;overflow-wrap:anywhere" tabindex="0" aria-label="Full candidate report"></pre>
+    </details>
+  </section>
+</section>
+
+<div id="newProfileDialog" class="dialog-backdrop" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle" aria-describedby="dialogDesc">
+    <h3 id="dialogTitle">Create a new profile</h3>
+    <p id="dialogDesc">A profile keeps one person’s phrases, recordings and models separate from everyone else’s.</p>
+    <div class="form-field"><label for="newProfileName">Your name</label>
+      <input type="text" id="newProfileName" maxlength="64" autocomplete="name"></div>
+    <details><summary>Advanced: folder name</summary>
+      <div class="form-field"><label for="newProfileId">Optional folder name (letters, numbers, - and _)</label>
+      <input type="text" id="newProfileId" maxlength="64" placeholder="Chosen automatically if blank"></div></details>
+    <div class="dialog-buttons">
+      <button id="btnCancelNewProfile" class="btn-cancel" type="button">Cancel</button>
+      <button id="btnConfirmNewProfile" type="button">Create profile</button>
+    </div>
+  </div>
+</div>
+</main>
+
+<script>
+(()=>{'use strict';
+const $=id=>document.getElementById(id);
+const video=$('video'),overlay=$('overlay'),draw=overlay.getContext('2d');
+const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');
+const mouthCanvas=$('mouthPreview'),mouthDraw=mouthCanvas.getContext('2d');
+const snapshot=document.createElement('canvas');
+canvas.width=960;canvas.height=720;snapshot.width=960;snapshot.height=720;
+
+let token='',stream=null,loop=null,inflight=false,working=false,recording=false,mode='gestures';
+let mouthPreviewError='',frames=0,started=0,lastTracking=0,mouthCrop=null;
+let activeProfile=null,allProfiles=[],currentStage='train'; // setup, train, validation, test, models
+let modelData=null,modelBusy=false;
+let signModelInfo=null,activeVideoCapture=false,captureAvailable=true;
+let setupBaseline=null,dialogReturnFocus=null,startingCapture=false,pageLeaving=false;
+
+function videoRequested(){return mode==='paired'&&$('pairedCaptureKind').value==='video';}
+function recordingModeKey(m){return m==='paired'&&videoRequested()?`paired-video-${signModelInfo?.manifest_sha256?.slice(0,12)||'unconfigured'}`:m;}
+function pairedItems(){
+  if(!videoRequested())return activeProfile?.gestures||[];
+  const signs=Object.entries(signModelInfo?.vocabulary||{}).filter(([,entry])=>entry.enabled).map(([label,entry])=>({label,display_name:entry.phrase,concept:entry.phrase,description:'Perform this standard sign once while mouthing the selected sentence. Keep face, upper body and both hands in view.'}));
+  return [...signs,{label:'REST',display_name:'Rest',description:'Remain relaxed without signing while mouthing the selected sentence.'},{label:'UNKNOWN',display_name:'Unrelated movement',description:'Perform an unrelated movement or an unsupported sign while mouthing the selected sentence.'}];
+}
+function pairedRequest(split,session){
+  const captureVideo=videoRequested();
+  if(captureVideo&&(!signModelInfo||!$('videoConsent').checked))throw Error('Agree to save the video of this try before recording.');
+  const label=$('pairedGestureSelect').value,text=$('pairedPromptSelect').value;
+  if(!label||!text)throw Error('Choose a sign or gesture and an intended sentence.');
+  return {profile:activeProfile.id,label,text,split,session,capture_video:captureVideo,video_consent:captureVideo&&$('videoConsent').checked};
+}
+
+const TARGET_FPS=25;
+const UPLOAD_INTERVAL_MS=40; // 1000 / 25 fps
+let framesReceivedCount=0,recordingStartTime=0;
+
+// Default stage targets: train: 5 gestures / 3 lips / 3 paired; validation: 3 gestures / 2 lips / 2 paired; test: 3 gestures / 2 lips / 2 paired
+const STAGE_TARGETS={train:{gestures:5,lips:3,paired:3},validation:{gestures:3,lips:2,paired:2},test:{gestures:3,lips:2,paired:2}};
+
+const sessionStoreKey='quietbridge-guided-sessions-v3';
+let sessionStore={};
+try{sessionStore=JSON.parse(localStorage.getItem(sessionStoreKey)||'{}')}catch{sessionStore={}}
+
+function getSafeReturnUrl(){
+  const defaultUrl='http://127.0.0.1:8765/';
+  try{
+    const params=new URLSearchParams(window.location.search);
+    const returnTo=params.get('return_to');
+    if(!returnTo)return defaultUrl;
+    const url=new URL(returnTo,window.location.href);
+    const isLoopback=url.hostname==='127.0.0.1'||url.hostname==='localhost';
+    const isHttp=url.protocol==='http:';
+    const isRootPath=url.pathname==='/';
+    const noCreds=!url.username&&!url.password;
+    const noExtra=!url.search&&!url.hash;
+    const notSelfLab=url.port!==window.location.port;
+    if(isLoopback&&isHttp&&isRootPath&&noCreds&&noExtra&&notSelfLab){
+      return url.href;
+    }
+  }catch{}
+  return defaultUrl;
+}
+
+const retLink=$('returnLink');
+if(retLink){
+  retLink.href=getSafeReturnUrl();
+  $('brandLink').href=retLink.href;
+  $('settingsLink').href=new URL('settings',retLink.href).href;
+}
+
+function getFreshSessionId(profileId,stageMode,split){
+  const stamp=Date.now().toString(36);
+  const rand=Math.random().toString(36).substring(2,6);
+  return `${profileId.slice(0,10)}-${stageMode.slice(0,25)}-${split}-${stamp}-${rand}`;
+}
+
+function getActiveSession(profileId,stageMode,split){
+  stageMode=recordingModeKey(stageMode);
+  const key=`${profileId}:${stageMode}:${split}`;
+  if(!sessionStore[key]){
+    sessionStore[key]=getFreshSessionId(profileId,stageMode,split);
+    localStorage.setItem(sessionStoreKey,JSON.stringify(sessionStore));
+  }
+  return sessionStore[key];
+}
+
+function renewActiveSession(profileId,stageMode,split){
+  stageMode=recordingModeKey(stageMode);
+  const key=`${profileId}:${stageMode}:${split}`;
+  sessionStore[key]=getFreshSessionId(profileId,stageMode,split);
+  localStorage.setItem(sessionStoreKey,JSON.stringify(sessionStore));
+  return sessionStore[key];
+}
+
+// Progress tracking per profile / stage
+const progressStoreKey='quietbridge-guided-progress-v3';
+let progressStore={};
+try{progressStore=JSON.parse(localStorage.getItem(progressStoreKey)||'{}')}catch{progressStore={}}
+
+function getProgressData(profileId,stage,m){
+  const key=`${profileId}:${stage}:${recordingModeKey(m)}`;
+  if(!progressStore[key]){
+    progressStore[key]={index:0,counts:[]};
+  }
+  return progressStore[key];
+}
+
+function saveProgressData(profileId,stage,m,data){
+  const key=`${profileId}:${stage}:${recordingModeKey(m)}`;
+  progressStore[key]=data;
+  localStorage.setItem(progressStoreKey,JSON.stringify(progressStore));
+}
+
+function hasRecordedSamples(profileId){
+  if(!profileId)return false;
+  // Check server stats from allProfiles or activeProfile first
+  const profiles=typeof allProfiles!=='undefined'?allProfiles:[];
+  const active=typeof activeProfile!=='undefined'?activeProfile:null;
+  const prof=profiles.find(p=>p.id===profileId)||(active?.id===profileId?active:null);
+  if(prof&&prof.stats){
+    let total=0;
+    for(const cat of Object.values(prof.stats)){
+      if(cat&&typeof cat==='object'){
+        for(const count of Object.values(cat)){
+          if(typeof count==='number')total+=count;
+        }
+      }
+    }
+    if(total>0)return true;
+  }
+  // Fall back to client localStorage progressStore
+  const store=typeof progressStore!=='undefined'?progressStore:{};
+  for(const [k,v] of Object.entries(store)){
+    if(k.startsWith(profileId+':')){
+      if(Array.isArray(v?.counts)&&v.counts.some(c=>c>0))return true;
+    }
+  }
+  return false;
+}
+
+const edges=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+
+function note(text,error=false){
+  const status=$('status'),cls=error?'error':'';
+  // Rewriting identical text would make screen readers announce it again.
+  if(status.textContent!==text||status.className!==cls){status.textContent=text;status.className=cls;}
+  const pill=$('recordingStatePill');
+  if(pill){
+    pill.textContent=error?'Needs attention':recording?'Recording…':'Ready';
+    pill.classList.toggle('alert',Boolean(error||recording));
+  }
+}
+
+async function request(path,options={}){
+  const r=await fetch(path,options);
+  let d;
+  try{d=await r.json()}catch{throw Error('Server response unavailable. Reload this page.')}
+  if(!r.ok)throw Error(d.error||'Request failed');
+  return d;
+}
+
+async function action(path,data={}){
+  return request('/api/'+path,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-QuietBridge-Token':token},
+    body:JSON.stringify(data)
+  });
+}
+
+function updateStageBanner(){
+  const split=currentStage==='setup'?'setup':(currentStage==='validation'?'validation':(currentStage==='test'?'test':'train'));
+  $('stageSplit').textContent=split;
+  const stageLabels={
+    setup:'1. Choose phrases',
+    train:'2. Practice',
+    validation:'3. Check on another occasion',
+    test:'4. Final check',
+    models:'5. Activate'
+  };
+  $('stageName').textContent=stageLabels[currentStage]||currentStage;
+  if(currentStage==='setup'||currentStage==='models'){
+    $('stageBanner').hidden=true;
+  }else{
+    $('stageBanner').hidden=false;
+    const sess=getActiveSession(activeProfile.id,mode,split);
+    $('sessionLabel').textContent=sess;
+  }
+}
+
+function render(){
+  for(const [id,stage] of [['stepSetup','setup'],['stepTrain','train'],['stepValidation','validation'],['stepTest','test'],['stepModels','models']]){
+    $(id).classList.toggle('selected',currentStage===stage);
+    if(currentStage===stage)$(id).setAttribute('aria-current','step'); else $(id).removeAttribute('aria-current');
+  }
+  $('modelsLayout').hidden=currentStage!=='models';
+  // Gestures / Lips / Both apply to recording steps only.
+  $('modeGroup').hidden=currentStage==='setup'||currentStage==='models';
+
+  if(currentStage==='models'){
+    $('recordingLayout').hidden=true;
+    $('setupLayout').hidden=true;
+    $('stageBanner').hidden=true;
+    $('title').textContent='Activate a personal model';
+    $('intro').textContent=`Models here belong to ${activeProfile?.name||'the selected profile'} only. Nothing changes in the running app until you reload its models.`;
+    renderModels();
+    return;
+  }
+
+  if(currentStage==='setup'){
+    $('title').textContent='Make room for your everyday words.';
+    $('intro').textContent='Choose what you want to say. Nothing is recorded until you start practising.';
+    $('recordingLayout').hidden=true;
+    $('setupLayout').hidden=false;
+    renderSetupView();
+    updateStageBanner();
+    return;
+  }
+
+  $('recordingLayout').hidden=false;
+  $('setupLayout').hidden=true;
+
+  const isLip=mode==='lips';
+  const isPaired=mode==='paired';
+  for(const [id,on] of [['gesturesTab',mode==='gestures'],['lipsTab',isLip],['pairedTab',isPaired]]){
+    $(id).classList.toggle('selected',on);
+    $(id).setAttribute('aria-pressed',String(on));
+  }
+
+  const what=isPaired?(videoRequested()?'one standard sign with its words':'a gesture while mouthing a phrase'):(isLip?'your silent phrase':'your gesture');
+  if(currentStage==='validation'){
+    $('title').textContent=`Check ${what} on another occasion.`;
+  }else if(currentStage==='test'){
+    $('title').textContent=`Final check: ${what}.`;
+  }else{
+    $('title').textContent=isPaired?(videoRequested()?'Check one standard sign with its words.':'Make a gesture while mouthing a phrase.'):(isLip?'Mouth the phrase silently. Record one try.':'Practise your gesture. Record one try.');
+  }
+  const stageIntro={
+    validation:'Record this on a different occasion from your practice, such as another day or sitting. These tries are kept apart from practice and used to check a model, not to train it.',
+    test:'A separate final sitting, kept apart from practice and checks. Use it for the final check before you activate a model; do not use it to adjust anything.'
+  }[currentStage];
+  if(isPaired){
+    $('intro').textContent=stageIntro||(videoRequested()?'Saves a local video, with your agreement, plus mouth close-ups, to compare lips only, signs only and both. No automatic training or recognition score.':'Records hand positions and mouth close-ups at the same time. This collects practice samples only; it does not recognize or transcribe anything.');
+  }else if(isLip){
+    $('intro').textContent=stageIntro||'Mouth each phrase without sound. Only close-ups of your mouth are saved; no microphone is used. Recordings stay on this computer.';
+  }else{
+    $('intro').textContent=stageIntro||'Each try saves your hand positions for this profile only. Recordings stay on this computer.';
+  }
+
+  $('pairedBox').hidden=!isPaired;
+  $('pairedCaptureKind').querySelector('[value="video"]').disabled=!signModelInfo;
+  $('videoConsentBox').hidden=!videoRequested();
+  $('pairedSignModel').textContent=signModelInfo?`${signModelInfo.language.toUpperCase()} sign model ${signModelInfo.sha256.slice(0,12)} is set up. It only lists the signs you can record here; there is no recognition or scoring while you record.`:'Standard-sign video checks are off because no standard-sign model was set up when QuietBridge started.';
+  $('mouthPrompt').hidden=!isLip&&!isPaired;
+  $('mouthNote').hidden=!isLip&&!isPaired;
+  $('mouthNote').textContent=videoRequested()?'Mouth the sentence while signing. The full video and mouth close-ups are saved only after you agree and choose Finish & save. The microphone is not used.':'Mouth these words silently at a natural pace, facing the camera. Only mouth close-ups are saved; the microphone is not used.';
+  $('trackingNote').hidden=isPaired; // the paired box already says this
+  $('trackingNote').textContent=isPaired
+    ?'This collects practice samples only. It does not recognize or transcribe anything.'
+    :(isLip?'The guide shows mouth tracking only. It is not a transcript or a trained recognizer.':'The guide shows tracking only. It is not a transcript or a trained recognizer.');
+
+  $('pose').hidden=isLip;
+  $('meaning').hidden=isLip;
+  $('concept').hidden=isLip;
+  $('instruction').hidden=isLip;
+  $('hint').hidden=isLip;
+
+  updateStageBanner();
+
+  const prog=getProgressData(activeProfile.id,currentStage,mode);
+  const targetCount=STAGE_TARGETS[currentStage]?.[mode]||3;
+
+  const stageLabels={
+    train:'Step 2 · Practice',
+    validation:'Step 3 · Another occasion',
+    test:'Step 4 · Final check'
+  };
+
+  if(isPaired){
+    const gestures=pairedItems();
+    const prompts=activeProfile.lip_prompts||[];
+    const gSel=$('pairedGestureSelect');
+    const pSel=$('pairedPromptSelect');
+    const curG=gSel.value;
+    const curP=pSel.value;
+    gSel.innerHTML='';
+    gestures.forEach(g=>{
+      const opt=document.createElement('option');
+      opt.value=g.label;
+      opt.textContent=`${g.emoji||'✋'} ${g.display_name||g.label}`;
+      gSel.appendChild(opt);
+    });
+    if(!gestures.some(g=>g.label==='REST')){
+      const opt=document.createElement('option');
+      opt.value='REST';
+      opt.textContent='😌 Rest (no gesture)';
+      gSel.appendChild(opt);
+    }
+    pSel.innerHTML='';
+    prompts.forEach(p=>{
+      const opt=document.createElement('option');
+      opt.value=p;
+      opt.textContent=p;
+      pSel.appendChild(opt);
+    });
+    if(curG&&Array.from(gSel.options).some(o=>o.value===curG)){
+      gSel.value=curG;
+    }else if(gestures[prog.index%Math.max(gestures.length,1)]){
+      gSel.value=gestures[prog.index%gestures.length].label;
+    }
+    if(curP&&Array.from(pSel.options).some(o=>o.value===curP)){
+      pSel.value=curP;
+    }else if(prompts[prog.index%Math.max(prompts.length,1)]){
+      pSel.value=prompts[prog.index%prompts.length];
+    }
+
+    const selectedLabel=gSel.value;
+    const g=gestures.find(x=>x.label===selectedLabel)||{label:'REST',emoji:'✋',display_name:'Rest',concept:'Resting (no message)',description:'Let your hands relax or rest them in your lap.',hint:'Record ordinary moments when you are not gesturing. These teach the app when to stay silent.'};
+    $('pose').textContent=g.emoji||'✋';
+    $('meaning').textContent=g.display_name||g.label;
+    $('concept').textContent=g.concept?`Means: ${g.concept}`:'';
+    $('instruction').textContent=g.description||g.text||'';
+    $('hint').textContent=g.hint||'';
+
+    $('mouthPrompt').textContent=pSel.value||'No phrase set up yet';
+    $('round').textContent=`${stageLabels[currentStage]||currentStage} · Both together`;
+    while(prog.counts.length<=prog.index)prog.counts.push(0);
+    $('progress').textContent=`${prog.counts[prog.index]||0} of ${targetCount} tries for this pair`;
+    $('next').textContent='Next pair →';
+  }else if(isLip){
+    const prompts=activeProfile.lip_prompts||[];
+    if(prog.index>=prompts.length)prog.index=0;
+    while(prog.counts.length<prompts.length)prog.counts.push(0);
+    $('mouthPrompt').textContent=prompts[prog.index]||'No phrase set up yet';
+    $('round').textContent=`${stageLabels[currentStage]||currentStage} · Lips`;
+    $('progress').textContent=`${prog.counts[prog.index]||0} of ${targetCount} tries for this phrase`;
+    $('next').textContent='Next phrase →';
+  }else{
+    const gestures=activeProfile.gestures||[];
+    if(prog.index>=gestures.length)prog.index=0;
+    while(prog.counts.length<gestures.length)prog.counts.push(0);
+    const g=gestures[prog.index]||{label:'REST',emoji:'✋',text:'Relax',hint:''};
+    $('pose').textContent=g.emoji||'✋';
+    $('meaning').textContent=g.display_name||g.label;
+    $('concept').textContent=g.concept?`Means: ${g.concept}`:'';
+    $('instruction').textContent=g.description||g.text||'';
+    $('hint').textContent=g.hint||'';
+    $('round').textContent=`${stageLabels[currentStage]||currentStage} · Gestures`;
+    $('progress').textContent=`${prog.counts[prog.index]||0} of ${targetCount} tries for this gesture`;
+    $('next').textContent='Next gesture →';
+  }
+
+  $('progress').textContent+=' (a practice count, not a recognition result)';
+  // Check if current stage is completed for this modality
+  checkStageCompletion();
+  controls();
+}
+
+function checkStageCompletion(){
+  if(videoRequested()){$('advanceBox').hidden=true;return;} // Data collection is not trainer selection or model activation.
+  const prog=getProgressData(activeProfile.id,currentStage,mode);
+  let items;
+  if(mode==='lips') items=activeProfile.lip_prompts||[];
+  else if(mode==='paired') items=pairedItems();
+  else items=activeProfile.gestures||[];
+  const targetCount=STAGE_TARGETS[currentStage]?.[mode]||3;
+  const allMet=items.length>0&&prog.counts.length>=items.length&&items.every((_,i)=>(prog.counts[i]||0)>=targetCount);
+
+  if(allMet){
+    $('advanceBox').hidden=false;
+    if(currentStage==='train'){
+      $('advanceMsg').textContent='You have reached the suggested number of tries. Next, record again on another occasion. This count does not check a model.';
+      $('btnAdvanceStage').textContent='Continue to Check on another occasion →';
+    }else if(currentStage==='validation'){
+      $('advanceMsg').textContent='You have reached the suggested number of tries. Next, record a separate final check on another occasion. This is not a model result.';
+      $('btnAdvanceStage').textContent='Continue to Final check →';
+    }else if(currentStage==='test'){
+      $('advanceMsg').textContent='You have reached the suggested number of tries. Review model reports before you activate anything.';
+      $('btnAdvanceStage').textContent='Continue to Activate →';
+    }else{
+      $('advanceMsg').textContent='Setup completed.';
+      $('btnAdvanceStage').textContent='Continue to Practice →';
+    }
+  }else{
+    $('advanceBox').hidden=true;
+  }
+}
+
+$('btnAdvanceStage').onclick=()=>{
+  if(recording||working)return;
+  if(currentStage==='train'){
+    setStage('validation');
+  }else if(currentStage==='validation'){
+    setStage('test');
+  }else if(currentStage==='test'){
+    setStage('models');
+  }else{
+    setStage('train');
+  }
+};
+
+function controls(){
+  const b=$('record');
+  b.disabled=!captureAvailable||working||!token||currentStage==='setup'||(!recording&&videoRequested()&&(!$('videoConsent').checked||!signModelInfo));
+  b.textContent=working?'Please wait…':recording?'Finish & save':'Start recording';
+  b.classList.toggle('active',recording);
+  $('discard').disabled=!recording||working;
+  $('cameraOff').disabled=!stream||working;
+  $('localConsent').disabled=recording||working;
+  $('next').disabled=recording||working||currentStage==='setup';
+  $('gesturesTab').disabled=recording||working;
+  $('lipsTab').disabled=recording||working;
+  $('pairedTab').disabled=recording||working;
+  $('pairedGestureSelect').disabled=recording||working;
+  $('pairedPromptSelect').disabled=recording||working;
+  $('pairedCaptureKind').disabled=recording||working;
+  $('videoConsent').disabled=recording||working;
+  for(const id of ['stepSetup','stepTrain','stepValidation','stepTest','stepModels','profileSelect','btnNewProfile','btnNewSession']) $(id).disabled=recording||working||modelBusy;
+  modelControls();
+}
+
+function clearMouth(message){
+  mouthCrop=null;
+  mouthDraw.clearRect(0,0,320,200);
+  $('mouthPlaceholder').hidden=false;
+  $('mouthPlaceholder').textContent=message;
+  $('mouthTracking').textContent=message;
+}
+
+function paint(hands,mouth){
+  draw.clearRect(0,0,640,480);
+  lastTracking=Date.now();
+  for(const hand of hands){
+    const p=hand.landmarks||[],color=hand.handedness==='Left'?'#0d9488':'#d97706';
+    draw.strokeStyle=color;
+    draw.lineWidth=3;
+    for(const [a,b]of edges){
+      if(!p[a]||!p[b])continue;
+      draw.beginPath();
+      draw.moveTo((1-p[a][0])*640,p[a][1]*480);
+      draw.lineTo((1-p[b][0])*640,p[b][1]*480);
+      draw.stroke();
+    }
+    for(const v of p){
+      draw.beginPath();
+      draw.arc((1-v[0])*640,v[1]*480,4,0,Math.PI*2);
+      draw.fillStyle=color;
+      draw.fill();
+    }
+    if(p.length){
+      const xs=p.map(v=>(1-v[0])*640),ys=p.map(v=>v[1]*480),x=Math.min(...xs),y=Math.min(...ys),w=Math.max(...xs)-x,h=Math.max(...ys)-y;
+      draw.strokeRect(x-8,y-8,w+16,h+16);
+      draw.fillStyle=color;
+      draw.font='16px sans-serif';
+      draw.fillText(hand.handedness||'Hand',Math.max(5,x),Math.max(20,y-14));
+    }
+  }
+  $('tracking').textContent=hands.length?`Tracking ${hands.length} hand${hands.length>1?'s':''}`:'No hand detected';
+
+  if(mouthPreviewError){
+    clearMouth(`Face preview unavailable: ${mouthPreviewError}`);
+    return;
+  }
+  const box=mouth?.mouth_box;
+  if(!box||box.length!==4){
+    clearMouth(mouth?.error?'Face tracker issue':'Face not detected');
+    return;
+  }
+  const [x,y,w,h]=box,aspect=1.6*snapshot.height/snapshot.width,targetW=Math.min(1,Math.max(.18,w*2.4)),targetH=Math.min(1,Math.max(targetW/aspect,h*3.2));
+  if(!mouthCrop)mouthCrop={x:x+w/2,y:y+h/2,w:targetW,h:targetH};
+  mouthCrop.x+=(x+w/2-mouthCrop.x)*.15;
+  mouthCrop.y+=(y+h/2-mouthCrop.y)*.15;
+  if(Math.abs(targetW-mouthCrop.w)/mouthCrop.w>.03)mouthCrop.w+=(targetW-mouthCrop.w)*.08;
+  if(Math.abs(targetH-mouthCrop.h)/mouthCrop.h>.03)mouthCrop.h+=(targetH-mouthCrop.h)*.08;
+  mouthCrop.w=Math.max(.18,Math.min(1,mouthCrop.w));
+  mouthCrop.h=Math.max(mouthCrop.w/aspect,Math.min(1,mouthCrop.h));
+  const left=Math.max(0,Math.min(1-mouthCrop.w,mouthCrop.x-mouthCrop.w/2)),top=Math.max(0,Math.min(1-mouthCrop.h,mouthCrop.y-mouthCrop.h/2)),sw=mouthCrop.w*snapshot.width,sh=mouthCrop.h*snapshot.height;
+  mouthDraw.clearRect(0,0,320,200);
+  mouthDraw.save();
+  mouthDraw.translate(320,0);
+  mouthDraw.scale(-1,1);
+  mouthDraw.drawImage(snapshot,left*snapshot.width,top*snapshot.height,sw,sh,0,0,320,200);
+
+  const path=(pts,close)=>{
+    if(!Array.isArray(pts)||pts.length<2)return;
+    mouthDraw.beginPath();
+    pts.forEach((p,i)=>{
+      const px=(p[0]-left)*snapshot.width/sw*320,py=(p[1]-top)*snapshot.height/sh*200;
+      i?mouthDraw.lineTo(px,py):mouthDraw.moveTo(px,py);
+    });
+    if(close)mouthDraw.closePath();
+    mouthDraw.stroke();
+    pts.forEach(p=>{
+      mouthDraw.beginPath();
+      mouthDraw.arc((p[0]-left)*snapshot.width/sw*320,(p[1]-top)*snapshot.height/sh*200,2.2,0,Math.PI*2);
+      mouthDraw.fill();
+    });
+  };
+  mouthDraw.strokeStyle='#0d9488';
+  mouthDraw.fillStyle='#5eead4';
+  mouthDraw.lineWidth=2.4;
+  path(mouth.outer_lips,true);
+  mouthDraw.lineWidth=1.8;
+  path(mouth.inner_lips,true);
+  mouthDraw.restore();
+  $('mouthPlaceholder').hidden=true;
+  $('mouthTracking').textContent=`Tracking face (quality ${(mouth?.quality||0).toFixed(2)})`;
+}
+
+async function sendFrame(){
+  if(!stream||inflight||!video.videoWidth)return;
+  inflight=true;
+  try{
+    const width=960,height=720;
+    if(canvas.width!==width){canvas.width=width;canvas.height=height}
+    ctx.drawImage(video,0,0,width,height);
+    snapshot.getContext('2d').drawImage(canvas,0,0,width,height);
+    const blob=await new Promise(r=>canvas.toBlob(r,'image/jpeg',.7));
+    const d=await request('/api/frame',{
+      method:'POST',
+      headers:{'Content-Type':'image/jpeg','X-QuietBridge-Token':token},
+      body:blob
+    });
+
+    framesReceivedCount++;
+    if(recording){
+      const elapsedSec=(Date.now()-recordingStartTime)/1000;
+      const measuredRate=elapsedSec>0?(framesReceivedCount/elapsedSec).toFixed(1):'0.0';
+      $('measuredFps').textContent=`${measuredRate} fps`;
+      $('recordDuration').textContent=`${elapsedSec.toFixed(1)}s`;
+      $('receivedFrames').textContent=`${framesReceivedCount} frames`;
+    }
+
+    if(!Array.isArray(d.tracking)){
+      draw.clearRect(0,0,640,480);
+      $('tracking').textContent='Tracking backend needs update';
+      clearMouth('Face not detected');
+      return;
+    }
+    paint(d.tracking,d.mouth);
+    frames=mode==='lips'?(d.mouth?.frames||0):(d.recorded_frames||0);
+
+    if(recording){
+      // Updated every frame, so it is deliberately not a live region.
+      const seconds=((Date.now()-started)/1000).toFixed(1);
+      $('recordingMeter').textContent=`Recording: ${seconds} s · ${frames} ${mode==='lips'?'mouth frames':'frames'} received`;
+    }
+    if(d.mouth?.limit_reached||d.limit_reached){
+      note(activeVideoCapture?'Video limit reached. Discard this try and record a shorter sign.':'Time limit for one try reached. Press Finish & save.',true);
+    }
+  }catch(e){
+    stopCamera();
+    $('tracking').textContent='Camera off';
+    note(`${e.message} Camera is off.${recording?' Discard or save the current try before trying again.':''}`,true);
+    controls();
+  }finally{
+    inflight=false;
+  }
+}
+
+async function camera(){
+  if(stream)return;
+  // getUserMedia target frameRate ideal 30
+  stream=await navigator.mediaDevices.getUserMedia({
+    video:{width:{ideal:960},height:{ideal:720},frameRate:{ideal:30}},
+    audio:false
+  });
+  video.srcObject=stream;
+  await video.play();
+  $('placeholder').hidden=true;
+  try{
+    await action('mouth/preview',{});
+    mouthPreviewError='';
+  }catch(e){
+    mouthPreviewError=e.message;
+    clearMouth(`Face preview unavailable: ${e.message}`);
+  }
+  // Target 25 fps serial upload interval (40ms)
+  loop=setInterval(sendFrame,UPLOAD_INTERVAL_MS);
+  sendFrame();
+}
+
+function setStage(stage){
+  if(recording||working||modelBusy)return;
+  if(stage===currentStage)return;
+  if(currentStage==='setup' && !confirmDiscardSetup())return;
+  if(stage==='setup')setupBaseline=null;
+  currentStage=stage;
+  if(stage==='models'){
+    render();
+    refreshModelStatus();
+    return;
+  }
+  const split=currentStage==='setup'?'setup':(currentStage==='validation'?'validation':(currentStage==='test'?'test':'train'));
+  if(split!=='setup'){
+    getActiveSession(activeProfile.id,mode,split);
+  }
+  render();
+}
+
+$('stepSetup').onclick=()=>setStage('setup');
+$('stepTrain').onclick=()=>setStage('train');
+$('stepValidation').onclick=()=>setStage('validation');
+$('stepTest').onclick=()=>setStage('test');
+$('stepModels').onclick=()=>setStage('models');
+
+$('btnNewSession').onclick=()=>{
+  if(recording||working)return;
+  const split=currentStage==='validation'?'validation':(currentStage==='test'?'test':'train');
+  const fresh=renewActiveSession(activeProfile.id,mode,split);
+  $('sessionLabel').textContent=fresh;
+  note('New session started. Use a new session each time you record on a different occasion.');
+};
+
+function advanceItem(){
+  const prog=getProgressData(activeProfile.id,currentStage,mode);
+  let items;
+  if(mode==='lips') items=activeProfile.lip_prompts||[];
+  else if(mode==='paired') items=pairedItems();
+  else items=activeProfile.gestures||[];
+  if(!items.length)return;
+  prog.index=(prog.index+1)%items.length;
+  saveProgressData(activeProfile.id,currentStage,mode,prog);
+  render();
+}
+
+$('next').onclick=()=>{
+  if(recording||working)return;
+  advanceItem();
+};
+
+$('gesturesTab').onclick=()=>{
+  if(recording||working)return;
+  if(currentStage==='setup')collectSetupFields();
+  mode='gestures';
+  note('Ready. Press Start recording when you are in view.');
+  render();
+};
+
+$('lipsTab').onclick=()=>{
+  if(recording||working)return;
+  if(currentStage==='setup')collectSetupFields();
+  mode='lips';
+  note('Ready. You will mouth the phrase shown, without sound.');
+  render();
+};
+
+$('pairedTab').onclick=()=>{
+  if(recording||working)return;
+  if(currentStage==='setup')collectSetupFields();
+  mode='paired';
+  note('Ready. Choose a gesture and a phrase, then Start recording.');
+  render();
+};
+
+$('pairedCaptureKind').onchange=()=>{
+  if(recording||working)return;
+  $('videoConsent').checked=false;
+  render();
+};
+$('videoConsent').onchange=()=>controls();
+
+$('pairedGestureSelect').onchange=()=>{
+  if(recording||working)return;
+  render();
+};
+
+$('pairedPromptSelect').onchange=()=>{
+  if(recording||working)return;
+  render();
+};
+
+$('record').onclick=async()=>{
+  if(working)return;
+  working=true;
+  controls();
+  try{
+    if(!recording){
+      if(!activeProfile?.id)throw Error('Choose a profile first.');
+      if(!$('localConsent').checked)throw Error('To record, first tick the box agreeing to save practice tries on this computer.');
+      const selected=getProgressData(activeProfile.id,currentStage,mode);
+      if(mode==='gestures'&&!activeProfile.gestures?.[selected.index]?.label)throw Error('Choose a configured gesture first.');
+      if(mode==='lips'&&!activeProfile.lip_prompts?.[selected.index]?.trim())throw Error('Choose a configured prompt first.');
+      if(mode==='paired')pairedRequest(currentStage,'check'); // Validate before opening the camera.
+      await camera();
+      if(pageLeaving){stopCamera();return;}
+      const split=currentStage==='validation'?'validation':(currentStage==='test'?'test':'train');
+      const session=getActiveSession(activeProfile.id,mode,split);
+
+      startingCapture=true;
+      if(mode==='gestures'){
+        const gestures=activeProfile.gestures||[];
+        const prog=getProgressData(activeProfile.id,currentStage,mode);
+        const g=gestures[prog.index];
+        if(!g)throw Error('No gesture configured');
+        await action('start',{
+          label:g.label,
+          split:split,
+          session:session,
+          profile:activeProfile.id
+        });
+      }else if(mode==='lips'){
+        const prompts=activeProfile.lip_prompts||[];
+        const prog=getProgressData(activeProfile.id,currentStage,mode);
+        const p=prompts[prog.index];
+        if(!p)throw Error('No prompt configured');
+        await action('mouth/start',{
+          text:p,
+          split:split,
+          session:session,
+          profile:activeProfile.id
+        });
+      }else if(mode==='paired'){
+        const body=pairedRequest(split,session);
+        await action('paired/start',body);
+        activeVideoCapture=body.capture_video;
+      }
+      recording=true;
+      startingCapture=false;
+      if(pageLeaving){discardOnExit();stopCamera();return;}
+      frames=0;
+      framesReceivedCount=0;
+      started=Date.now();
+      recordingStartTime=Date.now();
+      if(mode==='lips'){
+        note('Recording. Mouth these words silently at a natural pace, then choose Finish & save.');
+      }else if(mode==='gestures'){
+        note('Recording. Keep still for half a second, make the gesture once, then rest for half a second. Then choose Finish & save.');
+      }else{
+        note(activeVideoCapture?'Recording local video. Make one sign while silently mouthing the phrase. Finish within 10 seconds.':'Recording. Make the gesture while silently mouthing the phrase, then choose Finish & save.');
+      }
+    }else{
+      if(!frames)throw Error('Nothing has been captured yet. Wait until the camera view shows tracking, then save.');
+      if(mode==='gestures'){
+        await action('stop');
+      }else if(mode==='lips'){
+        await action('mouth/stop',{});
+      }else if(mode==='paired'){
+        await action('paired/stop',{});
+      }
+      recording=false;
+      stopCamera();
+      const prog=getProgressData(activeProfile.id,currentStage,mode);
+      while(prog.counts.length<=prog.index)prog.counts.push(0);
+      prog.counts[prog.index]=(prog.counts[prog.index]||0)+1;
+      saveProgressData(activeProfile.id,currentStage,mode,prog);
+
+      if(mode==='lips'){
+        note('Saved: mouth close-ups, on this computer. Take a short pause before the next try.');
+      }else if(mode==='gestures'){
+        note('Saved: hand positions, on this computer. Take a short pause before the next try.');
+      }else{
+        note(activeVideoCapture?'Saved locally: video, hand positions and mouth close-ups. Agreement resets for the next try.':'Saved: hand positions and mouth close-ups, on this computer. This is a practice sample only.');
+        $('videoConsent').checked=false;
+        activeVideoCapture=false;
+      }
+
+      const targetCount=STAGE_TARGETS[currentStage]?.[mode]||3;
+      if(!videoRequested()&&prog.counts[prog.index]>=targetCount){
+        advanceItem();
+      }else{
+        render();
+      }
+    }
+  }catch(e){
+    if(!recording)stopCamera();
+    note(e.name==='NotAllowedError'?'Allow camera access in your browser, then try again.':e.message,true);
+  }finally{
+    startingCapture=false;
+    working=false;
+    controls();
+  }
+};
+
+$('discard').onclick=async()=>{
+  if(!recording||working)return;
+  working=true;
+  controls();
+  try{
+    if(mode==='gestures'){
+      await action('discard');
+    }else if(mode==='lips'){
+      await action('mouth/discard');
+    }else if(mode==='paired'){
+      await action('paired/discard');
+    }
+    recording=false;
+    stopCamera();
+    activeVideoCapture=false;
+    $('videoConsent').checked=false;
+    note('Try discarded. Nothing was saved.');
+    render();
+  }catch(e){
+    note(e.message,true);
+  }finally{
+    working=false;
+    controls();
+  }
+};
+
+function stopCamera(){
+  clearInterval(loop); loop=null;
+  $('recordingMeter').textContent='';
+  stream?.getTracks().forEach(t=>t.stop());
+  stream=null; video.srcObject=null;
+  $('placeholder').hidden=false;
+  $('tracking').textContent='Camera off';
+  draw.clearRect(0,0,640,480);
+  clearMouth('Camera off');
+}
+$('cameraOff').onclick=()=>{if(!working){stopCamera();if(recording)note('Camera off. Discard this try, or save what was already captured.',true);controls();}};
+
+// Model operations use the active profile on the server.
+function modelControls(){
+  const blocked=recording||working||modelBusy||!token;
+  const kind=$('modelKind').value;
+  const candidate=(modelData?.candidates||[]).find(c=>c.id===$('candidateSelect').value && c.kind===kind);
+  for(const id of ['trainMotion','trainVisual','trainLanguage','refreshModels','rollbackModel','modelKind','candidateSelect']) $(id).disabled=blocked;
+
+  // Single training button corresponding to selected modelKind
+  $('trainMotion').hidden=kind!=='motion';
+  $('trainVisual').hidden=kind!=='lips';
+  $('trainLanguage').hidden=kind!=='language';
+
+  const isLang=kind==='language';
+  const canEval=!blocked&&candidate&&isLang&&candidate.status==='completed'&&candidate.eval_status!=='running';
+  $('evaluateRecognition').disabled=!canEval;
+  $('evaluateRecognition').hidden=!isLang;
+  $('viewReport').disabled=blocked||!candidate||(!candidate.report&&!candidate.comparison);
+  $('promoteModel').disabled=blocked||!candidate||!candidate.promotable;
+  // The server reports whether a rollback point exists; never offer a restore that can only fail.
+  const restore=modelData?.restore?.[kind];
+  $('rollbackModel').disabled=blocked||!restore?.available;
+  $('restoreHint').textContent=restoreHint(restore,$('modelKind').selectedOptions?.[0]?.textContent||kind);
+}
+
+function restoreHint(restore,kindName){
+  if(!modelData)return '';
+  if(!restore)return 'Restore is unavailable: this recorder did not report earlier saved models.';
+  if(!restore.available)return `Nothing to restore: no ${kindName} model has been replaced for this profile yet.`;
+  return restore.restores==='stock'
+    ?`Restore goes back to no saved ${kindName} model, so the main app uses its standard behaviour.`
+    :`Restore brings back the ${kindName} model that was saved before the current one.`;
+}
+
+const STATUS_TEXT={running:'training…',completed:'training finished',failed:'training failed'};
+function candidateName(c,index){return `Candidate ${index+1} (${c.id.slice(0,6)})`;}
+
+function renderModels(){
+  const kind=$('modelKind').value, select=$('candidateSelect'), previous=select.value;
+  select.replaceChildren();
+  const candidates=(modelData?.candidates||[]).filter(c=>c.kind===kind);
+  if(!candidates.length){
+    const option=document.createElement('option'); option.value=''; option.textContent='No trained candidates yet'; select.appendChild(option);
+  }
+  candidates.forEach((c,index)=>{
+    const option=document.createElement('option'); option.value=c.id;
+    let label=`${candidateName(c,index)} · ${STATUS_TEXT[c.status]||c.status}`;
+    if(c.kind==='language'&&c.eval_status==='running') label+=' · checking recognition';
+    else if(c.status==='completed') label+=c.promotable?' · can be saved':' · cannot be saved';
+    option.textContent=label; select.appendChild(option);
+  });
+  if(candidates.some(c=>c.id===previous))select.value=previous;
+  const active=modelData?.active?.[kind];
+  const kindName=$('modelKind').selectedOptions?.[0]?.textContent||kind;
+  const jobs=(modelData?.jobs||[]).map(j=>`${j.eval_status==='running'?'checking':'training'} ${j.kind} candidate ${j.id}`);
+  $('modelStatus').textContent=modelData
+    ?`Profile: ${activeProfile.name||activeProfile.id}. Saved ${kindName} model for this profile: ${active?active.split(/[\\/]/).pop():'none saved'}. ${jobs.length?`In progress: ${jobs.join('; ')}.`:'Nothing is training right now.'}`
+    :'Model status not loaded.';
+  $('reportView').hidden=true;
+  renderCandidateSummary();
+  modelControls();
+}
+
+// Plain-language fact list for a candidate; file paths stay in a collapsed section.
+function fact(label,value){
+  const li=document.createElement('li'),b=document.createElement('strong');
+  b.textContent=label+': '; li.append(b,document.createTextNode(value)); return li;
+}
+function whyNotSavable(c){
+  if(c.status==='running')return 'Training is still running.';
+  if(c.status==='failed')return 'Training failed. Train a new candidate after checking your recordings.';
+  if(c.report?.failures?.length)return 'The report lists problems (see the report).';
+  if(c.kind==='motion'&&!c.report?.validation_trials)return 'It has no results from a “Check on another occasion” session.';
+  if(c.selected===false)return 'It did not do better than the standard model on your “another occasion” recordings.';
+  if(c.kind==='language'&&!c.comparison_passed)return 'Its recognition check has not passed yet.';
+  return 'Its report is missing or incomplete.';
+}
+
+function renderCandidateSummary(){
+  const kind=$('modelKind').value;
+  const list=(modelData?.candidates||[]).filter(item=>item.kind===kind);
+  const index=list.findIndex(item=>item.id===$('candidateSelect').value);
+  const c=list[index];
+  if(!c){
+    $('candidateSummary').textContent=modelData?'No candidate yet. Record practice and “another occasion” sessions, then train one.':'';
+    if($('comparisonMetrics')) $('comparisonMetrics').hidden=true;
+    return;
+  }
+  const facts=document.createElement('ul'); facts.className='candidate-facts';
+  facts.append(fact(candidateName(c,index),STATUS_TEXT[c.status]||c.status));
+  if(c.kind!=='motion'&&c.selected!=null)facts.append(fact('Trainer’s choice',c.selected?'better than the standard model on your “another occasion” recordings':'not better than the standard model; the standard model stays'));
+  facts.append(fact('Save for main app',c.promotable?'possible after you review the report':`not possible. ${whyNotSavable(c)}`));
+  const failures=c.report?.failures;
+  const correctionWarnings=c.report?.corrections?.warnings||[];
+  const details=[c.error?`Error: ${c.error}`:'',c.comparison_warning||'',correctionWarnings.length?`Correction data: ${correctionWarnings.join(' ')}`:'',failures?.length?`Report problems: ${typeof failures==='string'?failures:failures.join('; ')}`:'',c.report?.text_overlap?.also_in_training?c.report.text_overlap.note:''];
+
+  if(c.kind==='language'){
+    if(c.eval_status==='running'){
+      details.push('Recognition: evaluating…');
+    }else if(c.eval_error){
+      details.push(`Recognition error: ${c.eval_error}`);
+    }else if(c.comparison){
+      const stock=c.comparison?.variants?.stock?.metrics;
+      const cand=c.comparison?.variants?.candidate?.metrics;
+      const fmtWer=v=>v!=null?(v*100).toFixed(1)+'%':'N/A';
+      const stockStr=`Stock WER: ${fmtWer(stock?.wer)} (target: ${fmtWer(stock?.target_wer)})`;
+      const candStr=`Candidate WER: ${fmtWer(cand?.wer)} (target: ${fmtWer(cand?.target_wer)})`;
+      const gateStr=c.comparison_passed?'Passed':'Not passed; check report identity and metrics';
+      details.push(`Recognition: ${stockStr} vs ${candStr} [Gate: ${gateStr}]`);
+    }else{
+      details.push('Recognition: not checked yet (required before saving)');
+    }
+  }
+
+  details.filter(Boolean).forEach(text=>{const li=document.createElement('li');li.textContent=text;facts.append(li);});
+  const files=document.createElement('details'); files.id='candidateFiles';
+  const summary=document.createElement('summary'); summary.textContent='File locations';
+  const paths=document.createElement('ul'); paths.className='candidate-facts';
+  paths.append(fact('Model file',c.model_path||'not written'),fact('Report',c.report_path||'not written'));
+  files.append(summary,paths);
+  $('candidateSummary').replaceChildren(facts,files);
+
+  if($('comparisonMetrics')){
+    if(c.kind==='language' && c.comparison?.variants){
+      const stock=c.comparison.variants.stock?.metrics;
+      const cand=c.comparison.variants.candidate?.metrics;
+      const fmtWer=v=>v!=null?(v*100).toFixed(1)+'%':'N/A';
+      $('comparisonMetrics').innerHTML=`<strong>Recognition check:</strong> Stock WER: <code>${fmtWer(stock?.wer)}</code> (target: <code>${fmtWer(stock?.target_wer)}</code>) | Candidate WER: <code>${fmtWer(cand?.wer)}</code> (target: <code>${fmtWer(cand?.target_wer)}</code>) &mdash; <span class="${c.comparison_passed?'gate-pass':'gate-fail'}">${c.comparison_passed?'&check; Check passed':'&cross; Check not passed'}</span>`;
+      $('comparisonMetrics').hidden=false;
+    }else{
+      $('comparisonMetrics').hidden=true;
+    }
+  }
+}
+
+// Server errors are terse; add the next step a person can take.
+function modelErrorHelp(message){
+  const hints=[
+    [/Independent train and validation recordings are required/i,'Record at least one Practice session and one “Check on another occasion” session for this model type, then train again.'],
+    [/already running/i,'Wait for it to finish, then choose Refresh status.'],
+    [/not eligible for promotion/i,'Only a candidate the trainer selected (and, for word suggestions, one that passed its recognition check) can be saved. Open its report to see why.'],
+    [/No previous model to roll back to/i,'There is no earlier saved model of this type for this profile.'],
+    [/must be completed before evaluation/i,'Wait until training has finished, then choose Refresh status.'],
+    [/Stop or discard the recording first/i,'Go back to the recording step and finish or discard the open try.']
+  ];
+  const hint=hints.find(([pattern])=>pattern.test(message));
+  return hint?`${message}. ${hint[1]}`.replace(/\.\. /,'. '):message;
+}
+
+async function refreshModelStatus(){
+  if(recording||working||modelBusy)return;
+  modelBusy=true; controls();
+  try{modelData=await request('/api/models'); $('modelError').textContent=''; renderModels()}
+  catch(e){modelData=null; $('modelStatus').textContent='Model status unavailable.'; $('modelError').textContent=modelErrorHelp(e.message)}
+  finally{modelBusy=false; controls()}
+}
+
+async function modelAction(path,data){
+  if(recording||working||modelBusy)return;
+  modelBusy=true; controls();
+  try{
+    $('modelError').textContent='';
+    modelData=await action('models/'+path,data); renderModels();
+    if(path==='promote'||path==='rollback'){
+      const message=document.createElement('span');
+      message.textContent='Model files saved. The running app has not reloaded them. ';
+      const link=document.createElement('a');
+      link.href=new URL('settings',getSafeReturnUrl()).href;
+      link.textContent='Open Settings to reload current models.';
+      $('modelSaveNotice').replaceChildren(message,link);
+    }
+  }
+  catch(e){$('modelError').textContent=modelErrorHelp(e.message)}
+  finally{modelBusy=false; controls()}
+}
+
+for(const [id,kind] of [['trainMotion','motion'],['trainVisual','lips'],['trainLanguage','language']]){
+  $(id).onclick=()=>{ $('modelKind').value=kind; modelAction('train',{kind}) };
+}
+$('refreshModels').onclick=refreshModelStatus;
+$('modelKind').onchange=()=>{ renderModels(); };
+$('candidateSelect').onchange=()=>{ $('reportView').hidden=true; renderCandidateSummary(); modelControls() };
+$('evaluateRecognition').onclick=()=>{
+  const candidate_id=$('candidateSelect').value;
+  if(!candidate_id)return;
+  modelAction('evaluate',{kind:'language',candidate_id});
+};
+// Readable report: counts with their denominators; "not measured" is never shown as 0.
+function ratio(n,d){return d?`${n} of ${d}`:'not measured (no recordings)';}
+function pct(v){return v==null?'not measured':`${(v*100).toFixed(1)}%`;}
+function reportRows(c){
+  const r=c.report||{}, rows=[];
+  if(c.kind==='motion'){
+    rows.push(['Recordings used','practice '+(r.train_trials??'?')+', another occasion '+(r.validation_trials??0)+', final check '+(r.test_trials??0)]);
+    for(const [name,m] of [['Another occasion',r.validation_ungated],['Final check',r.test_ungated]]){
+      if(!m){rows.push([name,'not recorded']);continue;}
+      rows.push([`${name}: gestures recognized`,ratio(m.positive_correct,m.positive_trials)]);
+      rows.push([`${name}: rest stayed silent`,ratio(m.rest_correctly_silent,m.rest_trials)]);
+      rows.push([`${name}: wrong gesture or false alarm`,m.trials?String(m.false_positives):'not measured (no recordings)']);
+    }
+  }else if(c.kind==='lips'){
+    rows.push(['Recordings used',`practice ${r.counts?.train??'?'}, another occasion ${r.counts?.validation??0}, final check ${r.counts?.test??0}`]);
+    for(const [name,split] of [['Another occasion','val'],['Final check','test']]){
+      rows.push([`${name}: word error rate, standard`,pct(r.baseline?.[split]?.metrics?.wer)]);
+      rows.push([`${name}: word error rate, candidate`,pct(r.candidate?.[split]?.metrics?.wer)]);
+    }
+  }else{
+    rows.push(['Phrases used',`practice ${r.counts?.train??'?'}, another occasion ${r.counts?.validation??0}, corrections ${r.counts?.corrections??0}`]);
+    if(r.perplexity)rows.push(['Fit to your “another occasion” phrases (lower is better)',`${r.perplexity.before?.yours?.toFixed?.(1)??'?'} before, ${r.perplexity.after?.yours?.toFixed?.(1)??'?'} after`]);
+    if(r.text_overlap)rows.push(['Same wording in practice and check',`${r.text_overlap.also_in_training} of ${r.text_overlap.validation_phrases} phrases`]);
+  }
+  if(r.selection?.reason)rows.push(['Trainer’s decision',r.selection.reason]);
+  return rows;
+}
+$('viewReport').onclick=()=>{
+  const candidate=(modelData?.candidates||[]).find(c=>c.id===$('candidateSelect').value && c.kind===$('modelKind').value);
+  if(!candidate?.report && !candidate?.comparison)return;
+  const content=candidate.comparison
+    ? { training_report: candidate.report, recognition_comparison: candidate.comparison }
+    : candidate.report;
+  const table=document.createElement('table'), body=document.createElement('tbody');
+  for(const [label,value] of reportRows(candidate)){
+    const tr=document.createElement('tr'), th=document.createElement('th'), td=document.createElement('td');
+    th.scope='row'; th.textContent=label; td.textContent=value; td.className='num'; tr.append(th,td); body.append(tr);
+  }
+  table.append(body);
+  const note=document.createElement('p'); note.className='field-hint';
+  note.textContent='These counts come from your own recordings. Small numbers are not proof of everyday accuracy.';
+  $('reportSummary').replaceChildren(table,note);
+  $('modelReport').textContent=typeof content==='string'?content:JSON.stringify(content,null,2);
+  $('reportDetails').open=false;
+  $('reportView').hidden=false;
+  $('reportTitle').focus?.();
+};
+$('promoteModel').onclick=()=>{
+  const kind=$('modelKind').value,candidate_id=$('candidateSelect').value;
+  if(confirm(`Save candidate ${candidate_id} as this profile's model? The running main app keeps its current models until you reload them in Settings.`))modelAction('promote',{kind,candidate_id});
+};
+$('rollbackModel').onclick=()=>{
+  const kind=$('modelKind').value;
+  if(confirm(`Restore the previously saved ${$('modelKind').selectedOptions?.[0]?.textContent||kind} model for this profile? The running main app keeps its current models until you reload them in Settings.`))modelAction('rollback',{kind});
+};
+
+// Setup Panel & Customization Logic
+function collectSetupFields(){
+  activeProfile.name=$('profileDisplayName').value;
+  $('gestureTbody').querySelectorAll('tr').forEach((row,i)=>{
+    const gesture=activeProfile.gestures[i];
+    for(const field of ['emoji','label','display_name','concept','description','intent_template']){
+      const value=row.querySelector(`[data-field="${field}"]`).value;
+      if(field==='intent_template'&&!value)delete gesture[field]; else gesture[field]=value;
+    }
+  });
+  activeProfile.lip_prompts=Array.from($('promptTbody').querySelectorAll('tr'),row=>row.querySelector('input').value);
+}
+function setupDirty(){
+  if(currentStage!=='setup'||!setupBaseline)return false;
+  collectSetupFields();
+  return JSON.stringify(activeProfile)!==setupBaseline;
+}
+function confirmDiscardSetup(){
+  if(!setupDirty())return true;
+  if(!confirm('Discard your unsaved changes to your name, gestures and phrases?'))return false;
+  activeProfile=JSON.parse(setupBaseline);
+  renderSetupView();
+  return true;
+}
+function renderSetupView(){
+  $('profileDisplayName').value=activeProfile.name||'';
+  const tbodyG=$('gestureTbody');
+  tbodyG.innerHTML='';
+  (activeProfile.gestures||[]).forEach((g,idx)=>{
+    const tr=document.createElement('tr');
+    const escape=value=>String(value||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    tr.innerHTML=`<td><details class="gesture-definition"><summary><span>${escape(g.display_name||g.label)}</span><span class="gesture-meaning">${g.label==='REST'?'No message. Keep ordinary rest silent.':escape(g.concept)}</span></summary>
+      <div class="gesture-fields">
+        <label>Gesture name<input type="text" value="${escape(g.display_name)}" data-field="display_name" data-idx="${idx}"></label>
+        <label>Words this gesture means<input type="text" value="${escape(g.concept)}" data-field="concept" data-idx="${idx}"></label>
+        <label class="gesture-instruction">How you make it<textarea rows="2" data-field="description" data-idx="${idx}">${escape(g.description)}</textarea></label>
+      </div>
+      <details class="gesture-advanced"><summary>Advanced: labels and sentence templates</summary><div class="gesture-fields">
+        <label>Internal label<input type="text" value="${escape(g.label)}" data-field="label" data-idx="${idx}"></label>
+        <label>Optional icon<input type="text" value="${escape(g.emoji)}" data-field="emoji" data-idx="${idx}"></label>
+        <label class="gesture-instruction">Sentence template<input type="text" data-field="intent_template" data-idx="${idx}" aria-label="Intent template for gesture ${idx+1}" placeholder="e.g. I need {gesture}"><small>Optional. Use one {gesture} slot. Only exact lip context can fill it.</small></label>
+      </div></details>
+      <button type="button" class="btn-del-g btn-remove" data-idx="${idx}" aria-label="Remove gesture: ${escape(g.display_name||g.label)}">Remove gesture</button>
+    </details></td>`;
+    tr.querySelector('[data-field="intent_template"]').value=g.intent_template||'';
+    tbodyG.appendChild(tr);
+  });
+
+  const tbodyP=$('promptTbody');
+  tbodyP.innerHTML='';
+  (activeProfile.lip_prompts||[]).forEach((p,idx)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td><input type="text" maxlength="300" aria-label="Practice phrase ${idx+1}" data-idx="${idx}"></td>
+      <td><button type="button" class="btn-del-p btn-remove" data-idx="${idx}" aria-label="Remove phrase ${idx+1}">Remove</button></td>
+    `;
+    tr.querySelector('input').value=p;
+    tr.querySelector('input').placeholder='Type a phrase you often say';
+    tbodyP.appendChild(tr);
+  });
+
+  tbodyG.querySelectorAll('.btn-del-g').forEach(btn=>{
+    btn.onclick=()=>{
+      const idx=parseInt(btn.getAttribute('data-idx'),10);
+      if(activeProfile.gestures.length<=1){
+        $('setupError').textContent='Keep at least one gesture. Change this one instead of removing it.';
+        return;
+      }
+      collectSetupFields();
+      activeProfile.gestures.splice(idx,1);
+      renderSetupView();
+      // Keep keyboard focus near the removed row instead of dropping it to the page.
+      const rows=$('gestureTbody').querySelectorAll('summary');
+      (rows[Math.min(idx,rows.length-1)]||$('btnAddGesture'))?.focus?.();
+    };
+  });
+
+  tbodyP.querySelectorAll('.btn-del-p').forEach(btn=>{
+    btn.onclick=()=>{
+      const idx=parseInt(btn.getAttribute('data-idx'),10);
+      if(activeProfile.lip_prompts.length<=1){
+        $('setupError').textContent='Keep at least one phrase. Change this one instead of removing it.';
+        return;
+      }
+      collectSetupFields();
+      activeProfile.lip_prompts.splice(idx,1);
+      renderSetupView();
+      const inputs=$('promptTbody').querySelectorAll('input');
+      (inputs[Math.min(idx,inputs.length-1)]||$('btnAddPrompt'))?.focus?.();
+    };
+  });
+  const count=(activeProfile.lip_prompts||[]).length;
+  $('promptCount').textContent=`(${count} ${count===1?'phrase':'phrases'})`;
+  if(!setupBaseline){ collectSetupFields(); setupBaseline=JSON.stringify(activeProfile); }
+}
+
+// A new gesture needs an internal label nobody else uses, even after removals.
+function unusedGestureLabel(gestures){
+  const used=new Set(gestures.map(g=>g.label));
+  let n=gestures.length+1;
+  while(used.has(`GESTURE_${n}`))n++;
+  return n;
+}
+
+// Server messages name internal fields; say what to change on this page instead.
+function setupErrorHelp(message){
+  const hints=[
+    [/Duplicate gesture label '([^']*)'/,m=>`Two gestures use the same internal label ${m[1]}. Open “Advanced” on one of them and give it a different label.`],
+    [/Gesture label '([^']*)' must be/,m=>`The internal label “${m[1]}” can only use capital letters, digits and _ (start with a letter, at most 32). Change it under “Advanced”.`],
+    [/lip_prompts must be a non-empty list/,()=>'Add at least one phrase before saving.'],
+    [/Lip prompt must be 1-(\d+) characters/,m=>`Each phrase must be 1 to ${m[1]} characters long.`],
+    [/Profile name must be 1-(\d+) characters/,m=>`Your name must be 1 to ${m[1]} characters long.`],
+    [/intent_template/,()=>'A sentence template needs exactly one {gesture} slot.'],
+    [/body too large/,()=>'There is too much text to save at once. Remove some phrases and try again.']
+  ];
+  for(const [pattern,help] of hints){const m=message.match(pattern); if(m)return help(m);}
+  return `Could not save: ${message}`;
+}
+
+$('btnAddGesture').onclick=()=>{
+  collectSetupFields();
+  const n=unusedGestureLabel(activeProfile.gestures);
+  activeProfile.gestures.push({
+    label:`GESTURE_${n}`,
+    display_name:`Gesture ${n}`,
+    concept:'New concept',
+    description:'Describe the physical movement',
+    hint:'0.5s pause, move once, 0.5s pause',
+    emoji:'✋'
+  });
+  renderSetupView();
+  const added=$('gestureTbody').querySelectorAll('details.gesture-definition');
+  const last=added[added.length-1];
+  if(last){last.open=true; last.querySelector('[data-field="display_name"]')?.focus?.();}
+};
+
+$('btnAddPrompt').onclick=()=>{
+  collectSetupFields();
+  activeProfile.lip_prompts.push('');
+  renderSetupView();
+  const inputs=$('promptTbody').querySelectorAll('input');
+  inputs[inputs.length-1]?.focus?.();
+};
+
+$('btnSaveProfile').onclick=async()=>{
+  $('setupError').textContent='';
+  try{
+    activeProfile.name=$('profileDisplayName').value.trim()||activeProfile.id;
+    // Collect updated gestures from inputs
+    const gRows=$('gestureTbody').querySelectorAll('tr');
+    const newGestures=[];
+    gRows.forEach((row,index)=>{
+      const emoji=row.querySelector('[data-field="emoji"]').value.trim()||'✋';
+      const label=row.querySelector('[data-field="label"]').value.trim().toUpperCase();
+      const display_name=row.querySelector('[data-field="display_name"]').value.trim()||label;
+      const concept=row.querySelector('[data-field="concept"]').value.trim()||display_name;
+      const description=row.querySelector('[data-field="description"]').value.trim();
+      const intent_template=row.querySelector('[data-field="intent_template"]').value.trim();
+      if(intent_template && intent_template.split('{gesture}').length!==2)throw Error('intent_template must contain exactly one {gesture}');
+      const gesture={...activeProfile.gestures[index],emoji,label,display_name,concept,description};
+      if(intent_template)gesture.intent_template=intent_template; else delete gesture.intent_template;
+      newGestures.push(gesture);
+    });
+
+    const pRows=$('promptTbody').querySelectorAll('tr');
+    const newPrompts=[];
+    pRows.forEach(row=>{
+      const text=row.querySelector('input').value.trim();
+      if(text)newPrompts.push(text);
+    });
+
+    const updated=await action('profile/update',{
+      id:activeProfile.id,
+      name:activeProfile.name,
+      gestures:newGestures,
+      lip_prompts:newPrompts
+    });
+    activeProfile=updated;
+    await loadProfiles();
+    setupBaseline=null;
+    setStage('train');
+    note('Saved. Start recording when you are ready.');
+  }catch(e){
+    $('setupError').textContent=setupErrorHelp(e.message);
+  }
+};
+
+$('btnExitSetup').onclick=()=>setStage('train');
+
+// Profile selection & creation
+async function loadProfiles(){
+  const data=await request('/api/profiles');
+  allProfiles=data.profiles||[];
+  const sel=$('profileSelect');
+  sel.innerHTML='';
+  const nameCount={};
+  allProfiles.forEach(p=>{nameCount[p.name||p.id]=(nameCount[p.name||p.id]||0)+1;});
+  allProfiles.forEach(p=>{
+    const opt=document.createElement('option');
+    opt.value=p.id;
+    const name=p.name||p.id;
+    opt.textContent=nameCount[name]>1?`${name} (${p.id})`:name;
+    if(p.id===data.active_profile)opt.selected=true;
+    sel.appendChild(opt);
+  });
+  activeProfile=allProfiles.find(p=>p.id===data.active_profile)||allProfiles[0];
+}
+
+$('profileSelect').onchange=async()=>{
+  const targetId=$('profileSelect').value;
+  if(targetId===activeProfile.id)return;
+  if(!confirmDiscardSetup()){ $('profileSelect').value=activeProfile.id; return; }
+  try{
+    const updated=await action('profile/select',{id:targetId});
+    activeProfile=updated;
+    if(currentStage==='setup')setupBaseline=null;
+    $('videoConsent').checked=false;
+    note(`Switched to ${activeProfile.name||activeProfile.id}’s profile.`);
+    modelData=null;
+    render();
+    if(currentStage==='models')await refreshModelStatus();
+  }catch(e){
+    $('profileSelect').value=activeProfile.id;
+    alert('Failed to switch profile: '+e.message);
+  }
+};
+
+function closeProfileDialog(){
+  $('newProfileDialog').hidden=true;
+  dialogReturnFocus?.focus();
+}
+$('btnNewProfile').onclick=()=>{
+  if(!confirmDiscardSetup())return;
+  dialogReturnFocus=$('btnNewProfile');
+  $('newProfileId').value=''; $('newProfileName').value='';
+  $('newProfileDialog').hidden=false; $('newProfileName').focus();
+};
+$('btnCancelNewProfile').onclick=closeProfileDialog;
+$('newProfileDialog').addEventListener('keydown',event=>{
+  if(event.key==='Escape'){event.preventDefault();closeProfileDialog();return;}
+  if(event.key==='Enter'&&event.target?.tagName==='INPUT'){event.preventDefault();$('btnConfirmNewProfile').click?.();return;}
+  if(event.key!=='Tab')return;
+  const focusable=Array.from($('newProfileDialog').querySelectorAll('input,button,summary')).filter(el=>el.getClientRects().length&&!el.disabled);
+  if(!focusable.length)return;
+  const first=focusable[0],last=focusable[focusable.length-1];
+  if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+  else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+});
+$('btnConfirmNewProfile').onclick=async()=>{
+  const name=$('newProfileName').value.trim();
+  if(!name){alert('Please enter your name.');$('newProfileName').focus();return;}
+  const id=$('newProfileId').value.trim()||`profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
+  try{
+    const created=await action('profile/create',{id,name});
+    closeProfileDialog(); await loadProfiles(); activeProfile=created;
+    setupBaseline=null; currentStage='train'; setStage('setup');
+    note(`Created a profile for ${created.name}.`);
+  }catch(e){alert('Failed to create profile: '+e.message);}
+};
+
+setInterval(()=>{
+  if(stream&&lastTracking&&Date.now()-lastTracking>1500){
+    draw.clearRect(0,0,640,480);
+    $('tracking').textContent='Waiting for tracking…';
+    clearMouth('Face not detected');
+  }
+},500);
+
+for(const id of ['returnLink','brandLink','settingsLink'])$(id).addEventListener('click',event=>{
+  if(!confirmDiscardSetup())event.preventDefault();
+});
+window.addEventListener('beforeunload',event=>{
+  if(recording||working||setupDirty()){event.preventDefault(); event.returnValue='';}
+});
+function discardOnExit(){
+  if(!token)return;
+  const path=mode==='paired'?'paired/discard':mode==='lips'?'mouth/discard':'discard';
+  fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-QuietBridge-Token':token},body:'{}',keepalive:true}).catch(()=>{});
+}
+window.addEventListener('pagehide',()=>{
+  pageLeaving=true;
+  if(recording||startingCapture)discardOnExit();
+  stopCamera();
+});
+
+request('/api/state').then(async s=>{
+  token=s.token;
+  signModelInfo=s.sign_model||null;
+  captureAvailable=s.capture_available!==false;
+  $('captureUnavailable').hidden=captureAvailable;
+  if(!captureAvailable)note('Preview only: recording is turned off in this copy of QuietBridge. You can still edit phrases and review models.',true);
+  await loadProfiles();
+  if(s.paired){
+    mode='paired';
+    activeVideoCapture=Boolean(s.paired_recording?.capture_video);
+    if(activeVideoCapture)$('pairedCaptureKind').value='video';
+    recording=true;
+    frames=s.recorded_frames||0;
+    note('An earlier try with both together is still open. Finish & save it, or discard it, before switching.',true);
+  }else if(s.mouth?.recording){
+    // /api/state.recording is also true for a mouth trial, so check lips first.
+    mode='lips';
+    recording=true;
+    frames=s.mouth.frames||0;
+    note('An earlier lip try is still open. Finish & save it, or discard it, before switching.',true);
+  }else if(s.recording){
+    mode='gestures';
+    recording=true;
+    frames=s.recorded_frames||0;
+    note('An earlier gesture try is still open. Finish & save it, or discard it, before switching.',true);
+  }
+
+  // First-time onboarding: if profile has no recorded samples, guide to setup view without opening camera
+  const hasSamples=hasRecordedSamples(activeProfile?.id);
+  if(!hasSamples&&!recording){
+    currentStage='setup';
+    setupBaseline=null;
+  }
+
+  render();
+}).catch(e=>note(e.message,true));
+
+})();
+</script>
+</body>
+</html>

@@ -14,7 +14,7 @@ Rules that apply throughout:
 The recording lab collects data; it does not silently deploy a model. Train a motion candidate from custom profile sessions:
 
 ```sh
-uv run python -m hackathon.signs.train_motion \
+uv run python -m quietbridge.signs.train_motion \
   --data "$HOME/.local/share/quietbridge/profiles/alice/sequences" \
   --output "$HOME/.local/share/quietbridge/profiles/alice/models/motion.candidate.npz"
 ```
@@ -24,7 +24,7 @@ By default every recorded session in each split is used; `--session-prefix` narr
 Train a lip candidate using the same beam width as the main app:
 
 ```sh
-uv run python -m hackathon.signs.train_lips \
+uv run python -m quietbridge.signs.train_lips \
   --data "$HOME/.local/share/quietbridge/profiles/alice/mouths" \
   --output "$HOME/.local/share/quietbridge/profiles/alice/models/lip.candidate.pth" \
   --beam 4
@@ -35,7 +35,7 @@ Training requires an independent `validation/` session. Selection rejects overal
 Train a personal language-model candidate from the same profile's independent text sessions:
 
 ```sh
-uv run python -m hackathon.signs.train_language \
+uv run python -m quietbridge.signs.train_language \
   --data "$HOME/.local/share/quietbridge/profiles/alice/mouths" \
   --output "$HOME/.local/share/quietbridge/profiles/alice/models/lm.candidate.pth"
 ```
@@ -45,7 +45,7 @@ The language report records held-out and general-English perplexity. A candidate
 Perplexity alone does not establish recognition quality. Compare the same VSR and test ROIs with stock versus personal language models:
 
 ```sh
-uv run python -m hackathon.evaluate_language \
+uv run python -m quietbridge.evaluate_language \
   --data "$HOME/.local/share/quietbridge/profiles/alice/mouths" \
   --candidate "$HOME/.local/share/quietbridge/profiles/alice/models/lm.candidate.pth" \
   --output "$HOME/.local/share/quietbridge/profiles/alice/models/lm-comparison.json"
@@ -60,7 +60,7 @@ Use the recording lab's **Paired** mode to capture the same expression as aligne
 After promoting the models to evaluate, run the same paired samples through both paths:
 
 ```sh
-uv run python -m hackathon.evaluate_fusion \
+uv run python -m quietbridge.evaluate_fusion \
   --profile alice --split test \
   --output "$HOME/.local/share/quietbridge/profiles/alice/models/fusion-diagnostic.json"
 ```
@@ -77,4 +77,4 @@ Measure new-session WER, exact intent, key-name/negation/number errors, gesture 
 
 ## Capture-only checks
 
-For capture-only checks, `uv run python -m hackathon.signs.capture_analysis <mouth.npz>` reports actual fps, frame gaps, face coverage and mouth-activity edges. Older recordings without activity metadata report those fields as null.
+For capture-only checks, `uv run python -m quietbridge.signs.capture_analysis <mouth.npz>` reports actual fps, frame gaps, face coverage and mouth-activity edges. Older recordings without activity metadata report those fields as null.

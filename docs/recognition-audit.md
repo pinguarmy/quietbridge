@@ -19,7 +19,7 @@ BSL has its own grammar and uses handshapes, facial expressions and body languag
 | Fusion | Keyword reranking and a single user-declared template slot | No learned word-level alignment or general translation |
 | Speech | Local text-to-speech after explicit user action | Does not establish that recognition was correct |
 
-Evidence: [stock pose map](../hackathon/signs/recognizer.py#L43-L58), [one-event motion classification](../hackathon/signs/recognizer.py#L250-L296), [hand-only features](../hackathon/signs/motion.py#L143-L191), [fusion rules](../hackathon/fusion.py).
+Evidence: [stock pose map](../quietbridge/signs/recognizer.py#L43-L58), [one-event motion classification](../quietbridge/signs/recognizer.py#L250-L296), [hand-only features](../quietbridge/signs/motion.py#L143-L191), [fusion rules](../quietbridge/fusion.py).
 
 The personal motion input contains two sets of 21 hand landmarks and presence masks. It does not encode body posture or facial grammar as sign-language features. The separate lip model is not a non-manual sign-language grammar model. Supporting full BSL would require a BSL-specific dataset, temporal language model, non-manual features, fingerspelling handling where needed, and validation with BSL users. ASL and other sign languages need their own validated language paths. Full translation remains future work. The explicit isolated-sign backend is now implemented and distinguished from personal gestures in Settings; it does not provide those missing language capabilities.
 
@@ -64,7 +64,7 @@ Opening a browser camera session hid the recording control. Automatic mouth chun
 
 The default personal motion mode now keeps a Hold control. Lips and one gesture share its start/end boundary; the completed window is fused before its text enters the session. Gesture-only results survive stopping the camera. Pure lips and experimental automatic-motion input retain their existing automatic behavior. Worker tests cover combined and gesture-only start/release/finish paths. They do not prove physical-camera recognition quality.
 
-Evidence: [session fusion](../hackathon/runtime.py), [cross-module regressions](../hackathon/tests/test_runtime_merge.py), [UI state checks](../hackathon/tests/test_ui_flow.cjs).
+Evidence: [session fusion](../quietbridge/runtime.py), [cross-module regressions](../quietbridge/tests/test_runtime_merge.py), [UI state checks](../quietbridge/tests/test_ui_flow.cjs).
 
 ### 2. Candidate reranking could drop a negation or number. Fixed for the reproduced paths.
 
@@ -72,7 +72,7 @@ With WATER and a template `I need {gesture}`, candidates `I do not need water` a
 
 Templates now fill only the leading lip candidate's exact static context. A matching lower candidate cannot erase the leading candidate. Ordinary reranking preserves the leading candidate when the proposed replacement changes a detected negation, number or listed safety-critical word. These cases become a conflict, and alternatives require a choice. This is a specific rule-based safeguard, not complete semantic verification.
 
-Evidence: [fusion](../hackathon/fusion.py), [regression examples](../hackathon/tests/test_integration.py).
+Evidence: [fusion](../quietbridge/fusion.py), [regression examples](../quietbridge/tests/test_integration.py).
 
 ### 3. Paired evaluation omitted the gesture-only baseline. Fixed.
 
@@ -80,7 +80,7 @@ Reports previously compared only lips-only and fusion. They now include all thre
 
 These are offline diagnostics. A gesture can supply only a noun while the reference is a whole sentence; standalone gesture WER should be read alongside gesture classification recall. Per-window false-emission rates do not measure false triggers per hour of continuous use. The evaluator does not establish that a weight file never saw the test set.
 
-Evidence: [evaluator](../hackathon/evaluate_fusion.py), [paired-report tests](../hackathon/tests/test_evaluate_fusion.py).
+Evidence: [evaluator](../quietbridge/evaluate_fusion.py), [paired-report tests](../quietbridge/tests/test_evaluate_fusion.py).
 
 ### 4. Correction learning could consume held-out sources. Known-source path fixed in follow-up.
 
@@ -88,7 +88,7 @@ The follow-up audit exercised a correction pointing to a validation/test NPZ. Th
 
 Corrections without sources remain available for explicitly consented daily learning and are marked unknown. This does not establish held-out independence. Freeze a new held-out session after the candidate and correction set are fixed; do not learn from it. No evidence here establishes that existing private data was contaminated.
 
-Evidence: [correction record and reader](../hackathon/corrections.py), [correction ingestion and coverage](../hackathon/signs/train_language.py), [recording isolation](../hackathon/signs/train_language.py#L49-L80).
+Evidence: [correction record and reader](../quietbridge/corrections.py), [correction ingestion and coverage](../quietbridge/signs/train_language.py), [recording isolation](../quietbridge/signs/train_language.py#L49-L80).
 
 ### 5. Model promotion checks are safety filters, not proof of benefit. Open.
 
@@ -96,7 +96,7 @@ The language gate rejects reported aggregate WER regression and mismatched/missi
 
 Keep validation for all tuning and selection. Use a fresh final test once for the frozen configuration, report the number of people, sessions, clips and errors, and do not call synthetic tests accuracy evidence.
 
-Evidence: [language gate](../hackathon/model_lifecycle.py#L65-L102), [promotion eligibility](../hackathon/model_lifecycle.py#L259-L291).
+Evidence: [language gate](../quietbridge/model_lifecycle.py#L65-L102), [promotion eligibility](../quietbridge/model_lifecycle.py#L259-L291).
 
 ## How lips and hands should cooperate
 

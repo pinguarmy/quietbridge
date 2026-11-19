@@ -25,7 +25,7 @@ dependencies = [
 
 [project.scripts]
 lipflow = "lipflow.__main__:main"
-quietbridge = "hackathon.server:main"  # same as `python -m hackathon.server`
+quietbridge = "quietbridge.server:main"  # same as `python -m quietbridge.server`
 
 [build-system]
 requires = ["hatchling"]
@@ -33,8 +33,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 # Hatchling ships every non-ignored file under these directories, including
-# hackathon/ui/*, hackathon/vocabulary.json, hackathon/signs/lab.html and labels.json.
-packages = ["lipflow", "espnet", "hackathon"]
+# quietbridge/ui/*, quietbridge/vocabulary.json, quietbridge/signs/lab.html and labels.json.
+packages = ["lipflow", "espnet", "quietbridge"]
 
 [dependency-groups]
 dev = [

@@ -7,8 +7,8 @@ The checks in this repository, and what each does and does not prove. Run focuse
 ```sh
 uv run lipflow doctor
 uv run pytest
-node --check hackathon/ui/app.js
-node --test hackathon/tests/test_ui_flow.cjs hackathon/tests/test_cleanup_settings_ui.cjs "hackathon/signs/tests/test_lab_*.cjs"
+node --check quietbridge/ui/app.js
+node --test quietbridge/tests/test_ui_flow.cjs quietbridge/tests/test_cleanup_settings_ui.cjs "quietbridge/signs/tests/test_lab_*.cjs"
 # Needs Node 22 or newer (CI uses 24) and an installed Chrome/Chromium; no new npm package.
 # As root (some containers), point CHROME_BIN at a wrapper that adds --no-sandbox.
 node scripts/check_web.mjs
@@ -22,7 +22,7 @@ The `test_lab_*.cjs` glob is quoted so Node expands it itself; this works the sa
 
 ## What they check
 
-**`uv run pytest`** runs the legacy Lipflow suite in `tests/` and the QuietBridge suites in `hackathon/`. Tests that need something the host lacks skip with a reason naming it, rather than failing or passing silently:
+**`uv run pytest`** runs the legacy Lipflow suite in `tests/` and the QuietBridge suites in `quietbridge/`. Tests that need something the host lacks skip with a reason naming it, rather than failing or passing silently:
 
 - macOS-only modules (`Quartz`, `AppKit`) for the native Lipflow app, hotkey, paste and onboarding checks, including the `lipflow run`/`file` CLI wiring, which imports the macOS hotkey module outside Windows;
 - a keyboard backend for `pynput` (on Linux this needs an X display) for the push-to-talk tests;

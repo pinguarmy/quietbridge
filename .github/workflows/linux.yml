@@ -31,10 +31,10 @@ jobs:
 
       # Fast checks first, before the large Python install, so UI breakage fails early.
       - name: UI script syntax
-        run: node --check hackathon/ui/app.js
+        run: node --check quietbridge/ui/app.js
       - name: Node UI contract tests
         # The glob is quoted so Node expands it itself, as on Windows.
-        run: node --test hackathon/tests/test_ui_flow.cjs hackathon/tests/test_cleanup_settings_ui.cjs "hackathon/signs/tests/test_lab_*.cjs"
+        run: node --test quietbridge/tests/test_ui_flow.cjs quietbridge/tests/test_cleanup_settings_ui.cjs "quietbridge/signs/tests/test_lab_*.cjs"
 
       # The locked Linux torch wheel pulls the CUDA libraries (about 3 GB). They are
       # downloaded on each run rather than cached: setup-uv prunes prebuilt wheels from its
