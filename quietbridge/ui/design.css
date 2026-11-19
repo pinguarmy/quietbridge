@@ -103,7 +103,7 @@
     --accent: #62d2c1;
     --accent-strong: #8be3d5;
     --accent-fill: #0e7c70;
-    --accent-fill-hover: #109082;
+    --accent-fill-hover: #0a685e;
     --on-accent: #ffffff;
     --accent-soft: #14302b;
     --accent-ink: #a9ece1;
@@ -295,7 +295,7 @@ button, summary { touch-action: manipulation; }
 .chip {
   display: inline-flex; align-items: center; max-width: 100%;
   min-height: var(--control-h-s); padding: 0 var(--s-4);
-  border: 1.5px solid var(--line); border-radius: var(--radius-pill);
+  border: 1.5px solid var(--control-line); border-radius: var(--radius-pill);
   background: var(--surface-2); color: var(--ink);
   font-size: var(--text-s); font-weight: 550; text-align: left; cursor: pointer;
 }
@@ -342,8 +342,8 @@ button, summary { touch-action: manipulation; }
   color: var(--muted); font-size: var(--text-xs); font-weight: 600;
 }
 .steps li > span:first-child, .steps li > .step-n {
-  display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
-  border: 1.5px solid var(--control-line); font-size: 13px; font-weight: 700;
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  border: 1.5px solid var(--control-line); font-size: 14px; font-weight: 700;
 }
 .steps li[aria-current="step"] { background: var(--accent-soft); color: var(--accent-ink); }
 .steps li[aria-current="step"] > span:first-child, .steps li[aria-current="step"] > .step-n {

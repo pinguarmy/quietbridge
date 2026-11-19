@@ -94,6 +94,11 @@ async function run(variant, coreOnly=false) {
     const hash=createHash('sha256').update(Buffer.from(app)).digest('hex');
     snapshotId=`${ready.identity.commit}:${hash}`;
     expect(hash===ready.identity.files['app.js'],'served /app.js SHA-256 matches fixture identity',{hash,identity:ready.identity.files['app.js']});
+    // The page's look comes from the shared design system plus page CSS; both must be the snapshot under test.
+    for(const file of ['design.css','style.css','favicon.svg']) {
+      const served=createHash('sha256').update(Buffer.from(await (await fetch(new URL('/'+file,origin))).arrayBuffer())).digest('hex');
+      expect(served===ready.identity.files[file],`served /${file} SHA-256 matches fixture identity`,{served,identity:ready.identity.files[file]});
+    }
     await waitFor(()=>parsedScripts.length,'browser parsed the expected app.js');
     const loaded=await send('Debugger.getScriptSource',{scriptId:parsedScripts.at(-1)});
     const executedHash=createHash('sha256').update(loaded.scriptSource).digest('hex');

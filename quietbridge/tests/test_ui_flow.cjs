@@ -280,7 +280,7 @@ for (const boundary of ['pagehide', 'restart']) {
     assert.equal(stopped,1,'late granted tracks are stopped');
     assert.equal(calls.length,0,'no old permission continuation starts capture');
     assert.equal(a.elements.get('browser-camera').srcObject,null);
-    assert.equal(a.elements.get('browser-camera-button').textContent,'Start camera');
+    assert.equal(a.elements.get('browser-camera-label').textContent,'Start camera');
   });
 }
 
@@ -310,7 +310,7 @@ test('unchanged camera start and explicit finish each request once', async () =>
   a.context.fetch=async(url,options)=>{const body=JSON.parse(options.body);calls.push(body);return{ok:true,json:async()=>({...a.context.sample,revision:a.context.sample.revision+1,session_active:body.active})};};
   await a.elements.get('browser-camera-button').onclick();
   assert.equal(a.elements.get('browser-camera').srcObject,stream);
-  assert.equal(a.elements.get('browser-camera-button').textContent,'Finish message');
+  assert.equal(a.elements.get('browser-camera-label').textContent,'Finish message');
   await a.elements.get('browser-camera-button').onclick();
   assert.equal(stopped,1);
   assert.deepEqual(calls.map(body=>body.active),[true,false]);
@@ -916,4 +916,67 @@ test('without on-device speech the unusable Speak button is hidden and Show larg
   a.render({ revision: 2, speech_available: true, decision: { text: 'Hello', status: 'accepted', reason: 'corrected' } });
   assert.equal(a.elements.get('speak').hidden, false);
   assert.equal(a.elements.get('show-large').classList.contains('show-large-primary'), false);
+});
+
+// ---- Presentation contracts of the redesigned page (class toggles only; no behaviour change) ----
+test('Use this message takes the primary style only while an applicable edit is unapplied', () => {
+  const a = screen(); a.render({ decision: { text: 'Old words', status: 'accepted', reason: 'corrected' } });
+  const save = a.elements.get('save-correction');
+  assert.equal(save.classList.contains('btn-primary'), false, 'nothing to apply: quiet');
+  a.elements.get('corrected-text').value = 'New words'; a.elements.get('corrected-text').listeners.input();
+  assert.equal(save.disabled, false);
+  assert.equal(save.classList.contains('btn-primary'), true, 'unapplied edit: applying is the next step');
+  assert.equal(a.elements.get('speak').disabled, true, 'and Speak waits meanwhile');
+  assert.equal(a.elements.get('decision-status').classList.contains('badge-warn'), true);
+  a.elements.get('corrected-text').value = ''; a.elements.get('corrected-text').listeners.input();
+  assert.equal(save.disabled, true);
+  assert.equal(save.classList.contains('btn-primary'), false, 'a disabled button is never styled as the primary action');
+  a.elements.get('corrected-text').value = 'Old words'; a.elements.get('corrected-text').listeners.input();
+  assert.equal(save.classList.contains('btn-primary'), false);
+});
+
+test('exactly one hero action: Speak, Stop speaking while speaking, or Show large without reliable speech', () => {
+  const a = screen(); const accepted = { text: 'Hello', status: 'accepted', reason: 'corrected' };
+  const actions = a.elements.get('message-actions'), speak = a.elements.get('speak'), show = a.elements.get('show-large');
+  a.render({ decision: accepted });
+  assert.equal(speak.classList.contains('btn-hero'), true); assert.equal(show.classList.contains('btn-hero'), false);
+  assert.equal(actions.classList.contains('speaking'), false);
+  a.render({ revision: 2, decision: accepted, speaking: true });
+  assert.equal(actions.classList.contains('speaking'), true, 'Stop speaking takes the hero slot');
+  assert.equal(a.elements.get('stop-speaking').hidden, false);
+  a.render({ revision: 3, decision: accepted, speech_error: 'No audio output device was found' });
+  assert.equal(actions.classList.contains('show-leads'), true);
+  assert.equal(show.classList.contains('btn-hero'), true); assert.equal(speak.classList.contains('btn-hero'), false);
+  assert.equal(speak.hidden, false, 'Speak stays available as a deliberate retry');
+  a.render({ revision: 4, decision: accepted, speech_available: false });
+  assert.equal(show.classList.contains('btn-primary'), true); assert.equal(speak.hidden, true);
+});
+
+test('the recording toggle uses the danger style only while recording', () => {
+  const a = screen(); a.render({ sign_input: 'motion', session_active: true, auto_recognition: true });
+  const record = a.elements.get('record');
+  assert.equal(record.classList.contains('btn-danger'), false);
+  a.render({ revision: 2, sign_input: 'motion', session_active: true, auto_recognition: true, phase: 'recording' });
+  assert.equal(record.classList.contains('btn-danger'), true);
+  assert.equal(a.elements.get('record-label').textContent, 'Finish recording');
+  assert.equal(record.attributes['aria-pressed'], 'true');
+});
+
+test('the camera button label lives in its own span so the icon survives every label change', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../ui/index.html'), 'utf8');
+  assert.match(html, /id="browser-camera-button"[^>]*>(?:<svg[\s\S]*?<\/svg>)+<span id="browser-camera-label">Start camera<\/span><\/button>/);
+  assert.match(html, /id="speak"[^>]*>(?:<svg[\s\S]*?<\/svg>)<span id="speak-label">/);
+  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /\$\('browser-camera-button'\)[^;]*textContent|button\.textContent = 'Start camera'/);
+});
+
+test('pages honour the strict CSP: no inline style, script or data URLs, and both load the design system first', () => {
+  for (const page of ['index.html', 'settings.html']) {
+    const html = fs.readFileSync(path.join(__dirname, '../ui/', page), 'utf8');
+    assert.doesNotMatch(html, /\sstyle=|<style|<script(?![^>]*\bsrc=)|data:|blob:|(?:src|href)="https?:/, page);
+    assert.match(html, /<link rel="stylesheet" href="\/design\.css"><link rel="stylesheet" href="\/style\.css">/, page);
+    assert.match(html, /<link rel="icon" href="\/favicon\.svg" type="image\/svg\+xml">/, page);
+    assert.equal((html.match(/<h1[\s>]/g) || []).length, 1, `${page} has exactly one h1`);
+    for (const svg of html.match(/<svg[^>]*>/g) || []) assert.match(svg, /aria-hidden="true" focusable="false"/, `${page}: decorative icon hidden`);
+  }
+  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /\.style\./, 'JS toggles classes, never element.style');
 });

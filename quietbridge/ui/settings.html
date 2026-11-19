@@ -3,58 +3,95 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>Settings · QuietBridge</title><link rel="stylesheet" href="/style.css">
+  <title>Settings · QuietBridge</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/design.css"><link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<main class="settings-page">
-  <header><a class="wordmark" href="/">QuietBridge<span class="bridge-mark" aria-hidden="true"></span></a><a class="settings-link" href="/">Back to your message</a></header>
-  <section class="intro"><p class="eyebrow">Make it yours</p><h1>A few preferences.</h1><p>Choose how you give input. Typing needs no setup or training. Add optional personal gestures in <a href="/record">Personalize</a>.</p></section>
-  <section class="settings-section"><h2>How would you like to communicate?</h2><div class="mode-switch" role="group" aria-label="Input mode"><button type="button" data-mode="combined" aria-describedby="mode-hint">Lips and gestures</button><button type="button" data-mode="lips" aria-describedby="mode-hint">Lips only</button><button type="button" data-mode="signs" aria-describedby="mode-hint">Gestures only</button></div><p id="mode-hint" class="hint">Either input can work on its own.</p></section>
-  <section class="settings-section">
-    <h2>Your profile</h2>
-    <p class="section-copy">Using <strong id="profile-name">Stock configuration</strong></p>
-    <div class="profile-switch-form">
-      <label for="profile-select">Personal profile<select id="profile-select"><option value="" disabled selected>Loading profiles…</option></select></label>
-      <button id="profile-switch-btn" type="button">Use profile</button>
-    </div>
-    <p id="profile-list-status" class="hint"></p>
-    <p id="profile-switch-status" class="hint" role="status" aria-live="polite"></p><p id="profile-switch-error" class="error" role="alert"></p>
-    <div class="reload-area">
-      <p id="models-reload-notice" class="notice" hidden><strong>A newer model is available.</strong> <span id="models-reload-detail"></span></p>
-      <button id="profile-reload-btn" class="secondary-button" type="button" aria-describedby="reload-consequence">Reload current models</button>
-      <p id="reload-consequence" class="hint">Loads the models saved for this profile. Clears the current message; an unfinished typed edit stays in this tab. Not available while the camera is in use. A model file chosen when QuietBridge started stays in use.</p>
-      <p id="models-reload-blocked" class="hint"></p>
-      <p id="profile-model-status" class="hint" role="status" aria-live="polite"></p>
-    </div>
-  </section>
-  <section id="gestures" class="settings-section">
-    <h2>Your gesture vocabulary</h2><p id="vocabulary-summary" class="section-copy">Checking your gestures…</p><div id="labels" class="label-list"></div>
-    <p id="sign-model-status" class="support-note">Checking the sign-language model…</p>
-    <p class="support-note">An explicitly installed BSL or ASL video model can provide isolated sign concepts alongside lips. Standard signs, personal gestures and stock poses are different backends. Full sentences, fingerspelling and non-manual grammar are not yet supported. A saved gesture name is not proof of sign-language support.</p>
-  </section>
-  <details id="cleanup" class="settings-section">
-    <summary id="cleanup-heading">Optional AI formatting suggestions</summary>
-    <p class="section-copy">Off unless you enable it. It may adjust spacing or add a final period, but cannot change words or verify your intent. Wrong words need your edit. Preferences and keys are held only until the server restarts.</p>
-    <form id="cleanup-settings-form" class="preview-form">
-      <label>API base URL<input id="cleanup-base-url" type="url" placeholder="https://.../v1" autocomplete="url"></label>
-      <label>Model<input id="cleanup-model" type="text" autocomplete="off"></label>
-      <label>API key<input id="cleanup-api-key" type="password" autocomplete="off"></label>
-      <label>Processing speed<select id="cleanup-tier"><option value="default">Standard</option><option value="fast">Fast · premium pricing</option></select></label>
-      <label><input id="cleanup-enabled" type="checkbox"> Enable AI formatting suggestions</label>
-      <p class="hint">Sends text candidates and gesture labels to your provider. Never video or audio. The key stays in server memory.</p>
-      <div><button id="cleanup-save" type="submit">Save preferences</button> <button id="cleanup-test" type="button">Test connection</button></div>
-      <p id="cleanup-settings-status" class="hint" role="status" aria-live="polite"></p><p id="cleanup-settings-error" class="error" role="alert"></p>
-    </form>
-  </details>
-  <section id="preview" class="settings-section" hidden><h2>Try without a camera</h2><p class="section-copy">These synthetic examples show the message flow. They do not test recognition.</p><div class="preview-form"><label>Example lip-reading text<input id="test-text" value="Yes" maxlength="2000"></label><label>Gesture<select id="test-label"><option value="">No gesture</option></select></label><button id="test-submit" type="button">Preview message</button></div></section>
-  <details class="settings-section diagnostics"><summary>Technical details</summary>
-    <div class="input-status"><div><span>Camera</span><strong id="camera-status">Starting</strong></div><div><span>Lip reader</span><strong id="lip-status">Starting</strong></div><div><span>Hand recognizer</span><strong id="hand-status">Starting</strong></div><div><span>Gesture input</span><strong id="sign-input">—</strong></div><div><span>Last stable gesture</span><strong id="last-sign">—</strong></div></div>
-    <p class="hint">Lip-reading model: <strong id="lip-model">stock</strong> · Language model: <strong id="language-model">stock</strong></p><p id="component-errors" class="component-errors"></p>
-    <div class="metrics"><div><span>Release to text</span><strong id="metric-release">—</strong></div><div><span>Lip decode</span><strong id="metric-decode">—</strong></div><div><span>Local fusion</span><strong id="metric-fusion">—</strong></div><div><span>Camera input</span><strong id="metric-camera-fps">—</strong></div><div><span>Recorded lip rate</span><strong id="metric-lip-fps">—</strong></div><div><span>Raw lip frames</span><strong id="metric-frames">—</strong></div><div><span>Largest frame gap</span><strong id="metric-gap">—</strong></div></div>
-    <p class="hint">Frame rates describe actual input, not the model's 25 fps target. Preview mode does not measure vision performance. Speech timing measures dispatch, not audible onset.</p>
-  </details>
-  <p id="error" class="error" role="alert"></p>
-  <footer><span>Recognition and speech run on this device.</span><a href="/">Back to your message</a></footer>
+<main class="page settings">
+  <header class="topbar">
+    <div class="topbar-brand"><a class="wordmark" href="/">QuietBridge<span class="bridge-mark" aria-hidden="true"></span></a></div>
+    <nav class="nav" aria-label="Main navigation"><a href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>Back to your message</a></nav>
+  </header>
+  <div class="settings-head">
+    <h1>Settings</h1>
+    <p class="muted">Typing needs no setup or training. Add optional personal gestures and phrases in <a href="/record">Personalize</a>.</p>
+  </div>
+  <p id="error" class="callout callout-danger settings-error" role="alert"></p>
+  <div class="settings-stack">
+    <section class="card settings-card" aria-labelledby="mode-heading">
+      <h2 id="mode-heading">How you communicate</h2>
+      <div class="segmented mode-switch" role="group" aria-labelledby="mode-heading"><button type="button" data-mode="combined" aria-describedby="mode-hint">Lips and gestures</button><button type="button" data-mode="lips" aria-describedby="mode-hint">Lips only</button><button type="button" data-mode="signs" aria-describedby="mode-hint">Gestures only</button></div>
+      <p id="mode-hint" class="hint">Either input can work on its own.</p>
+    </section>
+
+    <section class="card settings-card" aria-labelledby="profile-heading">
+      <div class="card-head"><h2 id="profile-heading">Your profile</h2><p class="muted small">Using <strong id="profile-name">Stock configuration</strong></p></div>
+      <div class="profile-row">
+        <div class="field"><label for="profile-select">Personal profile</label><select id="profile-select" class="select"><option value="" disabled selected>Loading profiles…</option></select></div>
+        <button id="profile-switch-btn" class="btn" type="button">Use profile</button>
+      </div>
+      <p id="profile-list-status" class="hint"></p>
+      <p id="profile-switch-status" class="hint" role="status" aria-live="polite"></p><p id="profile-switch-error" class="callout callout-danger" role="alert"></p>
+      <div class="subpanel reload-area">
+        <div id="models-reload-notice" class="callout callout-accent" hidden><p><strong>A newer model is available.</strong> <span id="models-reload-detail"></span></p></div>
+        <div class="reload-row">
+          <button id="profile-reload-btn" class="btn btn-s" type="button" aria-describedby="reload-consequence">Reload current models</button>
+          <p id="profile-model-status" class="hint" role="status" aria-live="polite"></p>
+        </div>
+        <p id="reload-consequence" class="hint">Loads the models saved for this profile. Clears the current message; an unfinished typed edit stays in this tab. Not available while the camera is in use. A model file chosen when QuietBridge started stays in use.</p>
+        <p id="models-reload-blocked" class="hint"></p>
+      </div>
+    </section>
+
+    <section id="gestures" class="card settings-card" aria-labelledby="gestures-heading">
+      <div class="card-head"><h2 id="gestures-heading">What it can recognize</h2><p id="vocabulary-summary" class="muted small">Checking your gestures…</p></div>
+      <div id="labels" class="label-list"></div>
+      <p id="sign-model-status" class="hint">Checking the sign-language model…</p>
+      <div class="callout support-note"><p>An explicitly installed BSL or ASL video model can provide isolated sign concepts alongside lips. Standard signs, personal gestures and stock poses are different backends. <strong>Full sentences, fingerspelling and non-manual grammar are not yet supported.</strong> A saved gesture name is not proof of sign-language support.</p></div>
+    </section>
+
+    <details id="cleanup" class="card settings-card disclosure-card">
+      <summary id="cleanup-heading">Optional AI formatting suggestions</summary>
+      <div class="disclosure-body">
+        <p class="muted small">Off unless you enable it. It may adjust spacing or add a final period, but cannot change words or verify your intent. Wrong words need your edit. Preferences and keys are held only until the server restarts.</p>
+        <form id="cleanup-settings-form" class="settings-form">
+          <div class="field"><label for="cleanup-base-url">API base URL</label><input id="cleanup-base-url" class="input" type="url" placeholder="https://.../v1" autocomplete="url"></div>
+          <div class="field-row">
+            <div class="field"><label for="cleanup-model">Model</label><input id="cleanup-model" class="input" type="text" autocomplete="off"></div>
+            <div class="field"><label for="cleanup-tier">Processing speed</label><select id="cleanup-tier" class="select"><option value="default">Standard</option><option value="fast">Fast · premium pricing</option></select></div>
+          </div>
+          <div class="field"><label for="cleanup-api-key">API key</label><input id="cleanup-api-key" class="input" type="password" autocomplete="off" aria-describedby="cleanup-privacy"></div>
+          <label class="check"><input id="cleanup-enabled" type="checkbox"><span>Enable AI formatting suggestions</span></label>
+          <p id="cleanup-privacy" class="hint">Sends text candidates and gesture labels to your provider. Never video or audio. The key stays in server memory.</p>
+          <div class="form-actions"><button id="cleanup-save" class="btn btn-primary" type="submit">Save preferences</button><button id="cleanup-test" class="btn" type="button">Test connection</button></div>
+          <p id="cleanup-settings-status" class="hint" role="status" aria-live="polite"></p><p id="cleanup-settings-error" class="callout callout-danger" role="alert"></p>
+        </form>
+      </div>
+    </details>
+
+    <section id="preview" class="card settings-card" aria-labelledby="preview-heading" hidden>
+      <div class="card-head"><h2 id="preview-heading">Try without a camera</h2><p class="muted small">Synthetic examples show the message flow. They do not test recognition.</p></div>
+      <div class="settings-form">
+        <div class="field-row">
+          <div class="field"><label for="test-text">Example lip-reading text</label><input id="test-text" class="input" value="Yes" maxlength="2000"></div>
+          <div class="field"><label for="test-label">Gesture</label><select id="test-label" class="select"><option value="">No gesture</option></select></div>
+        </div>
+        <div class="form-actions"><button id="test-submit" class="btn btn-primary" type="button">Preview message</button></div>
+      </div>
+    </section>
+
+    <details class="card settings-card disclosure-card diagnostics"><summary>Technical details</summary>
+      <div class="disclosure-body">
+        <dl class="facts"><div><dt>Camera</dt><dd id="camera-status">Starting</dd></div><div><dt>Lip reader</dt><dd id="lip-status">Starting</dd></div><div><dt>Hand recognizer</dt><dd id="hand-status">Starting</dd></div><div><dt>Gesture input</dt><dd id="sign-input">—</dd></div><div><dt>Last stable gesture</dt><dd id="last-sign">—</dd></div><div><dt>Lip-reading model</dt><dd id="lip-model">stock</dd></div><div><dt>Language model</dt><dd id="language-model">stock</dd></div></dl>
+        <p id="component-errors" class="callout callout-warn component-errors"></p>
+        <p class="facts-heading">Timing and input</p>
+        <dl class="facts"><div><dt>Release to text</dt><dd id="metric-release">—</dd></div><div><dt>Lip decode</dt><dd id="metric-decode">—</dd></div><div><dt>Local fusion</dt><dd id="metric-fusion">—</dd></div><div><dt>Camera input</dt><dd id="metric-camera-fps">—</dd></div><div><dt>Recorded lip rate</dt><dd id="metric-lip-fps">—</dd></div><div><dt>Raw lip frames</dt><dd id="metric-frames">—</dd></div><div><dt>Largest frame gap</dt><dd id="metric-gap">—</dd></div></dl>
+        <p class="hint">Frame rates describe actual input, not the model's 25 fps target. Preview mode does not measure vision performance. Speech timing measures dispatch, not audible onset.</p>
+      </div>
+    </details>
+  </div>
+  <footer class="site-footer"><p>Recognition and speech run on this device.</p></footer>
 </main>
 <script src="/app.js"></script><script src="/cleanup-settings.js"></script>
 </body></html>

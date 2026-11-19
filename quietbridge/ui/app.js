@@ -116,7 +116,7 @@ async function startBrowserCamera() {
   browserCameraStarting = true;
   const generation = browserCameraGeneration;
   const button = $('browser-camera-button');
-  if (button) { button.disabled = true; button.textContent = 'Starting camera…'; }
+  if (button) { button.disabled = true; text('browser-camera-label', 'Starting camera…'); }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({audio:false, video:{width:{ideal:960}, height:{ideal:720}, frameRate:{ideal:30}}});
     if (generation !== browserCameraGeneration || !state?.browser_camera || state.rehearsal) { stream.getTracks().forEach(track => track.stop()); return; }
@@ -144,7 +144,7 @@ async function startBrowserCamera() {
     focusEditor();
   } finally {
     browserCameraStarting = false;
-    if (button) { button.disabled = false; button.textContent = browserCameraStream ? 'Finish message' : 'Start camera'; }
+    if (button) { button.disabled = false; text('browser-camera-label', browserCameraStream ? 'Finish message' : 'Start camera'); }
   }
 }
 async function stopCameraSession() {
@@ -173,7 +173,7 @@ function stopBrowserCamera() {
   browserCameraStream = null;
   // The local preview is cleared, not frozen: no picture remains after the camera stops.
   const video = $('browser-camera'); if (video) { video.srcObject = null; video.hidden = true; }
-  const button = $('browser-camera-button'); if (button) button.textContent = 'Start camera';
+  text('browser-camera-label', 'Start camera');
   renderPreview();
 }
 
@@ -265,7 +265,8 @@ function render(s) {
   const browserCameraButton = $('browser-camera-button');
   if (browserCameraButton) {
     browserCameraButton.hidden = !browserCameraAvailable;
-    browserCameraButton.textContent = browserCameraStarting ? 'Starting camera…' : browserCameraStopping ? 'Finishing…' : browserCameraStream ? 'Finish message' : 'Start camera';
+    // The label has its own span so the button's icon survives.
+    text('browser-camera-label', browserCameraStarting ? 'Starting camera…' : browserCameraStopping ? 'Finishing…' : browserCameraStream ? 'Finish message' : 'Start camera');
     browserCameraButton.classList.toggle('is-active', Boolean(browserCameraStream));
     browserCameraButton.disabled = browserCameraStarting || browserCameraStopping || (!browserCameraStream && s.session_finalizing === true);
   }
@@ -280,6 +281,7 @@ function render(s) {
     record.disabled = sessionBusy || s.rehearsal || !ready || !['idle','recording'].includes(s.phase)
       || (needsLips && s.lips !== 'ready') || (s.mode === 'signs' && s.signs !== 'ready');
     record.classList.toggle('listening', s.phase === 'recording');
+    record.classList.toggle('btn-danger', s.phase === 'recording');
     const idleLabel = s.mode === 'signs' ? 'Start gesture recording' : motionInput ? 'Start lips + gesture recording' : 'Start recording words';
     text('record-label', ({recording:'Finish recording', tail:'Finishing…', decoding:'Reading your words…'})[s.phase] || idleLabel);
     record.setAttribute('aria-pressed', String(s.phase === 'recording'));
@@ -439,7 +441,7 @@ function renderQuickPhrases(s) {
   const shown = showAllPhrases ? phrases : phrases.slice(0, QUICK_PHRASES_COLLAPSED);
   list.replaceChildren(...shown.map(phrase => {
     const button = document.createElement('button');
-    button.type = 'button'; button.className = 'quick-phrase';
+    button.type = 'button'; button.className = 'quick-phrase chip';
     // Visually truncated by CSS; the full text stays the accessible name.
     button.textContent = phrase; button.title = phrase; button.dataset.phrase = phrase;
     button.setAttribute('dir', 'auto');
@@ -552,6 +554,9 @@ function updateMessage() {
   if ((sessionBusy || processing) && $('alternatives')) $('alternatives').replaceChildren();
   text('decision-status', decisionStatusText(v));
   $('decision-status').classList.toggle('review', review);
+  // Badge tone only: an unapplied edit warns, live input and speech are live, a reviewable message is accent.
+  const tone = editorDirty ? 'warn' : v.sessionActive || deviceSpeaking() ? 'live' : review || d.status === 'accepted' ? 'accent' : '';
+  ['accent', 'warn', 'live'].forEach(t => $('decision-status').classList.toggle('badge-' + t, t === tone));
   if ($('corrected-text')) $('corrected-text').disabled = sessionBusy || processing;
   text('reason', reasonText(v));
   document.querySelectorAll('.alternative').forEach(b => {const selected = b.dataset.candidate === chosenText; b.classList.toggle('selected', selected); b.setAttribute('aria-pressed', String(selected)); b.disabled = speaking;});
@@ -562,7 +567,13 @@ function updateMessage() {
   hide('stop-speaking', !deviceSpeaking());
   if ($('stop-speaking')) $('stop-speaking').disabled = stopSpeakingPending;
   if ($('show-large')) $('show-large').disabled = largeDisplayText(v) === null;
-  $('show-large')?.classList.toggle('show-large-primary', !state.speech_available || Boolean(speechErrorText(state)));
+  const showLeads = !state.speech_available || Boolean(speechErrorText(state));
+  $('show-large')?.classList.toggle('show-large-primary', showLeads);
+  // Presentation: exactly one hero action. Show large takes it when speech cannot be relied on;
+  // Stop speaking takes it while the device speaks.
+  ['btn-primary', 'btn-hero'].forEach(c => { $('show-large')?.classList.toggle(c, showLeads); $('speak')?.classList.toggle(c, !showLeads); });
+  $('message-actions')?.classList.toggle('show-leads', showLeads);
+  $('message-actions')?.classList.toggle('speaking', deviceSpeaking());
   const phraseBlocked = quickPhraseBlocked(v);
   Array.from($('quick-phrases-list')?.children || []).forEach(b => {
     const current = isCurrentMessage(b.dataset.phrase);
@@ -576,6 +587,8 @@ function updateMessage() {
   if ($('save-correction')) {
     const edited = $('corrected-text')?.value.trim() || '';
     $('save-correction').disabled = sessionBusy || processing || speaking || connectionLost || pendingActions > 0 || !edited || edited === d.text;
+    // An unapplied edit makes applying it the obvious next step (Speak is disabled meanwhile).
+    $('save-correction').classList.toggle('btn-primary', editorDirty && !$('save-correction').disabled);
   }
 }
 

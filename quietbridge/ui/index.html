@@ -3,89 +3,113 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>QuietBridge</title><link rel="stylesheet" href="/style.css">
+  <title>QuietBridge</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/design.css"><link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <a class="skip-link" href="#corrected-text">Skip to typing</a>
-<main id="main" class="communication-page">
-  <header>
-    <a class="wordmark" href="/">QuietBridge<span class="bridge-mark" aria-hidden="true"></span></a>
-    <nav class="header-links" aria-label="Main navigation"><a href="/record">Personalize</a><a href="/settings">Settings</a><button id="open-guide" class="text-button" type="button" aria-controls="first-use-guide" aria-expanded="false">Quick guide</button></nav>
+<main id="main" class="page comm">
+  <header class="topbar">
+    <div class="topbar-brand">
+      <a class="wordmark" href="/">QuietBridge<span class="bridge-mark" aria-hidden="true"></span></a>
+      <p id="active-input" class="topbar-context">Checking available input. You can type without a camera.</p>
+    </div>
+    <nav class="nav" aria-label="Main navigation">
+      <a href="/record"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Personalize</a>
+      <a href="/settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>Settings</a>
+      <button id="open-guide" type="button" aria-controls="first-use-guide" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.5"/><path d="M12 17h.01"/></svg>Guide</button>
+    </nav>
   </header>
-  <div id="rehearsal-banner" class="banner" hidden>Preview only. No camera or recognition. <a href="/settings#preview">Try an example</a></div>
-  <section class="intro"><p class="eyebrow">Your words. Your pace.</p><h1>A little space to say it.</h1><p id="entry-hint">Type a message or use the camera. Nothing is spoken until you choose Speak.</p></section>
-  <section id="first-use-guide" class="first-use-guide" aria-labelledby="guide-heading" hidden>
+  <h1 id="message-heading" class="sr-only">Your message</h1>
+  <section id="first-use-guide" class="callout callout-accent guide" aria-labelledby="guide-heading" hidden>
     <h2 id="guide-heading" tabindex="-1">Say your first message</h2>
     <ul class="guide-points">
       <li>Type below and choose <strong>Use this message</strong>. Nothing is spoken until you choose <strong>Speak message</strong>.</li>
       <li>The camera is optional and can make mistakes. It reads silent English mouth movements and listed gestures only. It is not full sign-language translation.</li>
       <li>No microphone. Live video stays on this device. Personalize asks before saving recordings. Optional AI sends text only if you enable it in Settings.</li>
     </ul>
-    <div class="guide-actions"><button id="guide-type" type="button">Type my first message</button><button id="guide-dismiss" class="text-button" type="button">Skip guide</button></div>
+    <div class="callout-actions"><button id="guide-type" class="btn btn-primary btn-s" type="button">Type my first message</button><button id="guide-dismiss" class="btn btn-ghost btn-s" type="button">Skip guide</button></div>
   </section>
-  <p id="active-input" class="active-input">Checking available input. You can type without a camera.</p>
-  <p id="input-warning" class="error" role="status"></p>
-  <ol class="flow-steps" aria-label="How to communicate"><li id="step-capture" aria-current="step"><span>1</span> Capture</li><li id="step-review"><span>2</span> Review</li><li id="step-speak"><span>3</span> Speak or show</li></ol>
   <div class="workspace">
-    <section class="message-panel" aria-labelledby="message-heading">
-      <div class="message-heading"><h2 id="message-heading">Your message</h2><span id="decision-status" class="status" role="status">Ready when you are</span></div>
-      <p id="draft-label" class="draft-label" hidden>Live draft. Review before speaking.</p>
-      <p id="message" class="message empty" dir="auto" aria-live="polite">Your words will appear here.</p>
-      <p id="reason" class="reason">Nothing is spoken until you choose.</p>
-      <div id="alternatives" class="alternatives" role="group" aria-label="Choose the message you intended"></div>
-      <div class="message-actions">
-        <button id="speak" class="speak" type="button" aria-describedby="reason" disabled><span id="speak-label">Speak message</span><span aria-hidden="true">↗</span></button>
-        <button id="stop-speaking" class="stop-speaking" type="button" hidden>Stop speaking</button>
-        <button id="show-large" class="text-button" type="button" aria-haspopup="dialog" disabled>Show large</button><button id="new-message" class="text-button" type="button" disabled>New message</button><button id="copy-message" class="text-button" type="button" disabled>Copy message</button>
-      </div>
-      <p id="speech-error" class="error speech-error" role="alert"></p>
-      <details id="correction-panel" class="correction-panel" open>
-        <summary>Edit or type a message</summary>
-        <div class="preview-form">
-          <label for="corrected-text">What would you like to say?</label><textarea id="corrected-text" dir="auto" maxlength="2000" rows="3" placeholder="Type here, or edit the recognized words." aria-describedby="editor-hint draft-status"></textarea>
-          <label class="check-label"><input id="learn-correction" type="checkbox"> Use this text in future personal training</label>
-          <button id="save-correction" type="button" aria-keyshortcuts="Control+Enter Meta+Enter">Use this message</button>
-          <p id="editor-hint" class="hint">Ctrl+Enter (⌘+Enter on Mac) also uses the message. Nothing is spoken or learned automatically.</p>
-          <p id="draft-status" class="hint" role="status"></p>
+    <div class="column column-message">
+      <section class="card stage" aria-labelledby="message-heading">
+        <div class="stage-header">
+          <ol class="steps" aria-label="How to communicate"><li id="step-capture" aria-current="step"><span>1</span><span class="step-label">Capture</span></li><li id="step-review"><span>2</span><span class="step-label">Review</span></li><li id="step-speak"><span>3</span><span class="step-label">Speak or show</span></li></ol>
+          <span id="decision-status" class="badge" role="status">Ready when you are</span>
         </div>
-      </details>
-      <div id="quick-phrases" class="quick-phrases" hidden>
-        <h3 id="quick-phrases-heading">Your phrases</h3>
-        <div id="quick-phrases-list" class="quick-phrase-list" role="group" aria-labelledby="quick-phrases-heading" aria-describedby="quick-phrases-source"></div>
-        <button id="quick-phrases-more" class="text-button" type="button" aria-controls="quick-phrases-list" aria-expanded="false" hidden>Show all phrases</button>
-        <p id="quick-phrases-source" class="hint">Saved in your profile. Choosing one makes it your message; it is not spoken until you choose Speak. Edit them in <a href="/record">Personalize</a>.</p>
-      </div>
-      <p id="correction-status" class="hint" role="status"></p>
-      <p id="error" class="error" role="alert"></p>
-      <p id="result-timing" class="timing-note"></p>
-      <p id="last-spoken" class="last-spoken"></p>
-    </section>
-    <section class="camera-panel" aria-labelledby="capture-heading">
-      <div class="panel-heading"><h2 id="capture-heading">Your camera</h2><span class="local-note">No microphone</span></div>
-      <section id="models-reload-notice" class="notice" aria-labelledby="models-reload-heading" hidden>
-        <h3 id="models-reload-heading">A newer model is available</h3>
-        <p id="models-reload-detail"></p>
-        <p class="notice-consequence">Reloading clears the current message. An unfinished typed edit stays in this tab. Nothing reloads until you choose.</p>
-        <button id="models-reload-button" type="button" aria-describedby="models-reload-blocked">Reload models</button>
-        <p id="models-reload-blocked" class="hint"></p>
+        <div class="message-block">
+          <p id="draft-label" class="draft-label" hidden>Live draft. Review before speaking.</p>
+          <p id="message" class="message empty" dir="auto" aria-live="polite">Your words will appear here.</p>
+          <p id="reason" class="reason">Nothing is spoken until you choose.</p>
+        </div>
+        <div id="alternatives" class="alternatives" role="group" aria-label="Choose the message you intended"></div>
+        <div id="message-actions" class="stage-actions">
+          <button id="speak" class="btn btn-primary btn-hero" type="button" aria-describedby="reason" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg><span id="speak-label">Speak message</span></button>
+          <button id="stop-speaking" class="btn btn-danger btn-hero" type="button" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>Stop speaking</button>
+          <button id="show-large" class="btn secondary-action" type="button" aria-haspopup="dialog" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>Show large</button>
+          <button id="copy-message" class="btn secondary-action" type="button" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg>Copy message</button>
+          <button id="new-message" class="btn secondary-action" type="button" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>New message</button>
+        </div>
+        <p id="speech-error" class="callout callout-danger" role="alert"></p>
+        <p id="error" class="callout callout-danger" role="alert"></p>
+        <div class="stage-meta"><p id="correction-status" role="status"></p><p id="last-spoken" class="last-spoken"></p><p id="result-timing" class="timing-note"></p></div>
       </section>
-      <div id="camera-preview" class="preview">
-        <img id="camera" alt="Your live camera preview" hidden>
-        <video id="browser-camera" autoplay playsinline muted aria-label="Your live camera preview, mirrored" hidden></video>
-        <canvas id="hands-overlay" width="640" height="480" aria-hidden="true"></canvas>
-        <div id="camera-placeholder"><span class="viewfinder" aria-hidden="true"></span><p id="camera-message">Keep your face and hands in view.</p></div>
-        <span id="preview-status" class="preview-label">Camera off</span><span id="hands-status" class="preview-label secondary">Waiting for tracking</span>
-      </div>
-      <div class="record-controls"><button id="browser-camera-button" class="camera-action" type="button">Start camera</button><button id="record" class="record" type="button" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">Start recording</span></button><button id="cancel" class="text-button" type="button" hidden>Cancel</button></div>
-      <p id="record-hint" class="hint">Nothing is spoken automatically.</p>
-      <div class="camera-options"><p id="capability-note" class="capability-note">Checking supported gestures. No full sign-language translation.</p><a href="/settings">Change input</a></div>
-      <details class="tracking-detail"><summary>Check mouth framing</summary><div class="mouth-view"><canvas id="mouth-overlay" width="320" height="200" aria-hidden="true"></canvas><span id="mouth-status">Face not detected</span></div></details>
-    </section>
+      <section id="correction-panel" class="card composer" aria-labelledby="composer-label">
+        <label id="composer-label" class="composer-label" for="corrected-text">What would you like to say?</label>
+        <div class="composer-box">
+          <textarea id="corrected-text" class="composer-input" dir="auto" maxlength="2000" rows="3" placeholder="Type here, or edit the recognized words." aria-describedby="entry-hint draft-status"></textarea>
+          <div class="composer-bar">
+            <label class="check"><input id="learn-correction" type="checkbox"><span>Use this text in future personal training</span></label>
+            <button id="save-correction" class="btn" type="button" aria-keyshortcuts="Control+Enter Meta+Enter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m5 12.5 4.5 4.5L19 7"/></svg>Use this message</button>
+          </div>
+        </div>
+        <p class="hint" id="entry-hint">Type a message or use the camera. Nothing is spoken until you choose Speak.<span class="keys-hint"> Ctrl+Enter (⌘+Enter) also uses it.</span></p>
+        <p id="draft-status" class="hint draft-status" role="status"></p>
+      </section>
+      <section id="quick-phrases" class="card phrases" aria-labelledby="quick-phrases-heading" hidden>
+        <div class="phrases-head">
+          <h2 id="quick-phrases-heading">Your phrases</h2>
+          <p id="quick-phrases-source" class="hint">Choosing one sets your message; it is not spoken until you choose Speak. Edit them in <a href="/record">Personalize</a>.</p>
+        </div>
+        <div id="quick-phrases-list" class="chips quick-phrase-list" role="group" aria-labelledby="quick-phrases-heading" aria-describedby="quick-phrases-source"></div>
+        <button id="quick-phrases-more" class="btn btn-ghost btn-s phrases-more" type="button" aria-controls="quick-phrases-list" aria-expanded="false" hidden>Show all phrases</button>
+      </section>
+    </div>
+    <div class="column column-camera">
+      <section class="card camera" aria-labelledby="capture-heading">
+        <div class="camera-head"><h2 id="capture-heading">Your camera</h2><span class="badge badge-plain"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 9.3V6a3 3 0 0 0-5.7-1.3M9 9v2a3 3 0 0 0 5 2.2"/><path d="M18.8 13.5A7 7 0 0 0 19 11M5 11a7 7 0 0 0 11.3 5.5M12 18v3"/><path d="m4 4 16 16"/></svg>No microphone</span></div>
+        <div id="rehearsal-banner" class="callout" hidden><span>Preview only. No camera or recognition. <a href="/settings#preview">Try an example</a></span></div>
+        <p id="input-warning" class="callout callout-warn" role="status"></p>
+        <section id="models-reload-notice" class="callout callout-accent reload-notice" aria-labelledby="models-reload-heading" hidden>
+          <h3 id="models-reload-heading">A newer model is available</h3>
+          <p id="models-reload-detail"></p>
+          <p class="notice-consequence">Reloading clears the current message. An unfinished typed edit stays in this tab. Nothing reloads until you choose.</p>
+          <div class="callout-actions"><button id="models-reload-button" class="btn btn-primary btn-s" type="button" aria-describedby="models-reload-blocked">Reload models</button></div>
+          <p id="models-reload-blocked" class="hint"></p>
+        </section>
+        <div id="camera-preview" class="preview">
+          <img id="camera" alt="Your live camera preview" hidden>
+          <video id="browser-camera" autoplay playsinline muted aria-label="Your live camera preview, mirrored" hidden></video>
+          <canvas id="hands-overlay" width="640" height="480" aria-hidden="true"></canvas>
+          <div id="camera-placeholder"><svg class="placeholder-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 14V9a3 3 0 0 1 3-3h5M34 6h5a3 3 0 0 1 3 3v5M42 34v5a3 3 0 0 1-3 3h-5M14 42H9a3 3 0 0 1-3-3v-5"/><circle cx="24" cy="20" r="6"/><path d="M14 36a10 10 0 0 1 20 0"/></svg><p id="camera-message">Keep your face and hands in view.</p></div>
+          <span id="preview-status" class="badge preview-badge preview-status">Camera off</span><span id="hands-status" class="badge badge-plain preview-badge hands-status">Waiting for tracking</span>
+        </div>
+        <div class="capture-controls">
+          <button id="browser-camera-button" class="btn btn-primary camera-action" type="button"><svg class="icon-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 8a2 2 0 0 1 2-2h2l2-2h6l2 2h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.5"/></svg><svg class="icon-finish" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m5 12.5 4.5 4.5L19 7"/></svg><span id="browser-camera-label">Start camera</span></button>
+          <button id="record" class="btn record" type="button" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">Start recording</span></button>
+          <button id="cancel" class="btn btn-ghost" type="button" hidden>Cancel</button>
+        </div>
+        <p id="record-hint" class="hint capture-hint">Nothing is spoken automatically.</p>
+        <div class="camera-foot"><p id="capability-note" class="capability-note">Checking supported gestures. No full sign-language translation.</p><a class="btn btn-ghost btn-s" href="/settings">Change input</a></div>
+        <details class="tracking-detail"><summary>Check mouth framing</summary><div class="mouth-view"><canvas id="mouth-overlay" width="320" height="200" aria-hidden="true"></canvas><span id="mouth-status" class="badge badge-plain preview-badge">Face not detected</span></div></details>
+      </section>
+    </div>
   </div>
-  <footer><span>Video stays on this device. You choose when to speak.</span></footer>
+  <footer class="site-footer"><p>Video stays on this device. You choose when to speak.</p></footer>
 </main>
 <div id="large-display" class="large-display" role="dialog" aria-modal="true" aria-labelledby="large-display-title" hidden>
-  <div class="large-display-bar"><h2 id="large-display-title" class="large-display-title">Message for you</h2><button id="large-close" class="large-close" type="button">Close</button></div>
+  <div class="large-display-bar"><h2 id="large-display-title" class="large-display-title">Message for you</h2><button id="large-close" class="large-close" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>Close</button></div>
   <p id="large-text" class="large-text" dir="auto"></p>
 </div>
 <script src="/app.js"></script>
