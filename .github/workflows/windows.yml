@@ -42,7 +42,9 @@ jobs:
         shell: pwsh
         run: node --test quietbridge/tests/test_ui_flow.cjs quietbridge/tests/test_cleanup_settings_ui.cjs "quietbridge/signs/tests/test_lab_*.cjs"
 
+      # Run the Python side even if a Node check above failed, so one run reports everything.
       - uses: astral-sh/setup-uv@v6
+        if: ${{ !cancelled() }}
       - name: Install locked dependencies
         id: sync
         if: ${{ !cancelled() }}

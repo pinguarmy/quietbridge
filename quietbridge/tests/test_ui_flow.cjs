@@ -671,6 +671,8 @@ test('frame upload waits for a new video frame and never overlaps', async () => 
   release({ ok: true, status: 200 }); await first;
   assert.equal(uploads, 1, 'the next upload waits for a new frame');
   assert.equal(typeof frameCallback, 'function');
+  // Pin the budget instead of racing the wall clock: a slow host can take longer than 40 ms to get here.
+  vm.runInContext('nextFrameUploadAt = Date.now() + 60000', a.context);
   let cb = frameCallback; frameCallback = null; cb(); await settle();
   assert.equal(uploads, 1, 'a frame inside the 40 ms budget is skipped, not encoded');
   assert.equal(typeof frameCallback, 'function', 'and the next frame is awaited');
