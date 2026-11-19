@@ -4,18 +4,37 @@ from __future__ import annotations
 import json
 import math
 import re
+import unicodedata
 from pathlib import Path
 
 from .contracts import Decision, LipResult, SignEvent
 
 VOCABULARY = Path(__file__).with_name("vocabulary.json")
-NEGATION = {"no", "not", "never", "don't", "dont", "cannot", "can't", "cant", "won't", "wont", "without"}
-RISK = NEGATION | {"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-                   "hundred", "thousand", "million", "medicine", "medication", "dose", "emergency", "pain"}
+# Any token ending in "n't" is also a negation (see is_sensitive).
+NEGATION = {"no", "not", "never", "none", "nothing", "nobody", "nowhere", "neither", "nor", "without",
+            "cannot", "dont", "cant", "wont", "isnt", "arent", "wasnt", "werent", "hasnt", "havent",
+            "hadnt", "doesnt", "didnt", "shouldnt", "wouldnt", "couldnt", "mustnt", "mightnt",
+            "neednt", "aint"}
+NUMBERS = {"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+           "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
+           "nineteen", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+           "hundred", "thousand", "million", "billion", "dozen"}
+SAFETY = {"medicine", "medicines", "medication", "medications", "dose", "doses",
+          "emergency", "emergencies", "pain", "pains"}
+RISK = NEGATION | NUMBERS | SAFETY
+_APOSTROPHES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'", "\u0060": "'", "\u00b4": "'"})
 
 
 def tokens(text: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9]+(?:'[a-z]+)?", text.lower().replace("’", "'")))
+    # NFKC folds fullwidth digits/letters; apostrophe variants become ASCII so
+    # "DON\u02bcT" is not split into the harmless-looking "don" and "t".
+    text = unicodedata.normalize("NFKC", text).translate(_APOSTROPHES).lower()
+    return set(re.findall(r"[a-z0-9]+(?:'[a-z]+)?", text))
+
+
+def is_sensitive(word: str) -> bool:
+    """Negation, number or safety token that agreement must never drop."""
+    return word in RISK or word.endswith("n't") or any(char.isdigit() for char in word)
 
 
 def load_vocabulary(path=VOCABULARY) -> dict:
@@ -75,7 +94,7 @@ def fuse(lips: LipResult | None, events: list[SignEvent], vocabulary: dict,
         for label in labels:
             entry = vocabulary[label]
             alias_match = any(tokens(alias) <= words for alias in entry["matches"])
-            safe = not (words & RISK) and not any(word.isdigit() for word in words)
+            safe = not any(is_sensitive(word) for word in words)
             if alias_match and (safe or words == tokens(entry["phrase"])):
                 matched.append(label)
         return matched
@@ -104,8 +123,7 @@ def fuse(lips: LipResult | None, events: list[SignEvent], vocabulary: dict,
     ranked = [(candidate, matched_labels(candidate)) for candidate in candidates]
     best, matched = max(ranked, key=lambda item: len(item[1]))
     def sensitive_words(candidate):
-        words = tokens(candidate)
-        return (words & RISK) | {word for word in words if word.isdigit()}
+        return {word for word in tokens(candidate) if is_sensitive(word)}
     if best != candidates[0] and sensitive_words(best) != sensitive_words(candidates[0]):
         # Agreement on an object is not evidence for dropping a negation, number,
         # or safety-critical word from the leading lip hypothesis.

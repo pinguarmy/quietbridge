@@ -433,16 +433,37 @@ class ModelLifecycle:
             record = self._describe(profile, json.loads(meta.read_text(encoding="utf-8")))
             if record["kind"] != kind or not record["promotable"]:
                 raise ValueError("Candidate is not eligible for promotion")
+            source = directory / filename
+            # Reports and comparison hashes describe record["model_path"]; promote
+            # exactly that file, not a different one beside it.
+            if Path(record["model_path"]).resolve() != source.resolve():
+                raise ValueError("Candidate is not eligible for promotion")
             root = self._root(profile)
             target = root / filename
             history = root / "history" / kind
             history.mkdir(parents=True, exist_ok=True)
             # Record absence as well as existing models, so rollback can restore stock.
-            entry = history / f"{time.time_ns()}-{uuid.uuid4().hex}"
-            entry.mkdir()
-            if target.is_file():
-                shutil.copyfile(target, entry / filename)
-            _atomic_copy(directory / filename, target)
+            # Build the rollback point outside history/ and rename it in only when
+            # complete: an empty or partial entry would make rollback delete or
+            # corrupt the active model.
+            name = f"{time.time_ns()}-{uuid.uuid4().hex}"
+            staging = root / "history" / ".staging" / name
+            staging.mkdir(parents=True)
+            try:
+                if target.is_file():
+                    _atomic_copy(target, staging / filename)
+                entry = history / name
+                os.replace(staging, entry)
+            except BaseException:
+                shutil.rmtree(staging, ignore_errors=True)
+                raise
+            try:
+                _atomic_copy(source, target)
+            except BaseException:
+                # The active model is unchanged; drop the rollback point for a
+                # promotion that never happened.
+                shutil.rmtree(entry, ignore_errors=True)
+                raise
             return self.status(profile)
 
     def rollback(self, profile: Profile, kind: str) -> dict[str, Any]:

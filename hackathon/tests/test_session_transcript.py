@@ -1,5 +1,5 @@
 """Camera sessions accumulate raw chunks; Stop is the only AI boundary."""
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from hackathon.contracts import LipResult
 from hackathon.runtime import Runtime

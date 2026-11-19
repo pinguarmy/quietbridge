@@ -3,12 +3,48 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+try:  # POSIX: also serialize appends from other processes (e.g. a second server)
+    import fcntl
+except ImportError:  # pragma: no cover - Windows keeps the in-process lock only
+    fcntl = None
+
+_APPEND_LOCK = threading.Lock()
+
+
+def _append_line(path: Path, line: str) -> None:
+    """Durably append one JSON line, never merging it into a torn previous line.
+
+    A crash mid-write can leave a final line without its newline. Appending
+    straight after it would make the new, valid record unparseable too, so a
+    missing terminator is written first. One os.write on an O_APPEND descriptor
+    keeps concurrent appends whole.
+    """
+    data = line.encode("utf-8")
+    with _APPEND_LOCK:
+        flags = os.O_RDWR | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0)
+        fd = os.open(path, flags, 0o600)
+        try:
+            if fcntl is not None:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            size = os.fstat(fd).st_size
+            if size:
+                os.lseek(fd, size - 1, os.SEEK_SET)
+                if os.read(fd, 1) != b"\n":
+                    data = b"\n" + data
+            written = os.write(fd, data)
+            if written != len(data):
+                raise OSError(f"Short write to {path.name}: {written} of {len(data)} bytes")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
 
 def inspect_source_npz(
@@ -128,10 +164,7 @@ class CorrectionStore:
             "sources": self._source_references(source_paths or []),
         }
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps(entry, ensure_ascii=False) + "\n")
-            stream.flush()
-            os.fsync(stream.fileno())
+        _append_line(self.path, json.dumps(entry, ensure_ascii=False) + "\n")
         return entry
 
     def _source_references(self, paths):
@@ -150,13 +183,21 @@ class CorrectionStore:
         return references
 
     def list(self):
+        """Readable records; torn or non-object lines are skipped, not fatal
+        (summarize_corrections reports them as warnings)."""
         if not self.path.is_file():
             return []
         entries = []
-        with self.path.open(encoding="utf-8") as stream:
+        with self.path.open(encoding="utf-8", errors="replace") as stream:
             for line in stream:
-                if line.strip():
-                    entries.append(json.loads(line))
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(entry, dict):
+                    entries.append(entry)
         return entries
 
 
@@ -205,13 +246,15 @@ def summarize_corrections(
             "correction_provenance_complete": False,
         }
 
-    with path.open(encoding="utf-8") as stream:
+    with path.open(encoding="utf-8", errors="replace") as stream:
         for line_num, line in enumerate(stream, start=1):
             if not line.strip():
                 continue
             try:
                 entry = json.loads(line)
             except Exception:
+                entry = None
+            if not isinstance(entry, dict):
                 skipped_count += 1
                 invalid_sources += 1
                 warnings.append(f"Line {line_num}: malformed JSON in corrections.jsonl")

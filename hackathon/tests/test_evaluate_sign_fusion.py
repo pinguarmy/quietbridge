@@ -6,7 +6,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import hackathon.evaluate_fusion as evaluator
 from hackathon.contracts import SignEvent
 from hackathon.evaluate_fusion import evaluate, load_pairs, main
 from hackathon.tests.test_evaluate_fusion import Motion, Reader, samples

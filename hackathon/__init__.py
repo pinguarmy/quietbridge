@@ -1,1 +1,1 @@
-"""Local LipFlow hackathon demo; independent of the installed menu-bar app."""
+"""QuietBridge product package (historical name `hackathon`); independent of the Lipflow menu-bar app."""

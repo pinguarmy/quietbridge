@@ -83,7 +83,7 @@ class LipsAdapter:
             self.model_path = str(Path(selected).expanduser().resolve())
             load_personal_state(self.reader, self.model_path)
             self.reader.personal_vsr_source = self.model_path
-            self.model_name = "personal (welcome pilot)"
+            self.model_name = "personal"
 
         vsr_source = getattr(self.reader, "personal_vsr_source", None) or self.model_path
         lm_source = getattr(self.reader, "personal_lm_source", None) or language_model_path
@@ -130,7 +130,9 @@ class LipsAdapter:
                     gray = cv2.cvtColor(f_bgr, cv2.COLOR_BGR2GRAY)
                     crop = face_crop(gray, obs, rec)
                 except Exception:
-                    crop = None
+                    # Skip the frame: a None crop beside real anchors would crash
+                    # mouth_rois at decode time. The omission shows up as a gap.
+                    continue
                 rec.ts.append(t_ms / 1000)
                 rec.grays.append(crop)
                 rec.anchors.append(obs.anchors if obs else None)

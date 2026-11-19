@@ -1,4 +1,4 @@
-"""Shared interface between Sam's runtime and Peter's sign recognizer.
+"""Shared interface between the runtime, the lip adapter, sign recognizers and fusion.
 
 All event timestamps use int(time.perf_counter() * 1000), on the same machine.
 Only final, supported sign events enter fusion. Scores are recognizer scores,

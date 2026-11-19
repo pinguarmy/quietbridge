@@ -62,7 +62,7 @@ def test_load_allowed_adaptation_before_warmup(tmp_path, reader_modules, prefix)
     path = checkpoint(tmp_path, state)
     original = path.read_bytes()
     adapter = LipsAdapter(personal_model_path=path)
-    assert adapter.model_name == "personal (welcome pilot)"
+    assert adapter.model_name == "personal"
     assert adapter.model_path == str(path.resolve())
     assert adapter.reader.personal_vsr is True and adapter.reader.warmed_personal is True
     assert torch.equal(adapter.reader.model.state_dict()[key], state[key])

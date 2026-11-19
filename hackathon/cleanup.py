@@ -7,10 +7,26 @@ import threading
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 MAX_RESPONSE = 512 * 1024
 TEST_PROMPT = "Please return exactly OK."
+
+
+class _RefuseRedirect(HTTPRedirectHandler):
+    """urllib re-sends every non-content header, Authorization included, to any
+    redirect target (other host, or https -> http). A bearer key must reach
+    only the configured origin, so a 3xx surfaces as an HTTP error instead."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = build_opener(_RefuseRedirect)
+
+
+def urlopen(request, timeout):
+    return _OPENER.open(request, timeout=timeout)
 
 
 def _same_words(source, suggestion):
@@ -54,7 +70,7 @@ class CleanupClient:
         self._config_generation = 0
         self._queue = queue.Queue(maxsize=1)
         self._stop = threading.Event()
-        self._worker = threading.Thread(target=self._run, name="demo-cleanup", daemon=True)
+        self._worker = threading.Thread(target=self._run, name="cleanup-worker", daemon=True)
         self._worker.start()
 
     def public_config(self):
@@ -172,12 +188,20 @@ class CleanupClient:
                 suggestion = self._chat(config, prompt).strip()
                 if not candidates or not _same_words(candidates[0], suggestion):
                     raise ValueError("Cleanup suggestion changed the original words and was rejected")
+                # The guard ignores whitespace runs; offer the collapsed form so
+                # tabs, newlines or U+2028 from the service never reach the UI.
+                suggestion = " ".join(suggestion.split())
                 result = {"status": "ready" if suggestion else "idle", "suggestion": suggestion, "error": ""}
             except Exception as exc:
                 result = {"status": "error", "suggestion": "", "error": str(exc) if isinstance(exc, ValueError) else "Cleanup failed"}
             result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
             if not self._stop.is_set():
-                callback(generation, revision, result)
+                try:
+                    callback(generation, revision, result)
+                except Exception:
+                    # A failing consumer must not end the only cleanup worker;
+                    # later revisions still get their (optional) suggestion.
+                    pass
 
     def close(self):
         self._stop.set()
