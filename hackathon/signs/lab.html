@@ -372,7 +372,7 @@ button.btn-remove:hover:not(:disabled){background:var(--danger-soft);border-colo
     </div>
     <div id="pose" class="pose" aria-hidden="true">✋</div>
     <h2 id="meaning" class="meaning">HELLO</h2>
-    <div id="concept" class="concept">Hello / Greeting</div>
+    <div id="concept" class="concept">Hello</div>
     <p id="instruction" class="instruction"></p>
     <p id="hint" class="hint"></p>
     <div id="mouthPrompt" class="mouth-prompt" hidden></div>
@@ -819,7 +819,7 @@ function render(){
     }
 
     const selectedLabel=gSel.value;
-    const g=gestures.find(x=>x.label===selectedLabel)||{label:'REST',emoji:'✋',display_name:'Rest',concept:'Rest / negative class',description:'Relax into a loose half-fist, or lower your hands.',hint:'Record ordinary relaxed moments as the negative class.'};
+    const g=gestures.find(x=>x.label===selectedLabel)||{label:'REST',emoji:'✋',display_name:'Rest',concept:'Resting (no message)',description:'Let your hands relax or rest them in your lap.',hint:'Record ordinary moments when you are not gesturing. These teach the app when to stay silent.'};
     $('pose').textContent=g.emoji||'✋';
     $('meaning').textContent=g.display_name||g.label;
     $('concept').textContent=g.concept?`Means: ${g.concept}`:'';

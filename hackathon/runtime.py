@@ -913,7 +913,7 @@ class Runtime:
             if phase == "idle" and self._lip_activity.state != ActivityState.IDLE:
                 self._lip_activity.reset()
             elif phase == "recording" and self._lip_activity.state != ActivityState.RECORDING:
-                self._lip_activity.sync_recording(self.record_start or timestamp_ms)
+                self._lip_activity.sync_recording(self.record_start if self.record_start is not None else timestamp_ms)
 
             action = self._lip_activity.update(opening, timestamp_ms)
             if action == ActivityAction.START and self.state["phase"] == "idle":

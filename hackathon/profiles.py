@@ -9,6 +9,8 @@ Existing data outside the profiles directory is never migrated or deleted.
 """
 from __future__ import annotations
 
+import glob
+
 import json
 import os
 import re
@@ -194,7 +196,7 @@ def check_session_split(data_root: Path | str, split: str, session: str) -> None
         if other == split:
             continue
         other_dir = data_root / other
-        if other_dir.is_dir() and any(other_dir.glob(f"{session}_*.npz")):
+        if other_dir.is_dir() and any(other_dir.glob(f"{glob.escape(session)}_*.npz")):
             raise ValueError(
                 f"session {session!r} already has recordings in {other}; refusing split leakage"
             )
