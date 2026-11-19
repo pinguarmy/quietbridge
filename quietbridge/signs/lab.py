@@ -16,6 +16,8 @@ import hashlib
 import json
 import re
 import secrets
+import socket
+import sys
 import threading
 import time
 import uuid
@@ -163,6 +165,14 @@ class _Recording:
 
 class _LabServer(ThreadingHTTPServer):
     daemon_threads = True
+    # On Windows SO_REUSEADDR lets a second process bind the same port and
+    # take over requests without any error; ask for exclusive use there.
+    allow_reuse_address = sys.platform != "win32"
+
+    def server_bind(self):
+        if sys.platform == "win32":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
     def __init__(self, address, engine, data_root, max_frames, max_seconds, profile_manager=None, sign_model_info=None):
         super().__init__(address, _Handler)
