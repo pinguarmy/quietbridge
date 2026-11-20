@@ -161,6 +161,10 @@ class _Recording:
     expected_text: str | None = None
     bgr_frames: list | None = None
     video_overflow: bool = False
+    # Set when a finished try waits for "Save anyway" / "Discard and retry":
+    # no more frames are added and nothing is on disk yet.
+    awaiting_review: bool = False
+    finished_monotonic: float | None = None
 
 
 class _LabServer(ThreadingHTTPServer):
@@ -261,29 +265,57 @@ def _check_profile_fields(profile_id, name, gestures, lip_prompts, id_required: 
         raise ValueError("lip_prompts must be a list of strings")
 
 
-def _with_restore_points(status: dict, profile) -> dict:
-    """Add ``restore``: per model type, whether "Restore previous model" can act.
+class _LazyQuality:
+    """capture_quality imports NumPy; opening the page must not (see test_personalize_entry)."""
 
-    ``ModelLifecycle.status`` does not report rollback points yet. Until it does
-    (a ``restore`` field there wins), mirror ``ModelLifecycle.rollback``: the
-    newest directory in ``models/history/<kind>/`` is consumed, and it holds
-    the previous file or, when nothing was saved before, nothing (= stock).
+    def __getattr__(self, name):
+        from . import capture_quality as module
+        return getattr(module, name)
+
+
+capture_quality = _LazyQuality()
+
+
+def _review_request(body: bytes) -> tuple[bool, bool]:
+    """Parse the optional review flags of a stop request: (review, accept_quality).
+
+    ``review``: return measured quality warnings instead of saving, so the
+    person can choose "Save anyway" or "Discard and retry". ``accept_quality``:
+    the person chose "Save anyway". Without either flag a stop saves as before.
     """
-    if isinstance(status.get("restore"), dict):
-        return status
-    from quietbridge.model_lifecycle import _KINDS
+    if not body or not body.strip():
+        return False, False
+    data = json.loads(body)
+    if not isinstance(data, dict):
+        raise ValueError("Expected a JSON object")
+    review, accept = data.get("review", False), data.get("accept_quality", False)
+    if not isinstance(review, bool) or not isinstance(accept, bool):
+        raise ValueError("review and accept_quality must be booleans")
+    return review, accept
 
-    history = Path(profile.profile_dir) / "models" / "history"
-    restore = {}
-    for kind, (_, filename, _) in _KINDS.items():
-        folder = history / kind
-        entries = sorted(p for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
-        if not entries:
-            restore[kind] = {"available": False, "restores": None}
-        else:
-            restore[kind] = {"available": True,
-                             "restores": "previous_model" if (entries[-1] / filename).is_file() else "stock"}
-    return {**status, "restore": restore}
+
+def _gesture_quality(rec: "_Recording") -> dict:
+    import numpy as np
+
+    return capture_quality.gesture_quality(np.stack(rec.landmarks), np.stack(rec.hand_present),
+                                           np.asarray(rec.timestamps_ms, dtype=np.float64), rec.label)
+
+
+def _mouth_quality(mouth) -> dict | None:
+    """Lip-try quality, or None for a mouth backend that cannot measure it."""
+    measure = getattr(mouth, "quality", None)
+    return measure() if callable(measure) else None
+
+
+def _decided(report: dict, review: bool, accept: bool) -> dict:
+    flagged = capture_quality.needs_review(report)
+    if not flagged:
+        decision = "no_warnings"
+    elif accept:
+        decision = "saved_anyway"
+    else:
+        decision = "not_reviewed"
+    return capture_quality.with_decision(report, decision)
 
 
 def _check_session_split(data_root: Path, split: str, session: str) -> None:
@@ -291,7 +323,7 @@ def _check_session_split(data_root: Path, split: str, session: str) -> None:
     check_session_split(data_root, split, session)
 
 
-def _save_sequence(server: _LabServer, rec: _Recording) -> Path:
+def _save_sequence(server: _LabServer, rec: _Recording, quality: dict | None = None) -> Path:
     """Write the buffered sequence as one .npz and return its path."""
     import numpy as np
 
@@ -317,6 +349,10 @@ def _save_sequence(server: _LabServer, rec: _Recording) -> Path:
         payload["profile_id"] = np.asarray(rec.profile_id)
     if rec.expected_text is not None:
         payload["expected_text"] = np.asarray(rec.expected_text)
+    if quality is not None:
+        # Measured values, thresholds version and the person's decision, so the
+        # thresholds can be revisited and trainers can report flagged tries.
+        payload["quality_json"] = capture_quality.to_npz_field(quality)
 
     if rec.bgr_frames is not None:
         info = server.sign_model_info
@@ -550,7 +586,13 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/api/models":
             with self.server.lock:
                 profile = self.server.profile_manager.get_active_profile()
-                payload = _with_restore_points(self.server.models.status(profile), profile)
+                payload = self.server.models.status(profile)
+            self._send_json(200, payload)
+            return
+        if self.path == "/api/guidance":
+            with self.server.lock:
+                profile = self.server.profile_manager.get_active_profile()
+                payload = self.server.models.guidance(profile)
             self._send_json(200, payload)
             return
         if self.path == "/api/state":
@@ -644,7 +686,7 @@ class _Handler(BaseHTTPRequestHandler):
                 else:
                     self._error(404, "unknown model action")
                     return
-                payload = _with_restore_points(self.server.models.status(profile), profile)
+                payload = self.server.models.status(profile)
         except (ValueError, RuntimeError, OSError, KeyError) as error:
             self._error(400, str(error))
             return
@@ -681,7 +723,7 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             process_ms = (time.perf_counter() - start) * 1000.0
             rec = self.server.recording
-            if rec is not None and not rec.limit_reached:
+            if rec is not None and not rec.limit_reached and not rec.awaiting_review:
                 if rec.bgr_frames is not None and len(rec.bgr_frames) >= MAX_VIDEO_FRAMES:
                     rec.video_overflow = True
                 elif rec.bgr_frames is not None and time.monotonic() - rec.start_monotonic >= MAX_VIDEO_SECONDS:
@@ -751,7 +793,19 @@ class _Handler(BaseHTTPRequestHandler):
                 elif action == "stop":
                     if self.server.paired_recording is not None:
                         raise ValueError("paired recording in progress; use /api/paired/stop")
-                    self.server.mouth.stop()
+                    review, accept = data.get("review", False), data.get("accept_quality", False)
+                    if not isinstance(review, bool) or not isinstance(accept, bool):
+                        raise ValueError("review and accept_quality must be booleans")
+                    quality = _mouth_quality(self.server.mouth)
+                    if review and not accept and capture_quality.needs_review(quality):
+                        state = self.server.mouth.freeze()
+                        self._send_json(200, {**state, "mouth": state, "review_required": True,
+                                              "quality": quality})
+                        return
+                    if quality is None:
+                        self.server.mouth.stop()
+                    else:
+                        self.server.mouth.stop(quality=_decided(quality, review, accept))
                 elif action == "discard":
                     if self.server.paired_recording is not None:
                         raise ValueError("paired recording in progress; use /api/paired/discard")
@@ -929,7 +983,13 @@ class _Handler(BaseHTTPRequestHandler):
         })
 
     def _handle_paired_stop(self):
-        if self._read_body(MAX_JSON_BYTES) is None:
+        body = self._read_body(MAX_JSON_BYTES)
+        if body is None:
+            return
+        try:
+            review, accept = _review_request(body)
+        except ValueError as error:
+            self._error(400, str(error))
             return
         with self.server.lock:
             if self.server.paired_recording is None:
@@ -941,8 +1001,11 @@ class _Handler(BaseHTTPRequestHandler):
                 self._error(400, "no frames captured in gesture sequence; nothing to save")
                 return
 
+            # A try waiting for review finished when the review started; time
+            # spent deciding is not capture time.
+            finished = rec.finished_monotonic or time.monotonic()
             if rec.bgr_frames is not None and (rec.video_overflow or rec.limit_reached
-                    or time.monotonic() - rec.start_monotonic > MAX_VIDEO_SECONDS
+                    or finished - rec.start_monotonic > MAX_VIDEO_SECONDS
                     or len(rec.bgr_frames) != len(rec.timestamps_ms)):
                 self._error(400, "video capture exceeded a limit or has mismatched frames; discard this trial")
                 return
@@ -950,6 +1013,19 @@ class _Handler(BaseHTTPRequestHandler):
             if self.server.mouth._rec is None:
                 self._error(400, "no mouth recording to stop")
                 return
+
+            gesture_q = _gesture_quality(rec)
+            mouth_q = _mouth_quality(self.server.mouth)
+            combined = capture_quality.combine(gesture_q, mouth_q)
+            if review and not accept and capture_quality.needs_review(combined):
+                rec.awaiting_review = True
+                rec.finished_monotonic = rec.finished_monotonic or time.monotonic()
+                self.server.mouth.freeze()
+                self._send_json(200, {"review_required": True, "quality": combined, "recording": True,
+                                      "paired": True, "sequence_frames": len(rec.timestamps_ms)})
+                return
+            gesture_q = _decided(gesture_q, review, accept)
+            mouth_q = _decided(mouth_q, review, accept) if mouth_q is not None else None
 
             pair_info = self.server.paired_recording
             pair_id = pair_info["pair_id"]
@@ -960,14 +1036,15 @@ class _Handler(BaseHTTPRequestHandler):
             session = pair_info["session"]
 
             try:
-                mouth_snap = self.server.mouth.stop()
+                mouth_snap = (self.server.mouth.stop(quality=mouth_q) if mouth_q is not None
+                              else self.server.mouth.stop())
                 mouth_path = mouth_snap.get("last_saved") or self.server.mouth.last_saved
             except Exception as mouth_error:
                 self._error(400, f"mouth capture failed: {mouth_error}")
                 return
 
             try:
-                seq_path = _save_sequence(self.server, rec)
+                seq_path = _save_sequence(self.server, rec, gesture_q)
             except Exception as seq_error:
                 self._send_json(500, {
                     "error": f"sequence save failed: {seq_error}",
@@ -998,6 +1075,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "session": session,
                 "sequence_frames": len(rec.timestamps_ms),
                 "saved_count": self.server.saved_count,
+                "quality": capture_quality.combine(gesture_q, mouth_q),
             }
             if rec.bgr_frames is not None:
                 payload["capture_video"] = True
@@ -1176,7 +1254,13 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json(200, payload)
 
     def _handle_stop(self):
-        if self._read_body(MAX_JSON_BYTES) is None:
+        body = self._read_body(MAX_JSON_BYTES)
+        if body is None:
+            return
+        try:
+            review, accept = _review_request(body)
+        except ValueError as error:
+            self._error(400, str(error))
             return
         with self.server.lock:
             if self.server.paired_recording is not None:
@@ -1191,8 +1275,17 @@ class _Handler(BaseHTTPRequestHandler):
                 # the user can retry or discard explicitly.
                 self._error(400, "no frames captured; nothing to save")
                 return
+            quality = _gesture_quality(rec)
+            if review and not accept and capture_quality.needs_review(quality):
+                # Nothing is saved or dropped: the person decides.
+                rec.awaiting_review = True
+                rec.finished_monotonic = rec.finished_monotonic or time.monotonic()
+                self._send_json(200, {"review_required": True, "quality": quality, "recording": True,
+                                      "recorded_frames": len(rec.timestamps_ms)})
+                return
+            quality = _decided(quality, review, accept)
             try:
-                path = _save_sequence(self.server, rec)
+                path = _save_sequence(self.server, rec, quality)
             except ValueError as error:
                 self._error(400, str(error))
                 return
@@ -1203,6 +1296,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "saved": str(path),
                 "recorded_frames": len(rec.timestamps_ms),
                 "saved_count": self.server.saved_count,
+                "quality": quality,
             }
         self._send_json(200, payload)
 

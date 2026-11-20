@@ -182,6 +182,28 @@ def _replay_sign(recognizer, frames, times, base):
     return retimed, decode_ms, int(times[-1]) - first + base + 1
 
 
+def phrase_suggestion_section(rows, phrases):
+    """Would offering the person's own phrases rescue a wrong lip top-1? (diagnostic)
+
+    Uses ``quietbridge.phrase_match.rescue_outcome`` on each pair's lip n-best
+    and reference, with the profile's saved phrases. The reference only scores;
+    it never chooses a suggestion. Paired recordings use the practice phrases
+    as prompts, so most references are in the phrase list: read
+    ``reference_not_in_phrases`` for how often a wrong phrase is offered.
+    """
+    if not phrases:
+        return {'measured': False, 'reason': 'profile has no saved phrases'}
+    from .phrase_match import rescue_outcome, summarize_rescue
+    outcomes = []
+    for row in rows:
+        candidates = [c.get('text', '') for c in row.get('raw_candidates') or [] if isinstance(c, dict)]
+        outcome = rescue_outcome(candidates, row['reference'], phrases)
+        row['phrase_suggestion'] = outcome
+        outcomes.append(outcome)
+    return {'measured': True, 'phrases_source': 'profile lip_prompts', 'phrases': len(phrases),
+            **summarize_rescue(outcomes)}
+
+
 def evaluate(profile, split, reader, motion=None, *, sign_recognizer=None):
     if (motion is None) == (sign_recognizer is None):
         raise ValueError('pass exactly one of motion or sign_recognizer')
@@ -244,6 +266,17 @@ def evaluate(profile, split, reader, motion=None, *, sign_recognizer=None):
     rejected = sum(r['predicted_label'] is None or r['predicted_label'] == 'REST' for r in positive)
     def false_emissions(group):
         return sum(r['predicted_label'] is not None and r['predicted_label'] != 'REST' for r in group)
+
+    def recall_group(group):
+        hits = sum(r['predicted_label'] == r['true_label'] for r in group)
+        return {'labels': sorted({r['true_label'] for r in group}), 'count': len(group), 'correct': hits,
+                'recall': hits / len(group) if group else None}
+    # Fusion only turns a gesture into text when its vocabulary entry is enabled
+    # (or, without "enabled", verified). Recognising a label that can never
+    # produce text is a classifier result, not a communication result, so
+    # recall is reported over all vocabulary labels AND over text-producing ones.
+    producing = {label for label, entry in vocabulary.items()
+                 if entry.get('enabled', entry.get('verified')) is True}
     classification = {
         'positive_count': len(positive), 'correct': correct, 'rejected': rejected,
         'wrong': len(positive) - correct - rejected,
@@ -263,6 +296,14 @@ def evaluate(profile, split, reader, motion=None, *, sign_recognizer=None):
                'agreement': sum(r['decision']['reason'] == 'agreement' for r in rows),
                'gesture_reject': sum(not r['gesture']['accepted'] for r in rows),
                'gesture_rest': sum(r['gesture']['accepted'] and r['gesture']['raw_label'] == 'REST' for r in rows)}
+    # gesture_classification.recall covers every vocabulary label; this splits it.
+    summary['gesture_recall_by_text_output'] = {
+        'all_vocabulary_labels': recall_group(positive),
+        'text_producing': recall_group([r for r in positive if r['true_label'] in producing]),
+        'not_text_producing': recall_group([r for r in positive if r['true_label'] not in producing]),
+        'rule': 'text-producing = vocabulary entry enabled (or, without "enabled", verified), as fusion uses it',
+    }
+    summary['phrase_suggestions'] = phrase_suggestion_section(rows, getattr(profile, 'lip_prompts', None))
     for stream in ('sequence', 'mouth'):
         timings = [r[f'{stream}_timing'] for r in rows]
         duration = sum(t['end_ms'] - t['start_ms'] for t in timings)
@@ -273,7 +314,9 @@ def evaluate(profile, split, reader, motion=None, *, sign_recognizer=None):
     limitations = ['Offline paired-sample diagnostics do not measure live camera accuracy, latency, or calibrated confidence.',
                    'Gestures-only text may contain only a slot and is compared with the full reference, so its WER and exact rate reflect that difference.',
                    'Cross-split checks cover recording session/trial/pair ids, not what models were trained on; this report does not establish test independence.',
-                   'Unknown inputs are labels outside the profile vocabulary other than REST; false emissions count accepted non-REST predictions.']
+                   'Unknown inputs are labels outside the profile vocabulary other than REST; false emissions count accepted non-REST predictions.',
+                   'gesture_classification.recall counts every vocabulary label; gesture_recall_by_text_output separates labels whose entry can produce text.',
+                   'phrase_suggestions counts whether a suggestion was available, not whether the person would choose it.']
     if sign_recognizer is not None:
         decodes = [r['sign_decode_ms'] for r in rows]
         current = sign_recognizer.model_info.get('sha256')

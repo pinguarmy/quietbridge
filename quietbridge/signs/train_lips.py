@@ -14,10 +14,59 @@ import re
 import time
 
 import numpy as np
-import torch
 
-ROOT = Path(__file__).resolve().parents[2]
-TOKENIZER = ROOT / "models" / "lm" / "unigram5000.model"
+from lipflow import paths as _lipflow_paths
+
+# One models-folder rule for the lip reader, the downloader and this trainer.
+TOKENIZER = Path(_lipflow_paths.MODELS) / "lm" / "unigram5000.model"
+
+#: Refusal limits (engineering defaults, not validated): below these the
+#: trainer stops before loading the model and says what to record. With fewer
+#: practice clips a 6-epoch adaptation mostly memorises; with fewer check clips
+#: a one-word WER difference decides selection.
+MIN_FIT_CLIPS = 10
+MIN_VALIDATION_CLIPS = 5
+
+
+class InsufficientData(ValueError):
+    """Too little recorded data to train or to judge a candidate."""
+
+
+def check_minimums(fit: list[dict], val: list[dict]) -> dict:
+    """Raise InsufficientData with a concrete next step; return the counts otherwise."""
+    counts = {"fit_clips": len(fit), "validation_clips": len(val),
+              "fit_phrases": len({x["text"] for x in fit}),
+              "validation_words": sum(len(normalise(x["text"]).split()) for x in val),
+              "minimums": {"fit_clips": MIN_FIT_CLIPS, "validation_clips": MIN_VALIDATION_CLIPS}}
+    problems = []
+    if len(fit) < MIN_FIT_CLIPS:
+        problems.append(f"record {MIN_FIT_CLIPS - len(fit)} more lip practice tries "
+                        f"({len(fit)} of at least {MIN_FIT_CLIPS})")
+    if len(val) < MIN_VALIDATION_CLIPS:
+        problems.append(f"record {MIN_VALIDATION_CLIPS - len(val)} more lip check tries on another occasion "
+                        f"({len(val)} of at least {MIN_VALIDATION_CLIPS})")
+    if problems:
+        raise InsufficientData("Not enough lip recordings to train a candidate: " + "; ".join(problems) + ".")
+    return counts
+
+
+def _sha256(path) -> str | None:
+    import hashlib
+    path = Path(path)
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def capture_quality_summary(items: list[dict]) -> dict:
+    """Report (never exclude) lip tries whose capture review asked for a decision."""
+    flagged = [{"trial_id": x["trial_id"], "text": x["text"], "warnings": x["quality_warnings"],
+                "decision": x.get("quality_decision")} for x in items if x.get("quality_warnings")]
+    return {"checked": len(items), "flagged": flagged, "used_in_training_or_scoring": True}
 
 
 def _scalar(z, name: str) -> str:
@@ -57,6 +106,14 @@ def load_dataset(root: str | os.PathLike) -> dict[str, list[dict]]:
                         capture_fps=round((len(timestamps) - 1) * 1000 / duration, 3) if duration > 0 else None,
                         max_frame_gap_ms=int(np.diff(timestamps).max()) if len(timestamps) > 1 else 0,
                     )
+                from .capture_quality import from_npz, lip_quality
+                review = from_npz(z)
+                if review is None and "timestamps_ms" in z.files and "face_present" in z.files \
+                        and len(z["timestamps_ms"]) == len(z["face_present"]):
+                    review = lip_quality(z["timestamps_ms"], z["face_present"])
+                item["quality_warnings"] = [w.get("code") for w in (review or {}).get("warnings", [])
+                                            if isinstance(w, dict) and w.get("severity", "warn") == "warn"]
+                item["quality_decision"] = (review or {}).get("decision")
                 if "split" in z.files and _scalar(z, "split") != split:
                     raise ValueError(f"{path}: split metadata does not match its directory")
             if not item["text"] or not item["session_id"] or not item["trial_id"]:
@@ -146,7 +203,9 @@ def metrics(results: list[dict], target: str) -> dict:
         "mean_capture_fps": round(float(np.mean([row["capture_fps"] for row in results
                                 if row.get("capture_fps") is not None])), 3)
                             if any(row.get("capture_fps") is not None for row in results) else None,
-        "max_frame_gap_ms": max((row.get("max_frame_gap_ms", 0) for row in results), default=0),
+        # Older recordings have no timestamps: their gap is unknown (None), not 0.
+        "max_frame_gap_ms": max((row["max_frame_gap_ms"] for row in results
+                                 if row.get("max_frame_gap_ms") is not None), default=None),
     }
 
 
@@ -187,6 +246,8 @@ def evaluate(reader, items: list[dict], cache: dict[str, dict] | None = None) ->
 
 
 def save_candidate(reader, output: Path, scope: str) -> None:
+    import torch
+
     prefixes = ["encoder.frontend."]
     if scope in ("frontend+embed", "frontend+encoder1"):
         prefixes.append("encoder.embed.")
@@ -202,6 +263,7 @@ def save_candidate(reader, output: Path, scope: str) -> None:
 
 
 def _write_report(path: Path, report: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("x", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
         f.write("\n")
@@ -222,16 +284,33 @@ def run(args: argparse.Namespace) -> dict:
     data = load_dataset(args.data)
     fit, val = independent_partition(data)
     target = target_prompt(data["train"])
+    seed = getattr(args, "seed", 0)
+    final_test = not getattr(args, "no_final_test", False)
     report = {
         "data": str(Path(args.data).expanduser().resolve()), "output": str(output),
         "config": {"epochs": args.epochs, "beam": args.beam, "lr": args.lr,
-                   "scope": args.scope, "device": args.device},
+                   "scope": args.scope, "device": args.device, "seed": seed,
+                   "augmentation": "train clips only: random 88px crop, horizontal flip, brightness/contrast "
+                                   "jitter, 2 time masks (lipflow.train_vsr._augment)"},
         "counts": {"train": len(data["train"]), "fit": len(fit),
                    "validation": len(val), "val": len(val), "test": len(data["test"])},
         "target_prompt": target, "candidate_attempted": False,
         "selection": {"selected": "stock", "deployment": False, "reason": "candidate not completed"},
+        "capture_quality": {split: capture_quality_summary(data[split]) for split in ("train", "validation", "test")},
+        "tokenizer_sha256": _sha256(TOKENIZER),
         "failures": [],
     }
+    try:
+        # Before loading the ~1 GB model: too little data fails with what to record.
+        report["data_requirements"] = check_minimums(fit, val)
+    except InsufficientData as exc:
+        report["failures"].append(str(exc))
+        report["data_requirements"] = {"fit_clips": len(fit), "validation_clips": len(val),
+                                       "minimums": {"fit_clips": MIN_FIT_CLIPS,
+                                                    "validation_clips": MIN_VALIDATION_CLIPS}}
+        report["elapsed_seconds"] = time.perf_counter() - started
+        _write_report(report_path, report)
+        raise
     try:
         from lipflow.train_vsr import finetune
         from lipflow.vsr import LipReader
@@ -245,7 +324,7 @@ def run(args: argparse.Namespace) -> dict:
         }
         report["candidate_attempted"] = True
         candidate = finetune(fit, epochs=args.epochs, lr=args.lr, scope=args.scope,
-                             reader=reader, seed=0)
+                             reader=reader, seed=seed)
         candidate_val_rows = evaluate(candidate, val)
         candidate_val = metrics(candidate_val_rows, target)
         report["candidate"] = {"val": {"metrics": candidate_val, "transcripts": candidate_val_rows}}
@@ -253,17 +332,25 @@ def run(args: argparse.Namespace) -> dict:
         report["selection"] = {"selected": "candidate" if chosen else "stock",
                                "deployment": False, "reason": reason}
         save_candidate(candidate, output, args.scope)
+        # Binds this report to the exact weights it describes; promotion checks it.
+        report["candidate_sha256"] = _sha256(output)
 
-        # Frozen selection above: this is the sole final-test evaluation pass.
-        # finetune() mutates its reader, so construct a fresh stock reader for
-        # the untouched baseline rather than accidentally reusing candidate weights.
-        stock_reader = LipReader(device=args.device, beam_size=args.beam, personal=False)
-        stock_test_rows = evaluate(stock_reader, data["test"], stock_cache)
-        candidate_test_rows = evaluate(candidate, data["test"])
-        report["baseline"]["test"] = {"metrics": metrics(stock_test_rows, target),
-                                      "transcripts": stock_test_rows}
-        report["candidate"]["test"] = {"metrics": metrics(candidate_test_rows, target),
-                                       "transcripts": candidate_test_rows}
+        if final_test:
+            # Frozen selection above: this is the sole final-test evaluation pass.
+            # finetune() mutates its reader, so construct a fresh stock reader for
+            # the untouched baseline rather than accidentally reusing candidate weights.
+            stock_reader = LipReader(device=args.device, beam_size=args.beam, personal=False)
+            stock_test_rows = evaluate(stock_reader, data["test"], stock_cache)
+            candidate_test_rows = evaluate(candidate, data["test"])
+            report["baseline"]["test"] = {"metrics": metrics(stock_test_rows, target),
+                                          "transcripts": stock_test_rows}
+            report["candidate"]["test"] = {"metrics": metrics(candidate_test_rows, target),
+                                           "transcripts": candidate_test_rows}
+        else:
+            # Recipe experiments compare configurations on validation only; the
+            # final check is decoded once, for the chosen configuration, later.
+            report["final_test"] = "not evaluated (--no-final-test experiment run; not promotable)"
+            report["selection"]["experiment_only"] = True
         report["elapsed_seconds"] = time.perf_counter() - started
     except Exception as exc:
         report["failures"].append(f"{type(exc).__name__}: {exc}")
@@ -284,6 +371,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--scope", default="frontend",
                         choices=("frontend", "frontend+embed", "frontend+encoder1"))
     parser.add_argument("--device", default="auto")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="seeds Python/torch RNGs for augmentation and shuffling (CPU runs reproduce)")
+    parser.add_argument("--no-final-test", action="store_true",
+                        help="recipe experiments only: skip the final-test decode; the candidate is not promotable")
     args = parser.parse_args(argv)
     if args.epochs < 1 or args.beam < 1 or args.lr <= 0:
         parser.error("--epochs/--beam must be positive and --lr must be > 0")

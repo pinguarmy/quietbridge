@@ -120,6 +120,34 @@ def _comparison_gate_passed(comparison: dict[str, Any] | None) -> bool:
     return True
 
 
+#: Report field holding the SHA-256 of the weights the report describes.
+_REPORT_HASH_FIELD = {"motion": "model_sha256", "lips": "candidate_sha256"}
+_hash_cache: dict[tuple[str, int, int], str | None] = {}
+
+
+def _cached_sha256(path: Path) -> str | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    key = (str(path.resolve()), stat.st_size, stat.st_mtime_ns)
+    if key not in _hash_cache:
+        _hash_cache.clear() if len(_hash_cache) > 256 else None
+        _hash_cache[key] = _file_sha256(path)
+    return _hash_cache[key]
+
+
+def _report_binding(kind: str, report: dict[str, Any] | None, model_path: Path) -> str | None:
+    """"bound", "mismatch", "legacy_unbound" (older report without a hash), or None (no report)."""
+    field = _REPORT_HASH_FIELD.get(kind)
+    if field is None or not isinstance(report, dict):
+        return None
+    expected = report.get(field)
+    if not expected:
+        return "legacy_unbound"
+    return "bound" if _cached_sha256(model_path) == expected else "mismatch"
+
+
 class ModelLifecycle:
     """One shared manager tracks subprocesses for all profiles in this server."""
 
@@ -292,8 +320,19 @@ class ModelLifecycle:
         selected = None
         if report and isinstance(report.get("selection"), dict):
             selected = report["selection"].get("selected") == "candidate"
+        # A report describes exact weights. New trainers write the candidate's
+        # SHA-256; if the file no longer matches, the report is not evidence for it.
+        binding = _report_binding(record["kind"], report, Path(record["model_path"]))
+        record["report_binding"] = binding
+        if binding == "mismatch":
+            record["report_warning"] = ("The model file changed after its report was written, so the report does "
+                                        "not describe it. Train a new candidate.")
+        elif binding == "legacy_unbound":
+            record["report_warning"] = ("This report was written before reports recorded the model's fingerprint; "
+                                        "it cannot prove it describes this exact file.")
         valid = False
-        if report and not report.get("failures"):
+        if report and not report.get("failures") and binding != "mismatch" \
+                and not (report.get("selection") or {}).get("experiment_only"):
             if record["kind"] == "motion":
                 valid = bool(report.get("validation_trials")) and isinstance(report.get("validation_ungated"), dict)
             elif record["kind"] == "lips":
@@ -329,8 +368,53 @@ class ModelLifecycle:
                     continue
             active = {kind: str(root / filename) if (root / filename).is_file() else None
                       for kind, (_, filename, _) in _KINDS.items()}
-            return {"candidates": candidates, "active": active,
+            return {"candidates": candidates, "active": active, "restore": self._restore_points(profile),
                     "jobs": [c for c in candidates if c["status"] == "running" or c.get("eval_status") == "running"]}
+
+    def _restore_points(self, profile: Profile) -> dict[str, dict[str, Any]]:
+        """Per model type: can "Restore previous model" act, and what does it restore?
+
+        Mirrors ``rollback``: the newest entry in ``history/<kind>/`` is consumed;
+        it holds the previous file, or nothing when there was none (= stock).
+        """
+        history = self._root(profile) / "history"
+        restore = {}
+        for kind, (_, filename, _) in _KINDS.items():
+            folder = history / kind
+            entries = sorted(p for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
+            if not entries:
+                restore[kind] = {"available": False, "restores": None}
+            else:
+                restore[kind] = {"available": True,
+                                 "restores": "previous_model" if (entries[-1] / filename).is_file() else "stock"}
+        return restore
+
+    def guidance(self, profile: Profile) -> dict[str, Any]:
+        """"What to record next" for this profile, from data counts and validation reports only.
+
+        Uses the newest completed candidate report of each kind (by report file
+        time). Final-check results are never read by the guidance module.
+        """
+        from quietbridge.signs.guidance import guidance, inventory
+
+        with self._lock:
+            newest: dict[str, tuple[float, str, dict[str, Any]]] = {}
+            for meta in (self._root(profile) / "candidates").glob("*/candidate.json"):
+                try:
+                    record = json.loads(meta.read_text(encoding="utf-8"))
+                    report_path = Path(record["report_path"])
+                    if record.get("status") != "completed" or not report_path.is_file():
+                        continue
+                    report = json.loads(report_path.read_text(encoding="utf-8"))
+                    stamp = report_path.stat().st_mtime
+                except (OSError, ValueError, KeyError, TypeError):
+                    continue
+                kind = record.get("kind")
+                if kind in _KINDS and isinstance(report, dict) and (kind not in newest or stamp > newest[kind][0]):
+                    newest[kind] = (stamp, str(record.get("id", "")), report)
+            reports = {kind: (cid, report) for kind, (_, cid, report) in newest.items()}
+            inv = inventory(profile.sequences_dir, profile.mouths_dir)
+            return guidance(inv, profile.gestures, profile.lip_prompts, reports)
 
     def evaluate_language(self, profile: Profile, candidate_id: str) -> dict[str, Any]:
         with self._lock:

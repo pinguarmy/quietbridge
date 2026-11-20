@@ -90,8 +90,17 @@ DEFAULT_SCOPE = "frontend+encoder1"
 
 
 def finetune(clips: list[dict], epochs: int = 6, lr: float = 1e-4, scope: str = DEFAULT_SCOPE,
-             reader: LipReader | None = None, log=print, seed: int = 0, on_epoch=None) -> LipReader:
-    """clips: [{'rois': (T,96,96) uint8, 'text': str}]. Returns the adapted reader (in memory)."""
+             reader: LipReader | None = None, log=print, seed: int = 0, on_epoch=None,
+             augment=None) -> LipReader:
+    """clips: [{'rois': (T,96,96) uint8, 'text': str}]. Returns the adapted reader (in memory).
+
+    ``augment`` (default ``_augment``) is applied to these training clips only;
+    decoding for validation/test goes through ``reader.read`` and is never
+    augmented. Python and torch RNGs are seeded, so a CPU run is reproducible.
+    """
+    if not clips:
+        raise ValueError("finetune needs at least one training clip")
+    augment = augment or _augment
     random.seed(seed)
     torch.manual_seed(seed)
     reader = reader or LipReader(beam_size=10, personal=False)
@@ -112,7 +121,7 @@ def finetune(clips: list[dict], epochs: int = 6, lr: float = 1e-4, scope: str = 
         random.shuffle(data)
         total = 0.0
         for rois, ys in data:
-            loss = clip_loss(reader, _augment(rois), ys)
+            loss = clip_loss(reader, augment(rois), ys)
             opt.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params, 5.0)

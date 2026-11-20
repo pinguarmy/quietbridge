@@ -45,6 +45,7 @@ class MouthCapture:
         self._inner_lips = []
         self._face = False
         self._preview = False
+        self._frozen = False  # a finished try waiting for "Save anyway" / "Discard and retry"
         self.error = None
         self.last_saved = None
         self.saved_count = 0
@@ -135,7 +136,7 @@ class MouthCapture:
     # -- frames ------------------------------------------------------
     def feed(self, frame_bgr, timestamp_ms: int):
         """Consume one browser frame. Returns the latest real mouth box, or None."""
-        active = self._recording and self._rec is not None
+        active = self._recording and self._rec is not None and not self._frozen
         if not active and not self._preview:
             self._mouth_box = None
             self._outer_lips = self._inner_lips = []
@@ -169,7 +170,24 @@ class MouthCapture:
         return self._mouth_box
 
     # -- finish ------------------------------------------------------
-    def stop(self) -> dict:
+    def quality(self) -> dict:
+        """Measured capture quality of the open try (see capture_quality.lip_quality)."""
+        from .capture_quality import lip_quality
+        rec = self._rec
+        if rec is None:
+            raise ValueError("no recording to check")
+        n = len(rec.ts)
+        anchors = rec.anchors[:n] + [None] * max(0, n - len(rec.anchors))
+        return lip_quality([t * 1000.0 for t in rec.ts], [a is not None for a in anchors])
+
+    def freeze(self) -> dict:
+        """Stop adding frames to a finished try while the person reviews it."""
+        if self._rec is None:
+            raise ValueError("no recording to review")
+        self._frozen = True
+        return self.snapshot()
+
+    def stop(self, quality: dict | None = None) -> dict:
         rec, meta = self._rec, self._meta
         if rec is None or meta is None:
             raise ValueError("no recording to stop")
@@ -182,7 +200,7 @@ class MouthCapture:
             rois = rois_for(rec)
             if rois is None or len(rois) < MIN_ROIS:
                 raise ValueError("not enough visible mouth frames")
-            path = self._save(rec, np.asarray(rois), meta)
+            path = self._save(rec, np.asarray(rois), meta, quality)
         except Exception as e:
             self.error = str(e)  # keep the recording; call discard() to drop it
             raise
@@ -192,7 +210,7 @@ class MouthCapture:
         self.last_saved, self.saved_count = path, self.saved_count + 1
         return self.snapshot()
 
-    def _save(self, rec, rois, meta) -> str:
+    def _save(self, rec, rois, meta, quality=None) -> str:
         import numpy as np
 
         if isinstance(meta, dict):
@@ -237,6 +255,9 @@ class MouthCapture:
             save_dict["profile_id"] = np.array(profile_id)
         if gesture_label is not None:
             save_dict["gesture_label"] = np.array(gesture_label)
+        if quality is not None:
+            from .capture_quality import to_npz_field
+            save_dict["quality_json"] = to_npz_field(quality)
 
         created = False
         try:
@@ -264,6 +285,7 @@ class MouthCapture:
         self._mouth_box = None
         self._rec = self._meta = None
         self._recording = self._limit = False
+        self._frozen = False
         self._face = False
 
     def snapshot(self) -> dict:
@@ -278,6 +300,7 @@ class MouthCapture:
                 "preview": self._preview,
                 "quality": round(float(quality), 3),
                 "limit_reached": self._limit,
+                "awaiting_review": bool(self._frozen and rec is not None),
                 "error": self.error,
                 "last_saved": self.last_saved,
                 "saved_count": self.saved_count}

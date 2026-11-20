@@ -210,6 +210,22 @@ code{font-family:var(--font-mono);font-size:var(--text-xs);overflow-wrap:anywher
 .report-summary .field-hint{margin-top:var(--s-3)}
 #modelReport{max-height:420px;overflow:auto;margin:var(--s-2) 0 0;padding:var(--s-4);border-radius:var(--radius-m);background:var(--surface-2);color:var(--ink);font:var(--text-xs)/1.5 var(--font-mono);white-space:pre-wrap;overflow-wrap:anywhere}
 
+/* ---------- Capture-quality review and "What to record next" ---------- */
+.quality-review{display:grid;gap:var(--s-2)}
+.quality-review ul{display:grid;gap:var(--s-1);margin:0;padding-left:1.2em}
+.quality-review p{margin:0}
+.guidance{display:grid;gap:var(--s-3);margin-top:var(--s-6)}
+.guidance-head{display:flex;align-items:center;justify-content:space-between;gap:var(--s-2) var(--s-3);flex-wrap:wrap}
+.guidance-head h2{margin:0}
+.guidance-counts{display:grid;gap:var(--s-2)}
+.guidance-counts .facts{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.guidance-list{display:grid;margin:0;padding:0;list-style:none}
+.guidance-item{display:grid;grid-template-columns:8.5rem minmax(0,1fr);gap:var(--s-1) var(--s-3);align-items:start;padding:var(--s-3) 0;border-top:1px solid var(--line)}
+.guidance-item .badge{justify-self:start;white-space:nowrap}
+.guidance-finding{margin:0;color:var(--ink);font-size:var(--text-s);font-weight:600;overflow-wrap:anywhere}
+.guidance-next{margin:2px 0 0;color:var(--ink-2);font-size:var(--text-s);overflow-wrap:anywhere}
+#guidanceMore>summary{cursor:pointer;padding:var(--s-2) 0;color:var(--ink-2);font-size:var(--text-s);font-weight:600}
+
 /* ---------- New profile dialog ---------- */
 .dialog{display:grid;gap:var(--s-4)}
 .dialog h2{font-size:var(--text-xl)}
@@ -248,6 +264,7 @@ code{font-family:var(--font-mono);font-size:var(--text-xs);overflow-wrap:anywher
   .setup-actions .btn{flex:1 1 100%}
   .card{padding:var(--s-4)}
   .meaning{font-size:34px}
+  .guidance-item{grid-template-columns:minmax(0,1fr)}
 }
 /* Short viewports (large zoom, landscape phones): the action bar scrolls with the page instead of covering it. */
 @media (max-height:520px){
@@ -412,6 +429,15 @@ code{font-family:var(--font-mono);font-size:var(--text-xs);overflow-wrap:anywher
   <section class="card lesson-controls" aria-label="Recording controls">
     <p id="recordingMeter" class="meter"></p>
     <div id="status" role="status" aria-live="polite">Ready. Press Start recording when you are in view.</div>
+    <div id="qualityReview" class="callout callout-warn quality-review" role="alert" aria-labelledby="qualityTitle" hidden>
+      <p><strong id="qualityTitle">Check this try before saving</strong></p>
+      <ul id="qualityList"></ul>
+      <p id="qualityNote">Nothing has been saved yet. A try like this can teach the model the wrong thing, but you decide.</p>
+      <div class="callout-actions">
+        <button id="qualityDiscard" type="button" class="btn btn-primary btn-s">Discard and retry</button>
+        <button id="qualitySave" type="button" class="btn btn-s">Save anyway</button>
+      </div>
+    </div>
     <label class="check consent"><input id="localConsent" type="checkbox"> <span>I agree to save my practice tries on this computer (hand positions and mouth close-ups). Saving video needs separate agreement.</span></label>
     <div id="videoConsentBox" class="callout callout-warn" hidden>
       <p class="consent-lock"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>This try saves video. Recording stays off until you agree.</p>
@@ -522,8 +548,24 @@ code{font-family:var(--font-mono);font-size:var(--text-xs);overflow-wrap:anywher
     </section>
   </div>
 </section>
+
+<section id="guidancePanel" class="card guidance" aria-labelledby="guidanceTitle" hidden>
+  <div class="guidance-head">
+    <h2 id="guidanceTitle">What to record next</h2>
+    <button id="refreshGuidance" type="button" class="btn btn-ghost btn-s">Refresh suggestions</button>
+  </div>
+  <p id="guidanceIntro" class="field-hint">Based on the tries saved for this profile and the “another occasion” results of your newest candidates. Final-check results are never used here. Recommended numbers are guides, not guarantees.</p>
+  <div class="guidance-counts">
+    <p class="field-hint" id="guidanceCountsLabel">Tries recorded so far (counts, not results)</p>
+    <dl id="guidanceFacts" class="facts" aria-labelledby="guidanceCountsLabel"></dl>
+  </div>
+  <ul id="guidanceList" class="guidance-list" aria-label="Suggestions"></ul>
+  <p id="guidanceEmpty" class="field-hint" hidden></p>
+  <details id="guidanceMore" hidden><summary id="guidanceMoreSummary">More suggestions</summary><ul id="guidanceMoreList" class="guidance-list"></ul></details>
+</section>
 </main>
 </div>
+
 
 <div id="newProfileDialog" class="scrim" hidden>
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle" aria-describedby="dialogDesc">
@@ -556,6 +598,9 @@ let activeProfile=null,allProfiles=[],currentStage='train'; // setup, train, val
 let modelData=null,modelBusy=false;
 let signModelInfo=null,activeVideoCapture=false,captureAvailable=true;
 let setupBaseline=null,dialogReturnFocus=null,startingCapture=false,pageLeaving=false;
+let reviewPending=false,guidanceData=null,guidanceBusy=false;
+// Finish-and-save request per mode. {review:true} returns capture-quality warnings instead of saving.
+const STOP_PATH={gestures:'stop',lips:'mouth/stop',paired:'paired/stop'};
 
 function videoRequested(){return mode==='paired'&&$('pairedCaptureKind').value==='video';}
 function recordingModeKey(m){return m==='paired'&&videoRequested()?`paired-video-${signModelInfo?.manifest_sha256?.slice(0,12)||'unconfigured'}`:m;}
@@ -576,8 +621,10 @@ const TARGET_FPS=25;
 const UPLOAD_INTERVAL_MS=40; // 1000 / 25 fps
 let framesReceivedCount=0,recordingStartTime=0;
 
-// Default stage targets: train: 5 gestures / 3 lips / 3 paired; validation: 3 gestures / 2 lips / 2 paired; test: 3 gestures / 2 lips / 2 paired
-const STAGE_TARGETS={train:{gestures:5,lips:3,paired:3},validation:{gestures:3,lips:2,paired:2},test:{gestures:3,lips:2,paired:2}};
+// Default stage targets: train: 5 gestures / 3 lips / 3 paired; validation: 4 gestures / 2 lips / 2 paired; test: 3 gestures / 2 lips / 2 paired.
+// 4 check tries per gesture (REST included) is the minimum at which the gesture trainer compares its
+// variants (motion_variants.MIN_VALIDATION_TRIES_PER_GESTURE / MIN_VALIDATION_REST_TRIES); below it the baseline is kept.
+const STAGE_TARGETS={train:{gestures:5,lips:3,paired:3},validation:{gestures:4,lips:2,paired:2},test:{gestures:3,lips:2,paired:2}};
 
 const sessionStoreKey='quietbridge-guided-sessions-v3';
 let sessionStore={};
@@ -763,6 +810,7 @@ function render(){
     $('title').textContent='Activate a personal model';
     $('intro').textContent=`Models here belong to ${activeProfile?.name||'the selected profile'} only. Nothing changes in the running app until you reload its models.`;
     renderModels();
+    renderGuidance();
     return;
   }
 
@@ -773,6 +821,7 @@ function render(){
     $('setupLayout').hidden=false;
     renderSetupView();
     updateStageBanner();
+    renderGuidance();
     return;
   }
 
@@ -912,6 +961,7 @@ function render(){
   $('progress').textContent+=' (a practice count, not a recognition result)';
   // Check if current stage is completed for this modality
   checkStageCompletion();
+  renderGuidance();
   controls();
 }
 
@@ -960,10 +1010,13 @@ $('btnAdvanceStage').onclick=()=>{
 
 function controls(){
   const b=$('record');
-  b.disabled=!captureAvailable||working||!token||currentStage==='setup'||(!recording&&videoRequested()&&(!$('videoConsent').checked||!signModelInfo));
-  b.textContent=working?'Please wait…':recording?'Finish and save':'Start recording';
+  b.disabled=!captureAvailable||working||!token||currentStage==='setup'||reviewPending||(!recording&&videoRequested()&&(!$('videoConsent').checked||!signModelInfo));
+  b.textContent=working?'Please wait…':reviewPending?'Choose an option above':recording?'Finish and save':'Start recording';
   b.classList.toggle('active',recording);
   $('discard').disabled=!recording||working;
+  $('qualitySave').disabled=!reviewPending||working;
+  $('qualityDiscard').disabled=!reviewPending||working;
+  $('refreshGuidance').disabled=recording||working||guidanceBusy;
   $('cameraOff').disabled=!stream||working;
   $('localConsent').disabled=recording||working;
   $('next').disabled=recording||working||currentStage==='setup';
@@ -1294,36 +1347,14 @@ $('record').onclick=async()=>{
       }
     }else{
       if(!frames)throw Error('Nothing has been captured yet. Wait until the camera view shows tracking, then save.');
-      if(mode==='gestures'){
-        await action('stop');
-      }else if(mode==='lips'){
-        await action('mouth/stop',{});
-      }else if(mode==='paired'){
-        await action('paired/stop',{});
+      const result=await action(STOP_PATH[mode],{review:true});
+      if(result?.review_required){
+        // Nothing is saved yet: the person chooses Save anyway or Discard and retry.
+        stopCamera();
+        showQualityReview(result.quality);
+        return;
       }
-      recording=false;
-      stopCamera();
-      const prog=getProgressData(activeProfile.id,currentStage,mode);
-      while(prog.counts.length<=prog.index)prog.counts.push(0);
-      prog.counts[prog.index]=(prog.counts[prog.index]||0)+1;
-      saveProgressData(activeProfile.id,currentStage,mode,prog);
-
-      if(mode==='lips'){
-        note('Saved: mouth close-ups, on this computer. Take a short pause before the next try.');
-      }else if(mode==='gestures'){
-        note('Saved: hand positions, on this computer. Take a short pause before the next try.');
-      }else{
-        note(activeVideoCapture?'Saved locally: video, hand positions and mouth close-ups. Agreement resets for the next try.':'Saved: hand positions and mouth close-ups, on this computer. This is a practice sample only.');
-        $('videoConsent').checked=false;
-        activeVideoCapture=false;
-      }
-
-      const targetCount=STAGE_TARGETS[currentStage]?.[mode]||3;
-      if(!videoRequested()&&prog.counts[prog.index]>=targetCount){
-        advanceItem();
-      }else{
-        render();
-      }
+      afterSave(result,false);
     }
   }catch(e){
     if(!recording)stopCamera();
@@ -1334,6 +1365,74 @@ $('record').onclick=async()=>{
     controls();
   }
 };
+
+function afterSave(result,savedAnyway){
+  recording=false;
+  stopCamera();
+  const prog=getProgressData(activeProfile.id,currentStage,mode);
+  while(prog.counts.length<=prog.index)prog.counts.push(0);
+  prog.counts[prog.index]=(prog.counts[prog.index]||0)+1;
+  saveProgressData(activeProfile.id,currentStage,mode,prog);
+
+  let message;
+  if(mode==='lips'){
+    message='Saved: mouth close-ups, on this computer. Take a short pause before the next try.';
+  }else if(mode==='gestures'){
+    message='Saved: hand positions, on this computer. Take a short pause before the next try.';
+  }else{
+    message=activeVideoCapture?'Saved locally: video, hand positions and mouth close-ups. Agreement resets for the next try.':'Saved: hand positions and mouth close-ups, on this computer. This is a practice sample only.';
+    $('videoConsent').checked=false;
+    activeVideoCapture=false;
+  }
+  if(savedAnyway)message+=' The capture warning is stored with this try.';
+  // Informational notes (for example a resting try with no hands in view) never block saving.
+  const info=(result?.quality?.warnings||[]).filter(w=>w.severity==='info').map(w=>w.message);
+  if(info.length)message+=' '+info.join(' ');
+  note(message);
+
+  const targetCount=STAGE_TARGETS[currentStage]?.[mode]||3;
+  if(!videoRequested()&&prog.counts[prog.index]>=targetCount){
+    advanceItem();
+  }else{
+    render();
+  }
+  loadGuidance();
+}
+
+function showQualityReview(quality){
+  reviewPending=true;
+  const warnings=(quality?.warnings||[]).filter(w=>w.severity!=='info');
+  $('qualityList').replaceChildren(...warnings.map(w=>{const li=document.createElement('li');li.textContent=w.message;return li;}));
+  $('qualityReview').hidden=false;
+  $('recordingMeter').textContent='';
+  note('This try is finished but not saved. Choose Discard and retry, or Save anyway.');
+  controls();
+  // After the finishing request's own cleanup has re-enabled the choice buttons.
+  setTimeout(()=>$('qualityDiscard').focus?.(),0);
+}
+
+function hideQualityReview(){
+  reviewPending=false;
+  $('qualityReview').hidden=true;
+  $('qualityList').replaceChildren();
+}
+
+$('qualitySave').onclick=async()=>{
+  if(!reviewPending||!recording||working)return;
+  working=true;
+  controls();
+  try{
+    const result=await action(STOP_PATH[mode],{accept_quality:true});
+    hideQualityReview();
+    afterSave(result,true);
+  }catch(e){
+    note(e.message,true);
+  }finally{
+    working=false;
+    controls();
+  }
+};
+$('qualityDiscard').onclick=()=>$('discard').onclick();
 
 $('discard').onclick=async()=>{
   if(!recording||working)return;
@@ -1347,11 +1446,13 @@ $('discard').onclick=async()=>{
     }else if(mode==='paired'){
       await action('paired/discard');
     }
+    const wasReview=reviewPending;
     recording=false;
     stopCamera();
+    hideQualityReview();
     activeVideoCapture=false;
     $('videoConsent').checked=false;
-    note('Try discarded. Nothing was saved.');
+    note(wasReview?'Try discarded. Nothing was saved. Start recording again when you are ready.':'Try discarded. Nothing was saved.');
     render();
   }catch(e){
     note(e.message,true);
@@ -1372,6 +1473,71 @@ function stopCamera(){
   clearMouth('Camera off');
 }
 $('cameraOff').onclick=()=>{if(!working){stopCamera();if(recording)note('Camera off. Discard this try, or save what was already captured.',true);controls();}};
+
+// "What to record next": counts and validation-only suggestions from the server.
+const GUIDANCE_BADGE={action:['badge-warn','Needed first'],warn:['badge-accent','Suggested'],info:['','Good to know']};
+async function loadGuidance(){
+  if(!activeProfile?.id||recording||guidanceBusy)return;
+  guidanceBusy=true;
+  try{guidanceData=await request('/api/guidance');}
+  catch(e){guidanceData={error:e.message};}
+  finally{guidanceBusy=false;renderGuidance();controls();}
+}
+function guidanceStage(){return currentStage==='validation'?'validation':currentStage==='test'?'test':'train';}
+function guidanceRelevant(item){
+  if(currentStage==='models')return true;
+  const areas=mode==='lips'?['lips','language']:mode==='gestures'?['gestures']:['gestures','lips'];
+  if(!areas.includes(item.area))return false;
+  const stage=guidanceStage();
+  return item.stage===stage||item.stage==='setup'||(stage==='train'&&item.stage==='models');
+}
+function guidanceItem(item){
+  const li=document.createElement('li');li.className='guidance-item';
+  const [cls,text]=GUIDANCE_BADGE[item.severity]||GUIDANCE_BADGE.info;
+  const badge=document.createElement('span');badge.className=`badge ${cls}`.trim();badge.textContent=text;
+  const body=document.createElement('div');
+  const finding=document.createElement('p');finding.className='guidance-finding';finding.textContent=item.finding;
+  const next=document.createElement('p');next.className='guidance-next';next.textContent=`Next: ${item.next_step}`;
+  body.append(finding,next);li.append(badge,body);return li;
+}
+function guidanceFacts(){
+  const total=(kind,split)=>Object.values(guidanceData?.data?.[kind]?.[split]||{}).reduce((n,row)=>n+(row?.tries||0),0);
+  const kinds=currentStage==='models'?[['gestures','Gesture'],['phrases','Lip']]:(mode==='lips'?[['phrases','Lip']]:mode==='gestures'?[['gestures','Gesture']]:[['gestures','Gesture'],['phrases','Lip']]);
+  const out=[];
+  for(const [kind,name] of kinds){
+    for(const [split,word] of [['train','practice'],['validation','check'],['test','final-check']]){
+      const div=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');
+      const n=total(kind,split);
+      dt.textContent=`${name} ${word} tries`;dd.textContent=String(n);div.append(dt,dd);out.push(div);
+    }
+  }
+  return out;
+}
+function renderGuidance(){
+  const show=Boolean(activeProfile)&&['train','validation','test','models'].includes(currentStage);
+  $('guidancePanel').hidden=!show;
+  if(!show)return;
+  const empty=$('guidanceEmpty');
+  // Guidance is per profile; stages only filter it. Fetch when nothing is loaded yet.
+  if(!guidanceData&&!guidanceBusy&&!recording)loadGuidance();
+  if(!guidanceData||guidanceData.error){
+    $('guidanceFacts').replaceChildren();$('guidanceList').replaceChildren();$('guidanceMore').hidden=true;
+    empty.hidden=false;
+    empty.textContent=guidanceData?.error?`Suggestions are unavailable: ${guidanceData.error}`:'Loading suggestions…';
+    return;
+  }
+  $('guidanceFacts').replaceChildren(...guidanceFacts());
+  const items=(guidanceData.items||[]).filter(guidanceRelevant);
+  const limit=currentStage==='models'?6:4;
+  $('guidanceList').replaceChildren(...items.slice(0,limit).map(guidanceItem));
+  const rest=items.slice(limit);
+  $('guidanceMore').hidden=!rest.length;
+  $('guidanceMoreSummary').textContent=`${rest.length} more suggestion${rest.length===1?'':'s'}`;
+  $('guidanceMoreList').replaceChildren(...rest.map(guidanceItem));
+  empty.hidden=items.length>0;
+  empty.textContent='Nothing to suggest for this step right now.';
+}
+$('refreshGuidance').onclick=()=>loadGuidance();
 
 // Model operations use the active profile on the server.
 function modelControls(){
@@ -1525,7 +1691,7 @@ function modelErrorHelp(message){
 async function refreshModelStatus(){
   if(recording||working||modelBusy)return;
   modelBusy=true; controls();
-  try{modelData=await request('/api/models'); $('modelError').textContent=''; renderModels()}
+  try{modelData=await request('/api/models'); $('modelError').textContent=''; renderModels(); loadGuidance()}
   catch(e){modelData=null; $('modelStatus').textContent='Model status unavailable.'; $('modelError').textContent=modelErrorHelp(e.message)}
   finally{modelBusy=false; controls()}
 }
@@ -1837,6 +2003,8 @@ $('profileSelect').onchange=async()=>{
     note(`Switched to ${activeProfile.name||activeProfile.id}’s profile.`);
     modelData=null;
     render();
+    guidanceData=null;
+    loadGuidance();
     if(currentStage==='models')await refreshModelStatus();
   }catch(e){
     $('profileSelect').value=activeProfile.id;
