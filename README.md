@@ -37,13 +37,13 @@ Without a speech backend the page says so; you can still use **Show large** or *
 Install [uv](https://docs.astral.sh/uv/), clone this repository, then from the checkout:
 
 ```sh
-uv sync --frozen                                   # Python dependencies (large: includes PyTorch)
-uv run python -m quietbridge.assets --download       # lip-reading and face models, ~1.2 GB (LRS3: non-commercial research use)
-uv run python -m quietbridge.signs.assets --download # stock MediaPipe gesture model
-uv run quietbridge --open                          # serves http://127.0.0.1:8765 and opens it
+uv sync --frozen     # Python dependencies (large: includes PyTorch)
+uv run quietbridge   # serves http://127.0.0.1:8765 and opens it in your browser
 ```
 
-The two downloads are needed only for camera input: without them the server still starts, typing works and lip reading is reported as unavailable. The browser owns the camera by default (`--server-camera` uses the host's camera instead). `uv run lipflow doctor` reports which models, camera and speech backend were found. `quietbridge` is the same as `python -m quietbridge.server`; `uv run quietbridge --help` lists every option. Without `--open`, visit <http://127.0.0.1:8765> yourself. To look at the page with synthetic inputs and no camera or model loading, run `uv run quietbridge --rehearsal`; rehearsal does not validate recognition. Stock models and gestures are the default; select a profile explicitly with `--profile alice`.
+Typing works straight away. For camera input, the page's camera card says which files are missing, how large they are (about 1.2 GB for lip reading, 8 MB for stock hand gestures) and under what terms, and downloads them after you tick the acknowledgement and choose **Download**; nothing is fetched or loaded without that. The lip-reading weights are limited by their authors to research and private study and come from a third-party mirror that states no licence, so check that your use fits (see [NOTICE](NOTICE)). The same files can be fetched from a terminal with `uv run python -m quietbridge.assets --download` and `uv run python -m quietbridge.signs.assets --download`.
+
+`quietbridge` is the same as `python -m quietbridge.server`; `uv run quietbridge --help` lists every option. If it is already running, a second start just opens the existing page. `--no-open` keeps the browser closed. The browser owns the camera by default (`--server-camera` uses the host's camera instead). `./setup.sh` (or `setup.ps1` on Windows) also adds a QuietBridge launcher, so no terminal is needed afterwards; **Settings → Quit QuietBridge** stops it. `uv run lipflow doctor` reports which models, camera and speech backend were found. To look at the page with synthetic inputs and no camera or model loading, run `uv run quietbridge --rehearsal`; rehearsal does not validate recognition. Stock models and gestures are the default; select a profile explicitly with `--profile alice`.
 
 ## Using the page
 
@@ -52,10 +52,12 @@ The two downloads are needed only for camera input: without them the server stil
 - **Speak** sends the applied message to on-device speech; **Stop speaking** interrupts it. Conflicts and uncertain inputs require you to choose or confirm first. UNKNOWN input never becomes a sentence.
 - **If speech fails**, the page says so next to the button instead of presenting the message as spoken.
 - **Your phrases**: the phrases saved in your profile appear below the editor. Choosing one makes it the message; it is not spoken until you choose Speak. Edit them in Personalize.
+- **Recent**: messages you spoke or showed in this tab are listed for reuse; they stay in the tab and are never sent anywhere.
+- **Suggestions from your phrases**: when a lip result is close to a sentence you saved, that sentence is offered as an alternative labelled *Your phrase*. It is never chosen for you.
 - **Show large** displays the applied message full-screen so you can turn the screen toward someone. **Copy message** copies it. **New message** clears only the edits that existed when you confirmed it.
 - **Camera input is optional.** Start the camera, then choose **Start lips + gesture recording** and **Finish recording** for one window. The button is a toggle, so there is no sustained hold; Space from the page background also toggles capture. **Finish message** stops the camera for final review. In browser-camera mode the preview is the browser's own local video; frames are also uploaded to the loopback server, for recognition only.
 - **Unfinished edits survive** Settings/Personalize navigation and new recognition results in the same tab.
-- **Settings** shows the active profile and models, supported concepts, frame rate, gaps and latency. **Personalize** opens the local recording page on demand. When a model saved there differs from the one in use, the page offers **Reload models**; nothing reloads by itself.
+- **Settings** shows the active profile and models, supported concepts, frame rate, gaps and latency, and lets you choose the speaking rate and voice (with **Test voice**), manage downloads and quit. **Personalize** opens the local recording page on demand. When a model saved there differs from the one in use, the page offers **Reload models**; nothing reloads by itself.
 - The page follows the operating system's light or dark setting. Message and camera order stays fixed at every screen size, message first.
 
 Details, including recording windows, profiles, model reloads, corrections and the fusion safety rules, are in [Using QuietBridge](docs/using-quietbridge.md).

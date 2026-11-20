@@ -10,6 +10,8 @@ Start with the [project README](../README.md) for what QuietBridge is, its hones
 | [standard-signs.md](standard-signs.md) | Running the app and the recording lab with an explicit isolated-sign bundle, and comparing standard-sign pairs |
 | [training-and-evaluation.md](training-and-evaluation.md) | Training motion, lip and language-model candidates; paired fusion evaluation; what to measure |
 | [verification.md](verification.md) | Test and browser-check commands, CI workflows, and what each does and does not prove |
+| [recognition-roadmap.md](recognition-roadmap.md) | Sourced roadmap for stronger recognition: what published evidence says, rights of candidate models, and a staged experiment plan for one participant |
+| [experiments/real-clip-experiments.md](experiments/real-clip-experiments.md) | Measurements with the stock lip model on two public clips of one speaker: baseline, phrase scoring, capture degradations, adaptation and language-model recipes. Not a measurement of silent mouthing or of a user |
 | [sign-language-support.md](sign-language-support.md) | Standard-sign implementation, BSL-1K export, sources and rights checks, and what was actually run (dated evidence) |
 | [recognition-audit.md](recognition-audit.md) | Recognition audit (2026-11-03, with later follow-ups): capability table, fixed defects, how lips and hands should cooperate, what would establish an accuracy gain |
 | [review-protocol.md](review-protocol.md) | Review protocol v2: how the product is reviewed, the current evidence record and remaining gaps. Required for any review report |

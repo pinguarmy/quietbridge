@@ -115,6 +115,15 @@ jobs:
           $t = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk).TargetPath
           Write-Host $t
           if (-not (Test-Path $t)) { throw "shortcut target missing: $t" }
+      - name: QuietBridge shortcut points at the venv's pythonw
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $lnk = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\QuietBridge.lnk"
+          $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+          Write-Host $s.TargetPath $s.Arguments
+          if (-not (Test-Path $s.TargetPath)) { throw "shortcut target missing: $($s.TargetPath)" }
+          if ($s.Arguments -ne "-X utf8 -m quietbridge.server") { throw "unexpected arguments: $($s.Arguments)" }
 
       # The tests run whenever the dependencies installed, even if a download failed: tests that need a
       # missing model or clip skip with a reason (shown by -rs). With the clips present, the real-clip

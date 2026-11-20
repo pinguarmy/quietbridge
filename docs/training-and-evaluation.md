@@ -53,6 +53,22 @@ uv run python -m quietbridge.evaluate_language \
 
 The comparison is diagnostic, uses beam4 and never promotes a candidate. Language promotion requires valid finite, nonnegative error rates and matching candidate/visual SHA-256 identities. Changing either model invalidates the old comparison. Evaluate again to save a new report without overwriting the old one; unchanged reports can be reused.
 
+### How a gesture candidate is chosen
+
+`train_motion` compares a small, fixed set of variants: the baseline, global instead of per-gesture thresholds, a two-nearest distance, and practice tries augmented with time warps, small rotations and shifts, and noise sized from the recorded resting tries. Each variant is scored by cross-fitting inside the check ("another occasion") session, ranked by false triggers at rest first, then wrong gestures, then gestures found. A variant replaces the baseline only if it is no worse on both safety counts and clearly better; a tie keeps the baseline, and with fewer than four check tries of any gesture or of resting moments the comparison is skipped. The final-check session is read only after that choice is frozen. The report lists every variant with its numbers. `--no-variant-search` and `--seed` control it. All of this was checked on synthetic data; whether a variant helps a real person has to be measured on their own sessions.
+
+### What to record next
+
+Personalize shows next steps computed from the data inventory and the check-session results of the newest candidates, each with its denominator, for example a gesture recognised in 2 of 5 check tries, two gestures the model confuses, or resting moments that triggered a gesture. Final-check results are never used for this. The recommended counts are guides, not guarantees.
+
+### Reviewing a try before it is saved
+
+When a try finishes, the page measures how long it was, frame gaps, how much of the time hands (or the face, for lip tries) were visible, whether the hands moved and whether they came back to rest. If something is off it asks whether to save anyway or discard and retry. The measurements are stored with the try, and trainers report flagged tries instead of removing them.
+
+### Lip and language candidates
+
+`train_lips` stops before loading the model when there are fewer than 10 practice or 5 check clips and says what to record. Reports carry the candidate and tokenizer hashes, and a report that does not match the file blocks promotion. `python -m quietbridge.signs.lip_recipe_experiment grid --data <profile>/mouths --out <dir>` compares adaptation recipes on validation only and decodes the final check once for the chosen one. On two public clips of one speaker, two minutes of adaptation data gave no reliable gain and the personal language-model recipe made recognition worse because of how its weight was combined ([experiments](experiments/real-clip-experiments.md)); published work reports stable gains only from about five minutes of a person's own data ([roadmap](recognition-roadmap.md)).
+
 ## Paired fusion evaluation
 
 Use the recording lab's **Paired** mode to capture the same expression as aligned mouth crops and hand landmarks. Both files share a `pair_id`, profile, session and split, while retaining independent trial IDs. Ordinary single-modality recordings can remain in the same profile directories.
