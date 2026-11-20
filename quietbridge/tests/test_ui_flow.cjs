@@ -1004,6 +1004,24 @@ test('voice: absent settings show nothing; rate and voice save explicitly with v
   assert.equal(calls.some(c => /speak/.test(c[0].replace('/api/speech/settings', ''))), false);
 });
 
+test('voice: Test voice asks for one sample, never touches the message and is not retried', async () => {
+  const a = screen('settings.html');
+  const calls = [];
+  let fail = false;
+  a.context.fetch = async (url, options) => { calls.push([url, JSON.parse(options.body)]); return fail ? { ok: false, status: 400, json: async () => ({ error: 'Speech is already playing. Stop it before testing the voice' }) } : okJson({ ...a.context.sample, revision: a.context.sample.revision }); };
+  a.render({ ...voiceState(), revision: 2 });
+  await a.elements.get('voice-test').onclick();
+  assert.deepEqual(calls, [['/api/speech/test', {}]]);
+  assert.match(a.elements.get('voice-status').textContent, /Your message was not changed/);
+  assert.equal(a.elements.get('voice-test').disabled, false);
+  fail = true;
+  await a.elements.get('voice-test').onclick();
+  assert.equal(calls.length, 2, 'a refused sample is reported, not retried');
+  assert.match(a.elements.get('voice-error').textContent, /not spoken/);
+  a.render({ ...voiceState(), revision: 3, speaking: true });
+  assert.equal(a.elements.get('voice-test').disabled, true, 'unavailable while a message is being spoken');
+});
+
 test('voice: a failed save says so, is not retried and returns to the saved voice', async () => {
   const a = screen('settings.html'); a.render(voiceState());
   let calls = 0; a.context.fetch = async () => { calls++; return { ok: false, status: 400, json: async () => ({ error: 'Unknown voice' }) }; };
@@ -1025,7 +1043,11 @@ test('voice: no voices or no speech hides the choices with a short explanation',
   a.render(voiceState({ revision: 2, speech_available: false }));
   assert.equal(a.elements.get('voice-controls').hidden, true);
   assert.match(a.elements.get('voice-unavailable').textContent, /not available/);
-  assert.equal(fs.readFileSync(path.join(__dirname, '../ui/settings.html'), 'utf8').includes('Test voice'), false, 'no Test voice: the speak path cannot do it without changing the message');
+  // Test voice uses its own backend route (a fixed sample that leaves the message alone) and lives
+  // inside the controls, so it disappears with them when this computer has no speech.
+  const html = fs.readFileSync(path.join(__dirname, '../ui/settings.html'), 'utf8');
+  const controls = html.slice(html.indexOf('id="voice-controls"'), html.indexOf('id="voice-unavailable"'));
+  assert.match(controls, /id="voice-test"/);
 });
 
 test('voice: polling does not undo a choice in progress, but follows a real change', () => {

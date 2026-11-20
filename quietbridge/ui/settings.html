@@ -38,7 +38,7 @@
     </section>
 
     <section id="voice" class="card settings-card" aria-labelledby="voice-heading" hidden>
-      <div class="card-head"><h2 id="voice-heading">Voice</h2><p class="muted small">How Speak message sounds on this computer. Changing it here never speaks.</p></div>
+      <div class="card-head"><h2 id="voice-heading">Voice</h2><p class="muted small">How Speak message sounds on this computer. Changing a setting never speaks; Test voice says one short sample and leaves your message alone.</p></div>
       <div id="voice-controls" class="settings-form">
         <div class="field">
           <span id="voice-rate-label" class="label">Speaking rate</span>
@@ -46,6 +46,7 @@
         </div>
         <div id="voice-select-field" class="field"><label for="voice-select">Voice</label><select id="voice-select" class="select"><option value="">System default</option></select></div>
         <p id="voice-list-note" class="hint"></p>
+        <div><button id="voice-test" class="btn btn-s" type="button">Test voice</button></div>
       </div>
       <p id="voice-unavailable" class="hint"></p>
       <p id="voice-status" class="hint" role="status" aria-live="polite"></p><p id="voice-error" class="callout callout-danger" role="alert"></p>

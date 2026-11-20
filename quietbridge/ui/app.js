@@ -662,7 +662,7 @@ async function setupReload() {
 }
 
 // ---- Voice (Settings) ----
-let voicePending = false, voiceSynced = null, renderedVoices = '';
+let voicePending = false, voiceTesting = false, voiceSynced = null, renderedVoices = '';
 function renderVoice(s) {
   if (!$('voice')) return;
   const vs = s.speech_settings;
@@ -691,6 +691,7 @@ function renderVoice(s) {
   const saved = typeof vs.voice === 'string' && voices.some(v => v.id === vs.voice) ? vs.voice : '';
   if (!voicePending && voiceSynced !== saved) { select.value = saved; voiceSynced = saved; }
   select.disabled = voicePending;
+  if ($('voice-test')) $('voice-test').disabled = voicePending || voiceTesting || s.speaking === true;
 }
 async function saveVoice(change) {
   if (!state || voicePending || !state.speech_settings) return;
@@ -705,6 +706,21 @@ async function saveVoice(change) {
     text('voice-error', `Not saved: ${e.message || 'QuietBridge did not answer.'} The previous setting stays in use.`);
     voiceSynced = null;
   } finally { voicePending = false; if (state) renderVoice(state); }
+}
+// An explicit request to hear the current voice. It speaks a fixed sample
+// and never touches the message; it is not retried.
+async function testVoice() {
+  if (!state || voicePending || voiceTesting || !state.speech_settings) return;
+  voiceTesting = true; if ($('voice-test')) $('voice-test').disabled = true;
+  text('voice-status', 'Speaking a short sample…'); text('voice-error', '');
+  try {
+    const result = await postJson('/api/speech/test', {});
+    if (isStatePayload(result)) render(result);
+    text('voice-status', 'Sample sent to this computer\'s voice. Your message was not changed.');
+  } catch (e) {
+    text('voice-status', '');
+    text('voice-error', `The sample was not spoken: ${e.message || 'QuietBridge did not answer.'}`);
+  } finally { voiceTesting = false; if (state) renderVoice(state); }
 }
 
 // ---- About line and Quit (Settings) ----
@@ -1334,6 +1350,7 @@ for (const rate of ['slow', 'normal', 'fast']) if ($('voice-rate-' + rate)) $('v
   if (state?.speech_settings?.rate !== rate) return saveVoice({rate});
 };
 if ($('voice-select')) $('voice-select').addEventListener('change', () => saveVoice({voice: $('voice-select').value}));
+if ($('voice-test')) $('voice-test').onclick = testVoice;
 if ($('quit-button')) $('quit-button').onclick = quitApp;
 if ($('stopped-copy')) $('stopped-copy').onclick = async () => {
   try { await navigator.clipboard.writeText($('stopped-draft').value); text('stopped-copy-status', 'Copied.'); }
