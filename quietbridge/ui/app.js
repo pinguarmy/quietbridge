@@ -637,7 +637,14 @@ function renderSetup(s) {
   const ids = JSON.stringify(shown.map(a => a.id));
   const items = shown.map(a => { const item = setupItem(a); updateSetupItem(item, a, s); announceSetup(a); return item.root; });
   // Re-inserting nodes would drop focus, so the list changes only when its members do.
-  if (ids !== renderedSetupIds) { renderedSetupIds = ids; container.replaceChildren(...items); }
+  if (ids !== renderedSetupIds) {
+    renderedSetupIds = ids;
+    // A surviving node still loses keyboard focus when it is re-inserted, so put it back.
+    const focused = document.activeElement;
+    const keep = focused && typeof container.contains === 'function' && container.contains(focused) ? focused : null;
+    container.replaceChildren(...items);
+    if (keep && container.contains(keep) && document.activeElement !== keep && typeof keep.focus === 'function') keep.focus();
+  }
   renderSetupReload(s);
 }
 function renderSetupReload(s) {

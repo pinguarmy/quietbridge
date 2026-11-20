@@ -182,7 +182,9 @@ async function run(variant, coreOnly=false) {
       currentCase='keyboard-setup-consent';
       await interceptSetup();
       await overlay({setup:setupFixture});
-      await waitFor(()=>evaluate("!document.querySelector('#setup-panel').hidden && !!document.querySelector('#setup-download-lips')"),'fixture setup offer rendered');
+      // Wait for the FIXTURE's offer, not the machine's own: on a host without the lip models the real
+      // state already shows a lips item, and the list is rebuilt when the fixture state replaces it.
+      await waitFor(()=>evaluate("!document.querySelector('#setup-panel').hidden && document.querySelectorAll('#setup-assets > *').length===1 && document.querySelector('#setup-license-lips')?.textContent.includes('Fixture licence note')"),'fixture setup offer rendered');
       await reach(x=>x.id==='setup-download-lips');await key('Enter');
       await sleep(300);
       expect((await setupRequests()).length===0 && await evaluate("document.activeElement?.id==='setup-consent-lips' && !document.activeElement.checked"),'Enter on Download without consent requests nothing and moves focus to the unticked consent',{requests:await setupRequests(),focus:await evaluate('document.activeElement?.id')});
