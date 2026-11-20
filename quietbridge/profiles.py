@@ -454,6 +454,48 @@ def profile_language_model(profile: Profile) -> Path:
     return profile.profile_dir / "models" / "lm.pth"
 
 
+SPEECH_RATES = ("slow", "normal", "fast")
+DEFAULT_SPEECH_SETTINGS = {"rate": "normal", "voice": ""}
+
+
+def profile_speech_settings_path(profile: Profile) -> Path:
+    """Speech preferences live in their own file beside profile.json.
+
+    profile.json keeps its exact schema (Profile.save() rewrites only its known
+    keys), so profiles saved by earlier versions load unchanged and a missing
+    file simply means the defaults.
+    """
+    return profile.profile_dir / "speech.json"
+
+
+def load_speech_settings(profile: Profile) -> dict[str, str]:
+    """{"rate", "voice"}; defaults when the file is missing, unreadable or invalid (never raises)."""
+    settings = dict(DEFAULT_SPEECH_SETTINGS)
+    try:
+        data = json.loads(profile_speech_settings_path(profile).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return settings
+    if not isinstance(data, dict):
+        return settings
+    if data.get("rate") in SPEECH_RATES:
+        settings["rate"] = data["rate"]
+    voice = data.get("voice")
+    if isinstance(voice, str) and len(voice) <= 128 and voice.isprintable():
+        settings["voice"] = voice
+    return settings
+
+
+def save_speech_settings(profile: Profile, rate: str, voice: str) -> None:
+    """Atomically write the profile's speech preferences (validated by the caller)."""
+    if rate not in SPEECH_RATES or not isinstance(voice, str):
+        raise ValueError("Invalid speech settings")
+    path = profile_speech_settings_path(profile)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps({"rate": rate, "voice": voice}, indent=2) + "\n", encoding="utf-8")
+    tmp_path.replace(path)
+
+
 def profile_configuration(
     profile: Profile, vocabulary_path: Path | str | None = None
 ) -> tuple[dict[str, Any] | None, Path | None, str]:

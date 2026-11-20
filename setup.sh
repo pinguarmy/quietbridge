@@ -5,7 +5,8 @@
 #
 #   --samples         also fetch the public-domain test clips (best effort: a failure warns, setup goes on)
 #   --strict-samples  fetch the clips and exit non-zero if any could not be downloaded
-#   --no-app          macOS: don't build /Applications/Lipflow.app
+#   --no-app          don't add app launchers (macOS: /Applications/Lipflow.app and QuietBridge.command
+#                     in this folder; Linux: quietbridge.desktop in ${XDG_DATA_HOME:-~/.local/share}/applications)
 #
 # Downloads come from scripts/models.txt and scripts/samples.txt. Each is retried with backoff
 # (honouring Retry-After) and resumed from its .part file. Tunables for CI and tests:
@@ -75,6 +76,64 @@ get() {  # url dest [min-bytes] -> 0 on success; on failure prints the URL and r
   done
 }
 
+_desktop_quote() {  # a path as one quoted .desktop Exec argument (freedesktop Desktop Entry spec)
+  # Inside quotes \ " ` $ need a backslash, and the string-level escape rule doubles every
+  # backslash again (so a literal \ becomes four); % becomes %% (field codes).
+  local value=$1 bs='\'
+  value=${value//"$bs"/"$bs$bs$bs$bs"}
+  value=${value//'"'/"$bs$bs"'"'}
+  value=${value//'`'/"$bs$bs"'`'}
+  value=${value//'$'/"$bs$bs"'$'}
+  value=${value//'%'/'%%'}
+  printf '"%s"' "$value"
+}
+
+_desktop_string() {  # a plain .desktop string value: a literal backslash is written as \\
+  local bs='\'
+  printf '%s' "${1//"$bs"/"$bs$bs"}"
+}
+
+write_linux_launcher() {  # checkout-dir -> writes quietbridge.desktop (idempotent); skipped without a data dir
+  local checkout=$1 base=${XDG_DATA_HOME:-}
+  case "$base" in /*) ;; *) base="$HOME/.local/share" ;; esac  # the spec ignores a relative XDG_DATA_HOME
+  if [ ! -d "$base" ]; then
+    echo "(no $base; skipping the QuietBridge menu launcher)"
+    return 0
+  fi
+  case "$checkout" in *$'\n'*|*$'\r'*)
+    echo "(this folder's path contains a line break; skipping the QuietBridge menu launcher)"
+    return 0 ;;
+  esac
+  local dir="$base/applications" file tmp
+  file="$dir/quietbridge.desktop"
+  mkdir -p "$dir"
+  tmp="$file.tmp.$$"
+  {
+    echo "[Desktop Entry]"
+    echo "Type=Application"
+    echo "Name=QuietBridge"
+    echo "Comment=Type, lip movements and gestures become text you review, then speech"
+    echo "Exec=$(_desktop_quote "$checkout/.venv/bin/quietbridge")"
+    echo "Path=$(_desktop_string "$checkout")"
+    echo "Icon=$(_desktop_string "$checkout/quietbridge/ui/favicon.svg")"
+    echo "Terminal=false"
+    echo "Categories=Accessibility;Utility;"
+  } >"$tmp"
+  mv -f "$tmp" "$file"
+  echo "✓ menu launcher: $file"
+}
+
+write_macos_command() {  # checkout-dir -> a double-clickable QuietBridge.command in the checkout (idempotent)
+  local file="$1/QuietBridge.command"
+  cat >"$file" <<'COMMAND'
+#!/bin/bash
+# Double-click to start QuietBridge; the page opens in your browser. Quit from the page's Settings.
+cd "$(dirname "$0")" && exec ./.venv/bin/quietbridge "$@"
+COMMAND
+  chmod +x "$file"
+  echo "✓ launcher: $file (double-click it in Finder)"
+}
+
 fetch_list() {  # manifest -> prints each destination that failed, returns 1 if any did
   local manifest=$1 url dest min failed=0
   while read -r url dest min; do
@@ -94,7 +153,7 @@ main() {
       --samples) samples=1 ;;
       --strict-samples) samples=1; strict=1 ;;
       --no-app) app=0 ;;
-      -h|--help) sed -n '2,12p' "$0"; return 0 ;;
+      -h|--help) sed -n '2,13p' "$0"; return 0 ;;
       *) echo "unknown option: $arg (see ./setup.sh --help)" >&2; return 2 ;;
     esac
   done
@@ -130,16 +189,21 @@ main() {
     if [ "$app" = 1 ]; then
       rm -rf ~/Applications/Lipflow.app  # older installs went here
       uv run python scripts/make_app.py --dest /Applications
+      write_macos_command "$PWD"
     fi
     echo
     echo "Done. Open Lipflow from Spotlight (or: open /Applications/Lipflow.app)."
     echo "The first launch walks you through permissions, your Wispr Flow words, and ~24 practice sentences."
+    echo "QuietBridge: double-click QuietBridge.command here, or run: uv run quietbridge (the page opens by itself)"
   else
+    if [ "$app" = 1 ]; then
+      write_linux_launcher "$PWD"
+    fi
     echo
-    echo "Done. Start QuietBridge with: uv run quietbridge"
+    echo "Done. Start QuietBridge from your app menu, or with: uv run quietbridge (the page opens by itself)"
     echo "(The Lipflow menu-bar dictation app is macOS/Windows only; \`uv run lipflow file VIDEO\` works here.)"
   fi
-  echo "Optional stock gesture model: uv run python -m quietbridge.signs.assets --download"
+  echo "Optional stock gesture model: download it from Setup in the QuietBridge page, or: uv run python -m quietbridge.signs.assets --download"
   echo "Check everything with: uv run lipflow doctor"
 }
 

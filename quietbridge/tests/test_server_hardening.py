@@ -469,10 +469,17 @@ def test_open_in_browser_is_best_effort(capsys):
     assert "open http://127.0.0.1:1/ manually" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("flag", [True, False])
-def test_main_open_flag(flag, tmp_path, monkeypatch):
+@pytest.mark.parametrize("extra, no_open_env, flag", [
+    ([], "", True),               # the page opens by default
+    (["--open"], "", True),       # accepted for compatibility
+    (["--no-open"], "", False),
+    ([], "1", False),             # QUIETBRIDGE_NO_OPEN
+])
+def test_main_open_flag(extra, no_open_env, flag, tmp_path, monkeypatch):
     monkeypatch.setenv("QUIETBRIDGE_DATA_ROOT", str(tmp_path))
     monkeypatch.delenv("QUIETBRIDGE_MOTION_MODEL", raising=False)
+    monkeypatch.setenv("DISPLAY", ":0")  # Linux: a desktop session
+    monkeypatch.setenv("QUIETBRIDGE_NO_OPEN", no_open_env)
     real_make_server = server_module.make_server
     servers = []
 
@@ -485,7 +492,7 @@ def test_main_open_flag(flag, tmp_path, monkeypatch):
 
     opened = threading.Event()
     opener = Mock(side_effect=lambda url: opened.set())
-    argv = ["quietbridge.server", "--rehearsal", "--port", "0"] + (["--open"] if flag else [])
+    argv = ["quietbridge.server", "--rehearsal", "--port", "0"] + extra
     with patch("sys.argv", argv), patch.object(server_module, "make_server", fake_make_server), \
             patch.object(server_module.webbrowser, "open", opener):
         server_module.main()

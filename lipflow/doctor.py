@@ -64,8 +64,7 @@ class Report:
 
 def _setup_hint(rel: str = "") -> str:
     script = r"run .\setup.ps1" if sys.platform == "win32" else "run ./setup.sh"
-    if rel == "lm/unigram5000.model":  # quietbridge.assets does not fetch the tokenizer
-        return script
+    # quietbridge.assets (also the Setup panel in the QuietBridge page) fetches every file here.
     return script + " (or: uv run python -m quietbridge.assets --download)"
 
 

@@ -13,5 +13,10 @@ Lipflow bundles code from these projects:
 - Chaplin by Amanvir Parhar (MIT License) — the original "type what you mouth" idea and the
   Hugging Face mirrors of the model weights.
 
-Model weights (downloaded by setup.sh, not redistributed here) are the Auto-AVSR LRS3 models; the
-LRS3 dataset is licensed for non-commercial research use, so treat the weights the same way.
+Model weights (downloaded by setup.sh or from the QuietBridge page, not redistributed here) are the
+Auto-AVSR LRS3 models; the LRS3 dataset is licensed for non-commercial research use, so treat the
+weights the same way. The authors' model licence (Visual_Speech_Recognition_for_Multiple_Languages,
+LICENSE) further limits the models to research and private study. The files are fetched from a
+third-party Hugging Face mirror (Amanvir/LRS3_V_WER19.1, Amanvir/lm_en_subword) that carries no
+licence statement of its own. Anyone using them is responsible for checking that their use fits
+those terms; see docs/recognition-roadmap.md for the sources.

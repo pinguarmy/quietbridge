@@ -11,6 +11,7 @@ from quietbridge.runtime import Runtime
 def run_main(argv, monkeypatch, tmp_path):
     monkeypatch.setenv("QUIETBRIDGE_DATA_ROOT", str(tmp_path))
     monkeypatch.delenv("QUIETBRIDGE_MOTION_MODEL", raising=False)
+    monkeypatch.setenv("QUIETBRIDGE_NO_OPEN", "1")  # the page opens by default
     captured = {}
     real_make_server = server_module.make_server
 

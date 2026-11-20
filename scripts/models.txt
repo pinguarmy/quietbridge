@@ -1,14 +1,16 @@
 # Required model downloads for setup.sh and setup.ps1 (~1.2 GB). One per line:
 #   URL  destination  minimum-bytes
 # The minimum size catches truncated downloads and error pages saved as files. CI caches models/
-# keyed on this file's hash, so editing it is what invalidates the cache.
+# keyed on this file's hash, so editing it is what invalidates the cache. quietbridge/assets.py
+# (the in-app and Python downloader) must list the same URLs and destinations; a test checks it.
 # Auto-AVSR visual-only model trained on LRS3 (WER 19.1%) + subword RNN language model.
 # LRS3-derived weights: non-commercial research use only (see NOTICE).
 https://huggingface.co/Amanvir/LRS3_V_WER19.1/resolve/main/model.json  models/vsr/model.json  100
 https://huggingface.co/Amanvir/LRS3_V_WER19.1/resolve/main/model.pth   models/vsr/model.pth   900000000
 https://huggingface.co/Amanvir/lm_en_subword/resolve/main/model.json   models/lm/model.json   100
 https://huggingface.co/Amanvir/lm_en_subword/resolve/main/model.pth    models/lm/model.pth    200000000
-# SentencePiece tokenizer for the LM (needed to train on your phrases and your face)
-https://github.com/mpc001/auto_avsr/raw/main/spm/unigram/unigram5000.model  models/lm/unigram5000.model  100000
+# SentencePiece tokenizer for the LM (needed to train on your phrases and your face). The direct raw host:
+# github.com/<repo>/raw/ only redirects there, and some proxies refuse github.com while allowing it.
+https://raw.githubusercontent.com/mpc001/auto_avsr/main/spm/unigram/unigram5000.model  models/lm/unigram5000.model  100000
 # MediaPipe face landmarker
 https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task  models/face_landmarker.task  3000000

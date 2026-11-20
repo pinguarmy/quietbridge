@@ -1,9 +1,10 @@
-# Lipflow for Windows: install dependencies, download the models (~1.2 GB) and add a Start menu shortcut.
+# Lipflow and QuietBridge for Windows: install dependencies, download the models (~1.2 GB) and add
+# Start menu shortcuts (Lipflow, and QuietBridge, which opens its page in the browser).
 #   powershell -ExecutionPolicy Bypass -File setup.ps1 [-Samples] [-StrictSamples] [-NoShortcut]
 #
 #   -Samples        also fetch the public-domain test clips (best effort: a failure warns, setup goes on)
 #   -StrictSamples  fetch the clips and exit non-zero if any could not be downloaded
-#   -NoShortcut     don't create the Start menu shortcut
+#   -NoShortcut     don't create the Start menu shortcuts
 #
 # Downloads come from scripts/models.txt and scripts/samples.txt (shared with setup.sh). Each is retried
 # with backoff (honouring Retry-After) and resumed from its .part file. Tunables for CI:
@@ -141,11 +142,23 @@ if (-not $NoShortcut) {
     $sh.Description = "Silent dictation by lip reading"
     $sh.Save()
     Write-Host "ok  Start menu shortcut: $lnk"
+
+    # QuietBridge without a console window: the page opens in the default browser, Quit is in its
+    # Settings. Starting it again while it runs just opens the running one's page.
+    $qlnk = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\QuietBridge.lnk"
+    $qs = (New-Object -ComObject WScript.Shell).CreateShortcut($qlnk)
+    $qs.TargetPath = Join-Path $PSScriptRoot ".venv\Scripts\pythonw.exe"
+    $qs.Arguments = "-X utf8 -m quietbridge.server"
+    $qs.WorkingDirectory = $PSScriptRoot
+    $qs.Description = "QuietBridge: typing, lip movements and gestures become text you review, then speech"
+    $qs.Save()
+    Write-Host "ok  Start menu shortcut: $qlnk"
 }
 
 Write-Host ""
 Write-Host "Done. Open Lipflow from the Start menu (it lives in the system tray, next to the clock)."
 Write-Host "The first launch walks you through your Wispr Flow words and ~24 practice sentences."
-Write-Host "QuietBridge: uv run quietbridge   Optional stock gesture model: uv run python -m quietbridge.signs.assets --download"
+Write-Host "QuietBridge: open it from the Start menu (or: uv run quietbridge); the page opens by itself."
+Write-Host "Optional stock gesture model: download it from Setup in the QuietBridge page (or: uv run python -m quietbridge.signs.assets --download)"
 Write-Host "Check everything with:  uv run lipflow doctor"
 if ($sampleProblem -and $StrictSamples) { exit 1 }

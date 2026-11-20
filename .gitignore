@@ -10,3 +10,4 @@ samples/
 !.env.example
 recordings/
 clips/
+QuietBridge.command

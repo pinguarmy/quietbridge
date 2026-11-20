@@ -144,3 +144,50 @@ def test_user_agent_is_generic(server, tmp_path):
 def test_unknown_option_is_rejected():
     proc = subprocess.run(["bash", SETUP, "--sampels"], capture_output=True, text=True, timeout=30)
     assert proc.returncode == 2 and "unknown option" in proc.stderr
+
+
+def _launcher(function, home, checkout, xdg=None):
+    env = {**os.environ, "HOME": str(home)}
+    env.pop("XDG_DATA_HOME", None)
+    if xdg is not None:
+        env["XDG_DATA_HOME"] = str(xdg)
+    return subprocess.run(["bash", "-c", f'source "{SETUP}"; {function} "$1"', "setup-test", str(checkout)],
+                          capture_output=True, text=True, env=env, timeout=30)
+
+
+def test_linux_launcher_is_written_idempotently_with_a_quoted_exec(tmp_path):
+    (tmp_path / "home" / ".local" / "share").mkdir(parents=True)
+    checkout = tmp_path / 'my "apps" $HOME %u'
+    for _ in range(2):
+        proc = _launcher("write_linux_launcher", tmp_path / "home", checkout)
+        assert proc.returncode == 0, proc.stderr
+    desktop = tmp_path / "home" / ".local" / "share" / "applications" / "quietbridge.desktop"
+    lines = desktop.read_text().splitlines()
+    assert lines[0] == "[Desktop Entry]" and "Terminal=false" in lines and "Name=QuietBridge" in lines
+    exe = str(checkout / ".venv" / "bin" / "quietbridge")
+    quoted = exe.replace('"', '\\\\"').replace("$", "\\\\$").replace("%", "%%")
+    assert f'Exec="{quoted}"' in lines
+    assert list(desktop.parent.iterdir()) == [desktop]  # no temporary files left behind
+
+
+def test_linux_launcher_honours_xdg_data_home_and_skips_without_it(tmp_path):
+    (tmp_path / "xdg").mkdir()
+    assert _launcher("write_linux_launcher", tmp_path / "home", tmp_path, tmp_path / "xdg").returncode == 0
+    assert (tmp_path / "xdg" / "applications" / "quietbridge.desktop").is_file()
+    proc = _launcher("write_linux_launcher", tmp_path / "nohome", tmp_path, tmp_path / "missing")
+    assert proc.returncode == 0 and "skipping" in proc.stdout
+    assert not (tmp_path / "missing").exists() and not (tmp_path / "nohome").exists()
+
+
+def test_macos_command_launcher_starts_quietbridge_from_its_folder(tmp_path):
+    for _ in range(2):
+        assert _launcher("write_macos_command", tmp_path, tmp_path).returncode == 0
+    command = tmp_path / "QuietBridge.command"
+    assert os.access(command, os.X_OK)
+    text = command.read_text()
+    assert text.startswith("#!/bin/bash\n") and 'cd "$(dirname "$0")" && exec ./.venv/bin/quietbridge' in text
+
+
+def test_no_app_is_documented_for_every_launcher():
+    help_text = subprocess.run(["bash", SETUP, "--help"], capture_output=True, text=True, timeout=30).stdout
+    assert "--no-app" in help_text and "quietbridge.desktop" in help_text and "QuietBridge.command" in help_text

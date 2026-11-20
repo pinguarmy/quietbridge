@@ -1,8 +1,20 @@
 """QuietBridge loopback server.
 
-Run ``python -m quietbridge.server`` and open the printed URL: the page asks the
-browser for camera access (the default). ``--rehearsal`` uses synthetic inputs
-only; ``--server-camera`` makes this process open a local camera itself.
+Run ``python -m quietbridge.server`` (or ``quietbridge``): the page opens in the
+default browser once the server listens, and asks the browser for camera access
+(the default). ``--rehearsal`` uses synthetic inputs only; ``--server-camera``
+makes this process open a local camera itself.
+
+Opening the page is best-effort and skipped with ``--no-open``, when
+``QUIETBRIDGE_NO_OPEN`` is set to anything non-empty, or on Linux/BSD when
+neither ``DISPLAY`` nor ``WAYLAND_DISPLAY`` is set (an SSH session or a
+headless box, where Python's webbrowser would start a text browser inside the
+terminal). Whether stdout is a terminal does not matter: a launcher without a
+console (Start menu, .desktop file) is exactly when the page should open.
+
+If the port is taken by a running QuietBridge, that one's page is opened and
+the command exits 0; any other program on the port is named in a one-line
+error (exit 2). ``POST /api/shutdown`` stops the app from the page.
 """
 from __future__ import annotations
 
@@ -11,15 +23,20 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlencode
+import os
 import secrets
 import socket
 import sys
 import threading
 import traceback
+import urllib.request
 import webbrowser
 
 from .runtime import Runtime, ProfileSwitchConflict
-from .profiles import ProfileManager, profile_configuration
+from .profiles import (ProfileManager, load_speech_settings, profile_configuration,
+                       save_speech_settings)
+from . import assets as setup_assets
+from .speech import RATES, Speaker
 
 UI = Path(__file__).with_name("ui")
 # Idle keep-alive connections close after this many seconds; server_close()
@@ -54,12 +71,174 @@ class _LazyLabEngine:
             self.engine = None
 
 
-def make_server(runtime, port=8765):
+def app_version():
+    try:
+        from importlib.metadata import version
+        return version("lipflow")
+    except Exception:
+        return "unknown"
+
+
+def _started_with(runtime):
+    # Strict checks: test doubles answer any attribute with a truthy object.
+    if getattr(runtime, "rehearsal", False) is True:
+        return "rehearsal"
+    if getattr(runtime, "browser_camera", False) is True:
+        return "browser_camera"
+    return "server_camera"
+
+
+def _runtime_state(runtime, key):
+    state = getattr(runtime, "state", None)
+    value = state.get(key) if isinstance(state, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def _clean_voices(voices):
+    if not isinstance(voices, list):
+        return []
+    return [{"id": v["id"], "label": v["label"]} for v in voices
+            if isinstance(v, dict) and isinstance(v.get("id"), str) and isinstance(v.get("label"), str)]
+
+
+class _SpeechSettings:
+    """Rate and voice for the next utterance, saved per profile in profiles/<id>/speech.json.
+
+    Only a real speech.Speaker receives them; with a test double the choice is
+    still validated, saved and reported (with no voices to choose from).
+    """
+
+    def __init__(self, runtime):
+        self.runtime = runtime
+        self.lock = threading.Lock()
+        self.rate, self.voice = "normal", ""
+        self.profile_id = object()  # forces the first sync
+        speaker = self.speaker()
+        if speaker is not None:
+            speaker.voices()  # start the bounded background listing now
+
+    def speaker(self):
+        speaker = getattr(self.runtime, "speaker", None)
+        return speaker if isinstance(speaker, Speaker) else None
+
+    def _profile(self):
+        profile = getattr(self.runtime, "profile", None)
+        return profile if isinstance(getattr(profile, "id", None), str) and \
+            isinstance(getattr(profile, "profile_dir", None), Path) else None
+
+    def sync(self):
+        """Apply the active profile's saved settings once per profile (also after a switch)."""
+        profile = self._profile()
+        profile_id = profile.id if profile is not None else None
+        with self.lock:
+            if profile_id == self.profile_id:
+                return
+            self.profile_id = profile_id
+            saved = load_speech_settings(profile) if profile is not None else {"rate": "normal", "voice": ""}
+            self.rate, self.voice = saved["rate"], saved["voice"]
+            speaker = self.speaker()
+            if speaker is not None:
+                speaker.set_rate(self.rate)
+                speaker.set_voice(self.voice, strict=False)
+
+    def payload(self):
+        self.sync()
+        speaker = self.speaker()
+        voices, voice = [], ""
+        if speaker is not None:
+            try:
+                voices = _clean_voices(speaker.voices())
+                current = speaker.settings().get("voice", "")
+                voice = current if isinstance(current, str) and any(v["id"] == current for v in voices) else ""
+            except Exception:
+                voices, voice = [], ""
+        return {"rate": self.rate, "voice": voice, "voices": voices}
+
+    def update(self, data):
+        unknown = set(data) - {"rate", "voice"}
+        if unknown:
+            raise ValueError(f"Unknown speech setting: {sorted(unknown)[0]}")
+        self.sync()
+        rate = data.get("rate", self.rate)
+        voice = data.get("voice", self.voice)
+        if rate not in RATES:
+            raise ValueError("Speaking rate must be slow, normal or fast")
+        if not isinstance(voice, str):
+            raise ValueError("Voice must be text")
+        speaker = self.speaker()
+        if voice:
+            installed = _clean_voices(speaker.voices(wait=True)) if speaker is not None else []
+            if not any(v["id"] == voice for v in installed):
+                raise ValueError("That voice is not installed on this computer; choose one from the list")
+        with self.lock:
+            profile = self._profile()
+            if profile is not None:
+                save_speech_settings(profile, rate, voice)
+            self.rate, self.voice = rate, voice
+            if speaker is not None:
+                speaker.set_rate(rate)
+                speaker.set_voice(voice, strict=False)  # validated above
+
+
+def make_server(runtime, port=8765, *, downloads=None):
     token = secrets.token_urlsafe(32)
     server_instance = secrets.token_urlsafe(16)
+    app_info = {"version": app_version(), "started_with": _started_with(runtime)}
+    speech_settings = _SpeechSettings(runtime)
+    reload_lock = threading.Lock()
+    pending_reload = set()  # groups installed after this process tried to load them
+
+    def models_unloaded(group_id):
+        if getattr(runtime, "rehearsal", False) is True:
+            return False
+        if group_id == "lips":
+            return getattr(runtime, "enable_lips", False) is True and _runtime_state(runtime, "lips") != "ready"
+        return getattr(runtime, "isolated_sign_model_path", None) is None and \
+            _runtime_state(runtime, "signs") != "ready"
+
+    def group_ready(group_id):
+        # Never loads anything: the page offers the existing explicit reload.
+        if models_unloaded(group_id):
+            with reload_lock:
+                pending_reload.add(group_id)
+
+    setup_downloads = downloads if downloads is not None else setup_assets.SetupDownloads(on_ready=group_ready)
+    if downloads is not None and getattr(downloads, "_on_ready", None) is None:
+        downloads._on_ready = group_ready
+
+    def setup_payload():
+        groups = []
+        for group_id in ("lips", "gestures"):
+            try:
+                groups.append(setup_downloads.group_state(group_id))
+            except Exception as exc:  # a broken path must not break polling
+                info = setup_assets.GROUPS[group_id]
+                groups.append({"id": group_id, "label": info["label"], "status": "error",
+                               "bytes_done": 0, "bytes_total": 0,
+                               "error": f"Could not check the model files ({exc.__class__.__name__}).",
+                               "size_note": "", "license_note": info["license_note"]})
+        with reload_lock:
+            reload_needed = bool(pending_reload)
+        return {"busy": setup_downloads.busy, "reload_needed": reload_needed, "assets": groups}
 
     def state_payload():
-        return {**runtime.snapshot(), "token": token, "server_instance": server_instance}
+        return {**runtime.snapshot(), "token": token, "server_instance": server_instance,
+                "setup": setup_payload(), "speech_settings": speech_settings.payload(),
+                "app": dict(app_info)}
+
+    def setup_action(path, data):
+        group_id = data.get("id")
+        if not isinstance(group_id, str) or group_id not in setup_assets.GROUPS:
+            raise ValueError("Unknown download; choose lips or gestures")
+        if path == "/api/setup/cancel":
+            setup_downloads.cancel(group_id)
+            return
+        if data.get("accept_license") is not True:
+            raise ValueError("Read and accept the model's license note before downloading")
+        if getattr(runtime, "rehearsal", False) is True:
+            raise ValueError("Downloads are off in rehearsal mode, which never loads models. "
+                             "Start QuietBridge without --rehearsal to download them.")
+        setup_downloads.start(group_id)
 
     class Handler(BaseHTTPRequestHandler):
         # HTTP/1.1 keep-alive: the page polls state, tracking and frames many
@@ -237,8 +416,13 @@ def make_server(runtime, port=8765):
             if self.path in {"/api/profile/select", "/api/action/profile_select"}:
                 self._handle_profile_select()
                 return
+            if self.path == "/api/shutdown":
+                self._handle_shutdown()
+                return
             cleanup_path = self.path in {"/api/cleanup/config", "/api/cleanup/test"}
-            if not cleanup_path and not self.path.startswith("/api/action/"):
+            setup_path = self.path in {"/api/setup/download", "/api/setup/cancel", "/api/speech/settings",
+                                       "/api/speech/test"}
+            if not cleanup_path and not setup_path and not self.path.startswith("/api/action/"):
                 self._json(404, {"error": "Not found"})
                 return
             try:
@@ -252,6 +436,16 @@ def make_server(runtime, port=8765):
                     payload = runtime.configure_cleanup(data)
                 elif self.path == "/api/cleanup/test":
                     payload = runtime.test_cleanup()
+                elif self.path == "/api/speech/settings":
+                    speech_settings.update(data)
+                    payload = state_payload()
+                elif self.path == "/api/speech/test":
+                    # An explicit request to hear the current voice; the message is untouched.
+                    runtime.speak_sample()
+                    payload = state_payload()
+                elif setup_path:
+                    setup_action(self.path, data)
+                    payload = state_payload()
                 else:
                     runtime.action(self.path.removeprefix("/api/action/"), data)
                     payload = state_payload()
@@ -324,6 +518,8 @@ def make_server(runtime, port=8765):
                 if not profile_id or not isinstance(profile_id, str):
                     raise ValueError("Profile id must be a non-empty string")
                 profile = runtime.switch_profile(profile_id.strip())
+                with reload_lock:
+                    pending_reload.clear()  # the workers were restarted: new files are loaded
                 payload = profile.to_dict(include_stats=True)
                 payload["active_profile"] = profile.id
                 payload["profile"] = profile.to_dict(include_stats=True)
@@ -337,6 +533,26 @@ def make_server(runtime, port=8765):
                 return
             # Anything else reaches _dispatch: a generic 500, details in the log.
             self._json(200, payload)
+
+        def _handle_shutdown(self):
+            try:
+                length = int(self.headers.get("Content-Length", "0") or 0)
+            except ValueError:
+                length = -1
+            if not 0 <= length <= 8192:
+                self._json(400, {"error": "Invalid request size"})
+                return
+            body = self._read_body(length) if length else b"{}"
+            try:
+                data = json.loads(body or b"{}")
+            except ValueError:
+                data = None
+            if not isinstance(data, dict):
+                self._json(400, {"error": "Expected a JSON object"})
+                return
+            self.close_connection = True
+            self._json(200, {"ok": True})
+            self.server.request_shutdown()
 
     class MainServer(ThreadingHTTPServer):
         daemon_threads = True
@@ -356,6 +572,8 @@ def make_server(runtime, port=8765):
             self._lab = None
             self._lab_thread = None
             self._closed = False
+            self._shutdown_requested = threading.Event()
+            self.setup_downloads = setup_downloads
             self._connections_lock = threading.Lock()
             self._connections = set()
             super().__init__(address, Handler)
@@ -411,7 +629,19 @@ def make_server(runtime, port=8765):
                     self._lab, self._lab_thread = lab, thread
                 return self._lab
 
+        @property
+        def shutdown_requested(self):
+            return self._shutdown_requested.is_set()
+
+        def request_shutdown(self):
+            """Stop serve_forever() from another thread (main() then closes the runtime)."""
+            if self._shutdown_requested.is_set():
+                return
+            self._shutdown_requested.set()
+            threading.Thread(target=self.shutdown, name="quietbridge-shutdown", daemon=True).start()
+
         def server_close(self):
+            setup_downloads.close()
             with self._lab_lock:
                 self._closed = True
                 lab, thread = self._lab, self._lab_thread
@@ -440,6 +670,63 @@ def open_in_browser(url, opener=None):
     return thread
 
 
+def should_open_browser(no_open=False, environ=None, platform=None):
+    """The documented rule for opening the page (see the module docstring)."""
+    environ = os.environ if environ is None else environ
+    platform = sys.platform if platform is None else platform
+    if no_open or (environ.get("QUIETBRIDGE_NO_OPEN") or "").strip():
+        return False
+    if platform == "win32" or platform == "darwin":
+        return True
+    return bool((environ.get("DISPLAY") or "").strip() or (environ.get("WAYLAND_DISPLAY") or "").strip())
+
+
+def probe_running(port, timeout=2.0):
+    """True when http://127.0.0.1:<port>/api/state answers like QuietBridge."""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # loopback: never a proxy
+    try:
+        with opener.open(f"http://127.0.0.1:{port}/api/state", timeout=timeout) as response:
+            if response.status != 200:
+                return False
+            data = json.loads(response.read(4 * 1024 * 1024))
+    except Exception:
+        return False
+    return isinstance(data, dict) and isinstance(data.get("server_instance"), str) and "revision" in data
+
+
+def _bind_failed(port, exc, open_page):
+    """Port taken: hand over to a running QuietBridge (exit 0) or explain (exit 2). No traceback."""
+    url = f"http://127.0.0.1:{port}"
+    if probe_running(port):
+        print(f"QuietBridge is already running at {url}", flush=True)
+        if open_page:
+            open_in_browser(url).join(10)
+        return 0
+    reason = getattr(exc, "strerror", None) or str(exc)
+    print(f"QuietBridge could not use port {port} ({reason}): another program is using it. "
+          f"Start QuietBridge with --port and another number, for example --port {port + 1 if port < 65535 else 8766}.",
+          file=sys.stderr, flush=True)
+    return 2
+
+
+def _missing_downloads_line(runtime):
+    if getattr(runtime, "rehearsal", False) is True:
+        return ""
+    names = []
+    try:
+        if not setup_assets.group_ready("lips") and getattr(runtime, "enable_lips", False) is True:
+            names.append("lip reading")
+        if not setup_assets.group_ready("gestures") and \
+                getattr(runtime, "isolated_sign_model_path", None) is None:
+            names.append("hand gestures")
+    except Exception:
+        return ""
+    if not names:
+        return ""
+    return (f"Not downloaded yet: {' and '.join(names)}. Typing works now; download them from Setup "
+            "in the page (one time).")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="QuietBridge loopback server. By default the page uses the browser's camera "
@@ -461,8 +748,11 @@ def main():
     parser.add_argument("--sign-model", type=Path, help="Explicit local BSL/ASL isolated-sign manifest; replaces stock/personal gesture backend")
     parser.add_argument("--max-utterance-seconds", type=float, default=30.0)
     parser.add_argument("--open", action="store_true",
-                        help="Open the printed loopback URL in the default browser once listening")
+                        help="Accepted for compatibility: the page opens by default")
+    parser.add_argument("--no-open", action="store_true",
+                        help="Do not open the page in the default browser (also: QUIETBRIDGE_NO_OPEN=1)")
     args = parser.parse_args()
+    open_page = should_open_browser(args.no_open)
     if args.camera is not None and not args.server_camera:
         parser.error("--camera selects a camera opened by this server; add --server-camera "
                      "(by default the page uses the browser's camera)")
@@ -497,7 +787,14 @@ def main():
                           explicit_vocabulary_path=args.vocabulary)
     except ValueError as exc:
         parser.error(str(exc))
-    server = make_server(runtime, args.port)
+    try:
+        server = make_server(runtime, args.port)
+    except OSError as exc:
+        runtime.close()
+        code = _bind_failed(args.port, exc, open_page)
+        if code:
+            raise SystemExit(code)
+        return
     runtime.start()
     url = f"http://127.0.0.1:{server.server_port}"
     print(f"QuietBridge: {url}", flush=True)
@@ -506,7 +803,11 @@ def main():
           "this computer; wait for warmup before recording." if browser_camera else
           f"SERVER CAMERA {args.camera or 0} — this process opens the camera itself. Recognition "
           "runs on this computer; wait for warmup before recording.", flush=True)
-    if args.open:
+    missing = _missing_downloads_line(runtime)
+    if missing:
+        print(missing, flush=True)
+    print("Stop with Ctrl+C here, or Quit in the page's Settings.", flush=True)
+    if open_page:
         # The socket is already listening; requests queue until serve_forever runs.
         open_in_browser(url)
     try:
@@ -516,6 +817,8 @@ def main():
     finally:
         server.server_close()
         runtime.close()
+    if server.shutdown_requested:
+        print("QuietBridge stopped from the page.", flush=True)
 
 
 if __name__ == "__main__":

@@ -483,6 +483,27 @@ class Runtime:
         """A voice is playing, or a validated speak request is starting one."""
         return self._speech_dispatching or self._speaker_speaking()
 
+    SPEECH_SAMPLE = "This is how your messages will sound."
+
+    def speak_sample(self):
+        """Speak one fixed sentence with the current voice settings, on request.
+
+        For trying a voice or rate in Settings. It never touches the message,
+        its revision, last_spoken or any suggestion, and it is refused while
+        speech is busy so it cannot cut off or replay a message.
+        """
+        with self.lock:
+            if self._switching_profile:
+                raise ProfileSwitchConflict("A profile switch is in progress")
+            if self._speech_busy():
+                raise ValueError("Speech is already playing. Stop it before testing the voice")
+            self._speech_dispatching = True
+        try:
+            self.speaker.speak(self.SPEECH_SAMPLE)
+        finally:
+            with self.lock:
+                self._speech_dispatching = False
+
     def _speaker_error(self):
         try:
             error = getattr(self.speaker, "last_error", "")
