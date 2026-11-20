@@ -50,7 +50,7 @@ def models_dir(environ=None, package_parent=None, platform=None):
 
 
 def default_home(platform=None, environ=None):
-    """The per-user data directory for this platform (before any LIPFLOW_HOME override).
+    r"""The per-user data directory for this platform (before any LIPFLOW_HOME override).
 
     Windows: %APPDATA%\Lipflow. macOS: ~/Library/Application Support/Lipflow.
     Elsewhere (Linux): $XDG_DATA_HOME/lipflow, by default ~/.local/share/lipflow.
@@ -63,7 +63,7 @@ def default_home(platform=None, environ=None):
         return os.path.expanduser("~/Library/Application Support/Lipflow")
     base = environ.get("XDG_DATA_HOME") or ""
     if not os.path.isabs(base):  # the XDG spec ignores a relative XDG_DATA_HOME
-        base = os.path.expanduser("~/.local/share")
+        base = os.path.join(os.path.expanduser("~"), ".local", "share")
     return os.path.join(base, "lipflow")
 
 

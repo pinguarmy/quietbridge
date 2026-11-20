@@ -268,8 +268,40 @@ def test_fixed_list_matches_scripts_models_txt():
 # ----------------------------------------------------------------- the page's worker
 
 
+REAL_LIPS_ASSETS = assets.LIPS_ASSETS  # the shipped table, before any fixture shrinks it
+
+
+def shrink_assets(monkeypatch):
+    """Use small stand-in sizes for the worker tests.
+
+    The fake fetchers create a file of each asset's size. Extending a file to a
+    gigabyte is instant on Linux but writes real zeros on Windows, which made
+    these tests take seconds, time out and leave a worker running.
+    """
+    import dataclasses
+    monkeypatch.setattr(assets, "LIPS_ASSETS", tuple(
+        dataclasses.replace(a, size=min(a.size, 4096), min_bytes=min(a.min_bytes, 512)) for a in REAL_LIPS_ASSETS))
+
+
+@pytest.fixture(autouse=True)
+def close_download_workers(monkeypatch):
+    """Join every download worker before the temporary models folder is undone."""
+    created = []
+    original = SetupDownloads.__init__
+
+    def tracking(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        created.append(self)
+
+    monkeypatch.setattr(SetupDownloads, "__init__", tracking)
+    yield
+    for manager in created:
+        manager.close(timeout=10)
+
+
 @pytest.fixture
 def model_dirs(tmp_path, monkeypatch):
+    shrink_assets(monkeypatch)
     monkeypatch.setattr(paths, "MODELS", str(tmp_path / "models"))
     monkeypatch.setenv("QUIETBRIDGE_GESTURE_MODEL", str(tmp_path / "cache" / "gesture.task"))
     return tmp_path
@@ -290,7 +322,7 @@ class FakeFetcher:
         self.max_active = 0
         self.lock = threading.Lock()
 
-    def __call__(self, asset, progress=None, cancel=None):
+    def __call__(self, asset, path=None, progress=None, cancel=None):
         with self.lock:
             self.active += 1
             self.max_active = max(self.max_active, self.active)
@@ -304,7 +336,7 @@ class FakeFetcher:
                 while not self.gate.wait(0.01):
                     if cancel.is_set():
                         raise DownloadCancelled(asset.name)
-            sparse(asset.path(), asset.size)
+            sparse(path or asset.path(), asset.size)
         finally:
             with self.lock:
                 self.active -= 1
@@ -322,8 +354,12 @@ def test_group_state_contract(model_dirs):
     lips = manager.group_state("lips")
     assert set(lips) == {"id", "label", "status", "bytes_done", "bytes_total", "error", "size_note", "license_note"}
     assert lips["status"] == "missing" and lips["bytes_done"] == 0
-    assert lips["bytes_total"] == sum(a.size for a in assets.LIPS_ASSETS) == 1221078042
-    assert lips["size_note"] == "about 1.2 GB, one time" and "non-commercial research use only" in lips["license_note"]
+    # The page's totals come from the asset table; the shipped table adds up to about 1.2 GB.
+    assert lips["bytes_total"] == sum(a.size for a in assets.LIPS_ASSETS)
+    assert lips["size_note"] == assets.size_note(lips["bytes_total"])
+    assert sum(a.size for a in REAL_LIPS_ASSETS) == 1221078042
+    assert assets.size_note(1221078042) == "about 1.2 GB, one time"
+    assert "non-commercial research use only" in lips["license_note"]
     gestures = manager.group_state("gestures")
     assert gestures["label"] == "Stock hand gestures" and gestures["bytes_total"] == 8373440
     assert gestures["size_note"] == "about 8 MB, one time"
@@ -333,7 +369,7 @@ def test_download_installs_the_group_and_reports_ready(model_dirs):
     ready = []
     fetcher = FakeFetcher()
     manager = SetupDownloads(on_ready=ready.append, fetcher=fetcher)
-    sparse(Path(paths.MODELS) / "vsr" / "model.json", 5512)  # present files are skipped
+    sparse(Path(paths.MODELS) / "vsr" / "model.json", assets.LIPS_ASSETS[0].size)  # present files are skipped
     manager.start("lips")
     wait_idle(manager)
     assert fetcher.calls == [a.name for a in assets.LIPS_ASSETS if a.name != "vsr/model.json"]
@@ -404,13 +440,13 @@ def test_unexpected_exception_never_kills_the_worker_silently(model_dirs):
 
 def test_undersized_existing_file_is_an_error_and_never_replaced(model_dirs):
     short = Path(paths.MODELS) / "vsr" / "model.pth"
-    sparse(short, 1000)
+    sparse(short, 100)  # below the stand-in minimum of 512 bytes
     fetcher = FakeFetcher()
     manager = SetupDownloads(fetcher=fetcher)
     assert "smaller than expected" in manager.group_state("lips")["error"]
     manager.start("lips")
     wait_idle(manager)
-    assert fetcher.calls == [] and short.stat().st_size == 1000
+    assert fetcher.calls == [] and short.stat().st_size == 100
     assert manager.group_state("lips")["status"] == "error"
 
 

@@ -33,8 +33,8 @@ function lineProtocol(child) {
 function cdpProtocol(child) {
   let buffer=Buffer.alloc(0), id=0; const pending=new Map(), listeners=new Map();
   child.stdio[4].on('data', chunk=>{buffer=Buffer.concat([buffer,chunk]); let n; while((n=buffer.indexOf(0))>=0) {const data=buffer.subarray(0,n).toString(); buffer=buffer.subarray(n+1); let m; try {m=JSON.parse(data);} catch {continue;} if(m.id && pending.has(m.id)){const [resolve,reject]=pending.get(m.id);pending.delete(m.id);m.error?reject(new Error(JSON.stringify(m.error))):resolve(m.result);} else if(m.method) for(const f of listeners.get(m.method)||[]) f(m.params,m.sessionId);}});
-  child.stderr.on('data',()=>{});
-  return {send(method,params={},sessionId) {const key=++id; const p=new Promise((resolve,reject)=>pending.set(key,[resolve,reject])); child.stdio[3].write(JSON.stringify({id:key,method,params,...(sessionId?{sessionId}:{})})+'\0'); return Promise.race([p,sleep(10000).then(()=>{throw Error(`CDP timeout ${method}`);})]);}, on(method,fn){if(!listeners.has(method)) listeners.set(method,[]);listeners.get(method).push(fn);}};
+  let stderrTail=''; child.stderr.on('data',b=>{stderrTail=(stderrTail+b).slice(-4000);});
+  return {stderr:()=>stderrTail, send(method,params={},sessionId,timeoutMs=10000) {const key=++id; const p=new Promise((resolve,reject)=>pending.set(key,[resolve,reject])); child.stdio[3].write(JSON.stringify({id:key,method,params,...(sessionId?{sessionId}:{})})+'\0'); return Promise.race([p,sleep(timeoutMs).then(()=>{throw Error(`CDP timeout ${method}`);})]);}, on(method,fn){if(!listeners.has(method)) listeners.set(method,[]);listeners.get(method).push(fn);}};
 }
 async function chromePath() {
   if(process.env.CHROME_BIN) return process.env.CHROME_BIN;
@@ -46,7 +46,10 @@ async function chromePath() {
 // and only for this throwaway headless profile, disable it and say so.
 let sandboxNoticePrinted = false;
 function chromeArgs(profile) {
-  const args=['--headless=new','--remote-debugging-pipe',`--user-data-dir=${profile}`,'--no-first-run','--no-default-browser-check'];
+  const args=['--headless=new','--remote-debugging-pipe',`--user-data-dir=${profile}`,'--no-first-run','--no-default-browser-check',
+    // Keep start-up quick and offline on a fresh CI machine: no GPU, no background fetches, no first-run work.
+    '--disable-gpu','--disable-dev-shm-usage','--disable-background-networking','--disable-component-update','--disable-sync',
+    '--disable-default-apps','--disable-extensions','--mute-audio','--disable-features=Translate,MediaRouter,OptimizationHints'];
   if(process.getuid?.()===0) {
     args.unshift('--no-sandbox');
     if(!sandboxNoticePrinted) { console.log('Running as root: launching headless Chrome with --no-sandbox for the temporary check profile.'); sandboxNoticePrinted=true; }
@@ -67,7 +70,10 @@ async function run(variant, coreOnly=false) {
     browser=spawn(await chromePath(),chromeArgs(profile),{stdio:['ignore','ignore','pipe','pipe','pipe']});
     browser.on('error', e=>process.stderr.write(`Chrome spawn: ${e.message}\n`));
     cdp=cdpProtocol(browser);
-    const target=await cdp.send('Target.createTarget',{url:'about:blank'});
+    let target;
+    try { target=await cdp.send('Target.createTarget',{url:'about:blank'},undefined,45000); }
+    catch(e) { e.message+=` (Chrome exit=${browser.exitCode} signal=${browser.signalCode}; stderr tail: ${JSON.stringify(cdp.stderr())})`; throw e; }
+    deadline=Date.now()+85000;  // the journey budget starts once the browser answers
     session=(await cdp.send('Target.attachToTarget',{targetId:target.targetId,flatten:true})).sessionId;
     const send=(method,params={})=>cdp.send(method,params,session);
     await send('Page.enable'); await send('Runtime.enable'); await send('Debugger.enable');

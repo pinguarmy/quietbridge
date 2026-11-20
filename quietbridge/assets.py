@@ -557,11 +557,15 @@ class SetupDownloads:
             if free is not None and free < needed + 50 * 1024 * 1024:
                 raise DownloadError(f"Not enough disk space in {probe}: about {needed / 1e9:.2f} GB is "
                                     "needed. Free some space, then try again.")
-        for asset in disk["missing"]:
+        # Resolve every destination once, when the job starts: a later change of the
+        # models folder (an override, or a test restoring it) must never redirect a
+        # running download into another directory.
+        targets = [(asset, asset.path()) for asset in disk["missing"]]
+        for asset, destination in targets:
             def report(count, name=asset.name):
                 with self._lock:
                     self._progress[group_id] = (name, count)
-            self._fetch(asset, progress=report, cancel=cancel)
+            self._fetch(asset, path=destination, progress=report, cancel=cancel)
             if cancel.is_set():
                 raise DownloadCancelled(asset.name)
         return True

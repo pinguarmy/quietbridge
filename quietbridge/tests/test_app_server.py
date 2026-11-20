@@ -46,8 +46,28 @@ class FakeRun:
         return subprocess.CompletedProcess(args, 0, self.stdout, b"")
 
 
+@pytest.fixture(autouse=True)
+def close_download_workers(monkeypatch):
+    """Join every download worker before the temporary models folder is undone."""
+    created = []
+    original = SetupDownloads.__init__
+
+    def tracking(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        created.append(self)
+
+    monkeypatch.setattr(SetupDownloads, "__init__", tracking)
+    yield
+    for manager in created:
+        manager.close(timeout=10)
+
+
 @pytest.fixture
 def isolated(tmp_path, monkeypatch):
+    # Small stand-in sizes: extending a file to a gigabyte writes real zeros on Windows.
+    import dataclasses
+    monkeypatch.setattr(assets, "LIPS_ASSETS", tuple(
+        dataclasses.replace(a, size=min(a.size, 4096), min_bytes=min(a.min_bytes, 512)) for a in assets.LIPS_ASSETS))
     monkeypatch.setenv("QUIETBRIDGE_DATA_ROOT", str(tmp_path / "data"))
     monkeypatch.setattr(paths, "MODELS", str(tmp_path / "models"))
     monkeypatch.setenv("QUIETBRIDGE_GESTURE_MODEL", str(tmp_path / "cache" / "gesture.task"))
@@ -111,12 +131,12 @@ class Fetcher:
         self.gate.set()
         self.calls = []
 
-    def __call__(self, asset, progress=None, cancel=None):
+    def __call__(self, asset, path=None, progress=None, cancel=None):
         self.calls.append(asset.name)
         while not self.gate.wait(0.01):
             if cancel.is_set():
                 raise DownloadCancelled(asset.name)
-        sparse(asset.path(), asset.size)
+        sparse(path or asset.path(), asset.size)
 
 
 def wait_for(predicate, timeout=5):
