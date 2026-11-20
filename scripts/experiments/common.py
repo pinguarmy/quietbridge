@@ -103,6 +103,13 @@ def degrade(idx: list[int], fps_native: float, cond: dict) -> list[int]:
         grid = np.arange(t[0], t[-1] + 1e-9, 1.0 / cond["fps"])
         keep = sorted(set(np.clip(np.searchsorted(t, grid - 0.5 / fps_native), 0, len(idx) - 1).tolist()))
         idx = [idx[i] for i in keep]
+    if cond.get("keep"):
+        # Irregular delivery: each native frame arrives with probability `keep` (0.67 of 29.97 fps ~ 20 fps
+        # on average, intervals of 33/67/100 ms), seeded by the segment's first frame. First/last kept.
+        rng = np.random.default_rng(10_000 + idx[0])
+        mask = rng.random(len(idx)) < cond["keep"]
+        mask[0] = mask[-1] = True
+        idx = [i for i, k in zip(idx, mask) if k]
     if cond.get("gap"):
         t = np.asarray(idx) / fps_native
         mid = (t[0] + t[-1]) / 2
@@ -120,6 +127,12 @@ def rois_for_segment(clip: ClipCache, seg: dict, cond: dict | None = None):
     cond = cond or {}
     idx = degrade(clip.frame_range(seg["start"], seg["end"]), clip.fps, cond)
     ts = [i / clip.fps for i in idx]
+    if cond.get("jitter"):
+        # Timestamp jitter (ms, Gaussian sd) on otherwise correct frames, as browser/camera clocks report
+        # them; kept increasing. Only the resampler sees it.
+        rng = np.random.default_rng(20_000 + idx[0])
+        t = np.asarray(ts) + rng.normal(0.0, cond["jitter"] / 1000.0, len(ts))
+        ts = np.maximum.accumulate(t).tolist()
     if cond.get("resample") == "nearest":  # alternative to the product's searchsorted-left resampling
         t = np.asarray(ts)
         grid = np.arange(t[0], t[-1] + 1e-9, 1.0 / 25)
@@ -150,13 +163,20 @@ def cond_key(cond: dict | None) -> str:
 
 
 # ---------------------------------------------------------------- model
-def make_reader(beam: int = 4, lm_path: str | None = None):
+def make_reader(beam: int = 4, lm_path: str | None = None, lm_mode: str | None = None,
+                personal_weight: float | None = None):
+    """Product LipReader on CPU. With a personal LM: lm_mode "shared" (current default: the personal LM
+    takes a share of the stock LM weight) or "additive" (the behaviour measured in Experiment 5)."""
     import torch
     torch.set_num_threads(int(os.environ.get("QB_EXP_THREADS", "2")))
     from lipflow.vsr import LipReader
     kw = {"beam_size": beam, "personal": False, "device": "cpu"}
     if lm_path:
         kw["personal_lm_path"] = lm_path
+    if lm_mode:
+        kw["personal_lm_mode"] = lm_mode
+    if personal_weight is not None:
+        kw["personal_weight"] = personal_weight
     return LipReader(**kw)
 
 

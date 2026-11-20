@@ -6,7 +6,9 @@ original as an extra scorer, so the decoder still knows general English but lean
 phrasing word by word, not just when picking among finished guesses.
 
 Guard against forgetting: perplexity is measured on your held-out phrases *and* on general text
-before and after; the model is only saved if yours improves and general text doesn't get much worse.
+before and after; the model is only saved if yours improves by at least MIN_RELATIVE_GAIN and general
+text gets no more than MAX_GENERAL_LOSS worse. Perplexity is not recognition quality: compare a
+saved candidate on an independent test session before promoting it.
 """
 from __future__ import annotations
 
@@ -25,20 +27,38 @@ from .vsr import MODELS
 
 from .paths import PERSONAL_LM
 SPM = os.path.join(MODELS, "lm", "unigram5000.model")
-GENERAL_SAMPLE = [  # TED/news-style text, for the forgetting check (from the public-domain test clips)
-    "SINCE THE DAYS OF GEORGE WASHINGTON PRESIDENTS HAVE DELIVERED SOME FORM OF FINAL MESSAGE WHILE IN OFFICE",
-    "A FAREWELL ADDRESS TO THE AMERICAN PEOPLE",
-    "ON TUESDAY NIGHT IN CHICAGO I'LL DELIVER MINE",
-    "I CHOSE CHICAGO NOT ONLY BECAUSE IT'S MY HOMETOWN WHERE I MET MY WIFE AND WE STARTED A FAMILY",
-    "THIS PAST WEEK WE LOST AN AMERICAN ICON AND ONE OF THE MOST INFLUENTIAL FIGURES OF HER TIME",
-    "BORN IN NEW YORK CITY AND RAISED MOSTLY IN CHICAGO NANCY DAVIS GRADUATED FROM SMITH COLLEGE",
-    "AS AN ACTRESS SHE APPEARED IN ELEVEN FILMS",
-    "AND OFF SCREEN SHE STARRED IN A REAL LIFE HOLLYWOOD ROMANCE WITH THE LOVE OF HER LIFE",
-    "I THINK THE MOST IMPORTANT THING IS TO KEEP LEARNING EVERY SINGLE DAY",
-    "WHEN WE STARTED THIS PROJECT NOBODY BELIEVED IT WOULD WORK",
-    "THE QUESTION IS NOT WHETHER WE CAN DO IT BUT WHETHER WE SHOULD",
-    "AND THAT IS WHY I WANT TO TALK TO YOU ABOUT WATER",
+# General English for the forgetting check. Written for this purpose: it must NOT come from the
+# sample clips (samples/2016-03-12.mov, samples/2017-01-07.mov) or any other evaluation material,
+# because then the text a model is later tested on would decide whether a candidate is saved. An
+# earlier version used sentences transcribed from those very clips.
+GENERAL_SAMPLE = [
+    "THE TRAIN TO THE CITY CENTRE LEAVES EVERY TWENTY MINUTES ON WEEKDAYS",
+    "SHE OPENED THE WINDOW TO LET SOME FRESH AIR INTO THE KITCHEN",
+    "MOST OF THE SHOPS ON THIS STREET CLOSE EARLY ON SUNDAY",
+    "WE SHOULD PLANT THE TOMATOES BEFORE THE WEATHER GETS TOO WARM",
+    "HE FORGOT HIS UMBRELLA AND GOT CAUGHT IN THE RAIN ON THE WAY HOME",
+    "THE LIBRARY HAS A QUIET ROOM WHERE STUDENTS CAN READ AND WORK",
+    "CAN YOU TELL ME HOW LONG IT TAKES TO WALK TO THE STATION",
+    "THE DOCTOR SAID I SHOULD DRINK MORE WATER AND SLEEP A LITTLE LONGER",
+    "OUR NEIGHBOURS ARE MOVING TO A SMALLER HOUSE NEAR THE COAST",
+    "THE MEETING HAS BEEN MOVED TO THURSDAY AFTERNOON",
+    "I USUALLY HAVE TEA WITH MILK AND A PIECE OF TOAST FOR BREAKFAST",
+    "THE CHILDREN BUILT A SMALL BRIDGE OUT OF STICKS AND STONES",
+    "PRICES WENT UP AGAIN THIS MONTH AND MANY FAMILIES ARE WORRIED",
+    "PLEASE REMEMBER TO TURN OFF THE LIGHTS WHEN YOU LEAVE THE OFFICE",
+    "THE MUSEUM IS FREE ON THE FIRST SATURDAY OF EVERY MONTH",
+    "SCIENTISTS HAVE FOUND A NEW SPECIES OF FROG IN THE MOUNTAINS",
 ]
+# Saving rule. Perplexity is NOT recognition quality: on the real clips a candidate whose held-out
+# perplexity improved by 1.5 % was saved and then cost 3.3 WER points when decoded (the extra LM
+# weight, not the personal text, caused that: docs/experiments/real-clip-experiments.md, Exp. 5).
+# A candidate is saved only if held-out perplexity improves by at least this fraction (a small
+# validation set moves perplexity by a few percent by chance) ...
+MIN_RELATIVE_GAIN = 0.10
+# ... and general-text perplexity does not rise by more than this factor (forgetting check).
+MAX_GENERAL_LOSS = 1.05
+# A saved candidate still needs a recognition-level comparison on an independent test session
+# (`quietbridge.evaluate_language`) before anyone promotes it.
 
 
 def normalise(line: str) -> list[str]:
@@ -100,7 +120,8 @@ def train(
     epochs: int = 3,
     lr: float = 3e-5,
     bs: int = 32,
-    max_general_loss: float = 1.15,
+    max_general_loss: float = MAX_GENERAL_LOSS,
+    min_relative_gain: float = MIN_RELATIVE_GAIN,
     seed: int = 0,
     phrases: Iterable[str] | None = None,
     validation_phrases: Iterable[str] | None = None,
@@ -170,7 +191,11 @@ def train(
     before = {"yours": perplexity(lm, val, eos, device), "general": perplexity(lm, general, eos, device)}
     opt = torch.optim.AdamW(lm.parameters(), lr=lr, weight_decay=0.01)
     t0 = time.time()
+    # Only an epoch that beats the stock model by the minimum relative gain can be saved.
+    required = before["yours"] * (1.0 - min_relative_gain)
     best, best_state = before["yours"], None
+    best_seen = before["yours"]
+    general_blocked = False
     for ep in range(epochs):
         lm.train()
         for x, t in _batches(tr, eos, bs):
@@ -181,10 +206,16 @@ def train(
             opt.step()
         p_y, p_g = perplexity(lm, val, eos, device), perplexity(lm, general, eos, device)
         print(f"  epoch {ep + 1}: your held-out phrases {p_y:.1f}, general text {p_g:.1f}  ({time.time() - t0:.0f}s)")
-        if p_y < best and p_g <= before["general"] * max_general_loss:
-            best, best_state = p_y, {k: v.detach().cpu().clone() for k, v in lm.state_dict().items()}
+        best_seen = min(best_seen, p_y)
+        if p_y < best and p_y <= required:
+            if p_g <= before["general"] * max_general_loss:
+                best, best_state = p_y, {k: v.detach().cpu().clone() for k, v in lm.state_dict().items()}
+            else:
+                general_blocked = True
     after = {"yours": best, "general": None}
     saved = best_state is not None
+    reason = ("saved" if saved else "general_text_regressed" if general_blocked
+              else "validation_gain_below_minimum")
     if saved:
         if target_path is not None:
             if target_path.exists():
@@ -198,4 +229,8 @@ def train(
         lm.load_state_dict(best_state)
         after["general"] = perplexity(lm, general, eos, device)
     return {"sentences": len(all_sents), "train": len(tr), "val": len(val), "before": before, "after": after,
-            "saved": saved, "seconds": time.time() - t0}
+            "saved": saved, "seconds": time.time() - t0, "reason": reason,
+            "rule": {"min_relative_gain": min_relative_gain, "max_general_loss": max_general_loss,
+                     "best_validation_perplexity_seen": best_seen,
+                     "note": "Perplexity is not recognition quality; compare on an independent test session "
+                             "(quietbridge.evaluate_language) before promoting."}}

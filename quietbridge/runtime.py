@@ -56,7 +56,21 @@ _PER_RESULT_METRICS = (
     "release_to_text_ms", "decode_ms", "lip_capture_fps", "lip_raw_frames", "lip_max_frame_gap_ms",
     "lip_start_ms", "lip_end_ms", "lip_candidate_count", "roi_ms", "encode_ms", "search_ms",
     "lip_model_frames", "lip_repeated_frames", "lip_unused_frames", "lip_dropped_frames",
-    "accepted_source", "accepted_candidate_index", "session_chunk_evidence")
+    "accepted_source", "accepted_candidate_index", "session_chunk_evidence", "capture_quality",
+    "phrase_scoring_ms")
+
+# Capture quality (docs/experiments/real-clip-experiments.md, Experiment 3: stock lip model, one
+# speaker talking aloud, session B, n = 22 sentences; paired WER change against ~30 fps):
+# 20 fps +6.1 points [95 % CI +2.5, +9.8] (A: +5.6 [+2.2, +9.1]), 12 fps +8.7; nothing between
+# 20 and 30 fps was measured. Below the model's 25 fps the resampler must repeat frames, so a
+# result delivered below 24 fps (1 fps of tolerance for timestamp jitter) gets a warning.
+CAPTURE_MIN_FPS = 24.0
+# One 400 ms stall (a ~430 ms frame interval) cost +8.2 [+4.2, +13.1] points and 800 ms +13.3;
+# a 200 ms stall (~230 ms interval) +2.3 [-0.8, +6.4], within noise. Warn from 300 ms between frames.
+CAPTURE_MAX_GAP_MS = 300
+# The frame rate is only judged on windows with at least this many frames (a short window's
+# rate is dominated by its first and last frame times).
+CAPTURE_MIN_FRAMES_FOR_FPS = 10
 
 MAX_QUICK_PHRASES = 50
 MAX_PHRASE_CHARS = 2000
@@ -348,6 +362,7 @@ class Runtime:
         self.session = SessionTranscript()
         self._session_windows = []
         self._session_evidence = []  # text-free per-chunk decoder/capture evidence
+        self._session_scoring = None  # model phrase scores for the last session chunk (no encoder kept)
         self._session_conflict = False
         self.session_signs = []  # Stable events validated when received in this session.
         self.state = {
@@ -363,7 +378,7 @@ class Runtime:
             "camera_error": "", "lip_error": "", "sign_error": "", "error": "",
             "decision": asdict(Decision("", "unavailable", "sign_only", "local")),
             "candidates": [], "candidate_scores": [], "alternatives": [], "phrase_matches": [],
-            "last_sign": None,
+            "last_sign": None, "capture_warning": "",
             "metrics": {}, "last_spoken": "", "last_correction": "", "recording": False,
             "auto_recognition": False,
             "session_active": False, "session_finalizing": False,
@@ -592,13 +607,15 @@ class Runtime:
         # Deliberately outside the runtime lock: camera and state remain responsive.
         return self.cleanup.test()
 
-    def _publish(self, lips, events, now, since=None, cleanup_labels=None, apply_phrases=True):
+    def _publish(self, lips, events, now, since=None, cleanup_labels=None, apply_phrases=True,
+                 phrase_scoring=None):
         if self.state["session_active"] and lips is None and self.session.text:
             lips = LipResult([self.session.text], 0)
         start = time.perf_counter()
         decision = fuse(lips, events, self._fusion_vocabulary, now, since)
         self.revision += 1
         self.confirmed_revision = None
+        self.state["capture_warning"] = ""  # describes one lip result; set again by the lips worker
         self.state["decision"] = asdict(decision)
         self.state["candidates"] = lips.candidates if lips else []
         self.state["candidate_scores"] = lips.candidate_scores if lips else []
@@ -625,7 +642,8 @@ class Runtime:
             self.state["metrics"]["session_chunk_evidence"] = copy.deepcopy(self._session_evidence)
         if apply_phrases:
             self._apply_phrase_suggestions(
-                lips, session=bool(self.state["session_active"] and self._session_windows))
+                lips, session=bool(self.state["session_active"] and self._session_windows),
+                scoring=phrase_scoring)
         self.state["metrics"]["fusion_ms"] = round((time.perf_counter() - start) * 1000, 2)
         self._cleanup_generation += 1
         labels = list(dict.fromkeys(e.label for e in usable_signs(events, self._fusion_vocabulary, now, since)))
@@ -639,7 +657,7 @@ class Runtime:
             "suggestion": "", "latency_ms": 0, "error": "", "source_revision": self.revision,
         }
 
-    def _apply_phrase_suggestions(self, lips=None, session=False):
+    def _apply_phrase_suggestions(self, lips=None, session=False, scoring=None):
         """Offer the person's own phrases behind every recognised alternative.
 
         Never changes the decision text or the order or content of existing
@@ -649,11 +667,23 @@ class Runtime:
         or safety words differ from the displayed text marks the decision as a
         conflict, so the person must choose explicitly.
 
+        Which phrases: when ``scoring`` holds the lip model's scores for this
+        result (``_score_saved_phrases``, computed outside the lock), a phrase
+        is offered only if the model scores it at least as well as its own top
+        text minus ``phrase_match.MODEL_OFFER_MARGIN``, best score first; a
+        phrase the model cannot write (e.g. digits above 20) falls back to the
+        text rule. Without scores (rehearsal, an adapter without scoring, an
+        error, no lip result) the text matcher decides, as before. Every offer's
+        evidence names its ``path``.
+
         Single window: phrases are compared with the lip n-best. Session: with
         the whole accumulated text and its chunk-swapped variants (a phrase
         split across endpointed chunks), and, from two chunks on, with the last
         chunk's n-best, offered as earlier chunks + phrase (like the existing
-        chunk swaps, earlier recognised words are kept).
+        chunk swaps, earlier recognised words are kept). Model scores exist
+        only for the last chunk (its encoder output): they decide the one-chunk
+        session and the last-chunk offers; whole-text offers of a multi-chunk
+        session stay text-only.
         """
         self.state["phrase_matches"] = []
         self.state["metrics"].pop("phrase_match", None)
@@ -667,31 +697,67 @@ class Runtime:
             return
         phrases = self._model_watch.suggestion_phrases()
         evidence = {"enabled": self.phrase_suggestions, "phrases": len(phrases),
-                    "candidates": len(candidates), "already_listed": 0, "offered": []}
+                    "candidates": len(candidates), "already_listed": 0, "offered": [],
+                    "path": "text", "fallback": ""}
         self.state["metrics"]["phrase_match"] = evidence
         if not self.phrase_suggestions or not phrases:
             return
+        if session and scoring is None:
+            scoring = self._session_scoring  # gesture-only republish of the same last chunk
+        model = scoring if isinstance(scoring, dict) and scoring.get("path") == "model" else None
+        scores, unscorable = {}, set()
+        if model is None:
+            evidence["fallback"] = (scoring or {}).get("fallback") or "no_scorer"
+        else:
+            # Scores belong to the phrase list captured when scoring started; a phrase removed
+            # since then is not offered, one added since then is not scored.
+            by_text = model.get("scores", {})
+            for index, phrase in enumerate(phrases):
+                if phrase in by_text:
+                    if by_text[phrase] is None:
+                        unscorable.add(phrase)
+                    else:
+                        scores[index] = by_text[phrase]
+            gaps = [value - model["top_score"] for value in scores.values()]
+            evidence.update(path="model", scored=len(scores), unscorable=len(unscorable),
+                            scoring_ms=model.get("scoring_ms"), top_score=round(model["top_score"], 4),
+                            score_margin=phrase_match.MODEL_OFFER_MARGIN,
+                            best_gap=round(max(gaps), 4) if gaps else None)
         top = decision["text"] or candidates[0]
         existing = list(self.state["alternatives"])
+        multi = bool(session and len(self._session_windows) > 1)
+        scope = "session" if session else "window"
+        offers = []
         matches = phrase_match.match_phrases(candidates, phrases, top=top, existing=existing)
         evidence["already_listed"] = sum(m.already_listed for m in matches)
-        offers = [(m, m.phrase, "session" if session else "window") for m in matches if not m.already_listed]
-        if session and len(self._session_windows) > 1:
+        if model is not None and not multi:
+            offers += [(o.evidence(), o.phrase, scope) for o in phrase_match.model_offers(
+                candidates, phrases, scores, model["top_score"], top=top, existing=existing)]
+            matches = [m for m in matches if m.phrase in unscorable]
+        offers += [({**m.evidence(), "path": "text"}, m.phrase, scope) for m in matches if not m.already_listed]
+        if multi:
             earlier = [selected for selected, _ in self._session_windows[:-1] if selected]
             last_selected, last_candidates = self._session_windows[-1]
             listed = {phrase_match.normalized(text) for text in existing}
-            for m in phrase_match.match_phrases(last_candidates, phrases, top=last_selected):
-                text = " ".join([*earlier, m.phrase])
-                if m.already_listed or phrase_match.normalized(text) in listed:
+            last = []
+            if model is not None:
+                last += [(o.evidence(), o.phrase, o) for o in phrase_match.model_offers(
+                    last_candidates, phrases, scores, model["top_score"], top=last_selected)]
+            last += [({**m.evidence(), "path": "text"}, m.phrase, m)
+                     for m in phrase_match.match_phrases(last_candidates, phrases, top=last_selected)
+                     if not m.already_listed and (model is None or m.phrase in unscorable)]
+            for item, phrase, _ in last:
+                text = " ".join([*earlier, phrase])
+                if phrase_match.normalized(text) in listed:
                     continue
                 differs = phrase_match.sensitive_words(text) != phrase_match.sensitive_words(top)
-                offers.append((replace(m, sensitive_difference=differs), text, "last_chunk"))
+                offers.append(({**item, "sensitive_difference": differs}, text, "last_chunk"))
         offered = []
-        for m, text, scope in offers:
+        for item, text, where in offers:
             if text in existing or text in offered:
                 continue
             offered.append(text)
-            evidence["offered"].append({**m.evidence(), "scope": scope})
+            evidence["offered"].append({**item, "scope": where})
             if len(offered) == phrase_match.MAX_SUGGESTIONS:
                 break
         if not offered:
@@ -702,6 +768,74 @@ class Runtime:
         decision["status"] = "confirmation_needed"
         if any(item["sensitive_difference"] for item in evidence["offered"]):
             decision.update(reason="conflict", matched_signs=[])
+
+    def _score_saved_phrases(self, adapter, result):
+        """Let the lip model score the person's saved phrases for this result.
+
+        Runs in the lips worker OUTSIDE the runtime lock, after ``finish()``
+        and before the result is published, so the scores always belong to
+        the result they are published with; a result cancelled or replaced
+        meanwhile is discarded by the worker's generation checks, scores
+        included. The adapter's held encoder output is released afterwards.
+        Returns the scoring for ``_apply_phrase_suggestions`` or a fallback
+        record; never raises.
+        """
+        try:
+            if not self.phrase_suggestions or result is None:
+                return None
+            candidates = [c for c in result.candidates if isinstance(c, str) and c.strip()]
+            if not candidates:
+                return None
+            scorer = getattr(adapter, "score_phrases", None)
+            if not callable(scorer):
+                return {"path": "text", "fallback": "no_scorer"}
+            phrases = self._model_watch.suggestion_phrases()
+            if not phrases:
+                return None
+            chosen = [phrases[i] for i in phrase_match.phrases_to_score(candidates, phrases)]
+            out = scorer(chosen)
+            if not isinstance(out, dict) or out.get("top_score") is None:
+                return {"path": "text", "fallback": "unavailable"}
+            values = list(out.get("scores") or [])
+            if len(values) != len(chosen):
+                return {"path": "text", "fallback": "unavailable"}
+            return {"path": "model", "top_score": float(out["top_score"]),
+                    "scores": {text: (None if value is None else float(value)) for text, value in zip(chosen, values)},
+                    "scoring_ms": round(float(out.get("scoring_ms") or 0.0), 1)}
+        except Exception as exc:  # scoring is optional: never lose the lip result over it
+            return {"path": "text", "fallback": "error", "error": type(exc).__name__}
+        finally:
+            release = getattr(adapter, "release_scoring", None)
+            if callable(release):
+                try:
+                    release()
+                except Exception:
+                    pass
+
+    def _capture_warning(self, result, dropped):
+        """Plain-language warning when the measured capture probably lost words, plus numbers."""
+        fps = result.capture_fps if result is not None else None
+        gap = result.max_frame_gap_ms if result is not None else None
+        frames = result.raw_frames if result is not None else 0
+        reasons, message = [], ""
+        if dropped:
+            reasons.append("dropped_frames")
+            message = (f"The computer could not keep up and skipped {dropped} camera "
+                       f"picture{'s' if dropped != 1 else ''}, so some words may be missing. "
+                       "Close other busy apps, then try again.")
+        if gap is not None and gap >= CAPTURE_MAX_GAP_MS:
+            reasons.append("frame_gap")
+            message = message or (f"The camera paused for {gap / 1000:.1f} seconds while you were speaking, "
+                                  "so some words may be missing. Close other apps using the camera, "
+                                  "then try again.")
+        if fps is not None and frames >= CAPTURE_MIN_FRAMES_FOR_FPS and fps < CAPTURE_MIN_FPS:
+            reasons.append("low_frame_rate")
+            message = message or (f"The camera sent only {max(1, round(fps))} pictures per second, so some "
+                                  "words may be missing. Close other apps using the camera or move closer "
+                                  "to the light, then try again.")
+        quality = {"capture_fps": fps, "max_frame_gap_ms": gap, "raw_frames": frames, "dropped_frames": dropped,
+                   "min_fps": CAPTURE_MIN_FPS, "max_gap_ms": CAPTURE_MAX_GAP_MS, "reasons": reasons}
+        return message, quality
 
     def _accepted_source(self, text):
         """Compact, text-free provenance of a confirmed alternative."""
@@ -803,6 +937,7 @@ class Runtime:
             self.session.reset()
             self._session_windows.clear()
             self._session_evidence.clear()
+            self._session_scoring = None
             self._session_conflict = False
             self.session_signs.clear()
             self.state["session_gestures"] = []
@@ -913,6 +1048,7 @@ class Runtime:
         self.session.reset()
         self._session_windows.clear()
         self._session_evidence.clear()
+        self._session_scoring = None
         self._session_conflict = False
         self.session_signs.clear()
         self.events.clear()
@@ -1079,8 +1215,11 @@ class Runtime:
                 "dropped_frames": self._window_dropped_frames,
                 "selected": reason}
 
-    def _publish_session(self, result, window_events=None):
+    def _publish_session(self, result, window_events=None, phrase_scoring=None):
         """Append a completed chunk; fuse explicit motion at its own boundary."""
+        if result is not None and result.candidates:
+            # Model phrase scores describe this (now last) chunk only.
+            self._session_scoring = phrase_scoring if isinstance(phrase_scoring, dict) else None
         if window_events is not None:
             now = self.finish_at if self.finish_at is not None else clock_ms()
             decision = fuse(result, window_events, self._fusion_vocabulary, now, self.record_start)
@@ -1118,7 +1257,8 @@ class Runtime:
             self._set_session_alternatives()
         if self._session_conflict and text:
             self.state["decision"].update(status="confirmation_needed", reason="conflict", matched_signs=[])
-        self._apply_phrase_suggestions(session_lips, session=bool(self._session_windows))
+        self._apply_phrase_suggestions(session_lips, session=bool(self._session_windows),
+                                       scoring=self._session_scoring)
         if not self.state["session_active"]:
             self.state["session_finalizing"] = False
 
@@ -1499,20 +1639,28 @@ class Runtime:
                     record_generation = self._record_generation
                 try:
                     result = adapter.finish()
+                    # Outside the lock, bound to this result (see _score_saved_phrases).
+                    scoring = self._score_saved_phrases(adapter, result)
                     with self.lock:
                         if (worker_gen != self._worker_generation
                                 or self.record_start != active_start
                                 or self.record_generation != active_generation
                                 or self.state["phase"] != "decoding"):
-                            continue  # cancelled/changed while inference ran
+                            continue  # cancelled/changed while inference ran (late scores discarded too)
                         if self.state["session_active"] or self.state["session_finalizing"]:
-                            self._publish_session(result, list(self.events) if self._window_motion else None)
+                            self._publish_session(result, list(self.events) if self._window_motion else None,
+                                                  phrase_scoring=scoring)
                         else:
                             events = list(self.events) if self.state["mode"] == "combined" else []
-                            self._publish(result, events, self.finish_at, active_start)
+                            self._publish(result, events, self.finish_at, active_start, phrase_scoring=scoring)
+                        warning, quality = self._capture_warning(result, self._window_dropped_frames)
+                        self.state["capture_warning"] = warning
                         self.state["metrics"].update(decode_ms=result.decode_ms,
                             release_to_text_ms=clock_ms() - released,
                             lip_dropped_frames=self._window_dropped_frames,
+                            capture_quality=quality,
+                            **({"phrase_scoring_ms": scoring["scoring_ms"]}
+                               if isinstance(scoring, dict) and "scoring_ms" in scoring else {}),
                             **getattr(adapter, "last_metrics", {}))
                 except Exception as exc:
                     with self.lock:
@@ -1643,6 +1791,7 @@ class Runtime:
                 self.session.reset()
                 self._session_windows.clear()
                 self._session_evidence.clear()
+                self._session_scoring = None
                 self._session_conflict = False
                 self.session_signs.clear()
                 self.tracking = {"hands": [], "mouth": None}
@@ -1684,7 +1833,8 @@ class Runtime:
                     "camera_error": "", "lip_error": "", "sign_error": "", "error": "",
                     "decision": asdict(Decision("", "unavailable", "sign_only", "local")),
                     "candidates": [], "candidate_scores": [], "alternatives": [], "phrase_matches": [],
-                    "last_sign": None, "metrics": {}, "last_spoken": "", "last_correction": "", "recording": False,
+                    "last_sign": None, "capture_warning": "",
+                    "metrics": {}, "last_spoken": "", "last_correction": "", "recording": False,
                     "auto_recognition": False,
                     "session_active": False, "session_finalizing": False,
                     "session_text": "", "session_chunks": [], "session_gestures": [],

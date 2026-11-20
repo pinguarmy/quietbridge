@@ -128,6 +128,7 @@ class LipsAdapter:
         from lipflow.camera import Recording, face_crop
         import cv2
 
+        self.release_scoring()
         self.recording = Recording(started=time.perf_counter())
         self.record_start_ms = timestamp_ms
 
@@ -217,6 +218,7 @@ class LipsAdapter:
         return True
 
     def cancel(self, timestamp_ms=None):
+        self.release_scoring()
         self.recording = None
         if getattr(self, "_preroll", None) is not None:
             self._preroll.clear()
@@ -231,6 +233,7 @@ class LipsAdapter:
         from lipflow.dictation import clip_problem, rois_for
         rec, self.recording = self.recording, None
         self.last_metrics = {}
+        self.release_scoring()
         if getattr(self, "_preroll", None) is not None:
             self._preroll.clear()
         if rec is None:
@@ -273,6 +276,11 @@ class LipsAdapter:
 
         _sync_encoder(self.reader)
         finished = time.perf_counter()
+        if hasattr(self.reader, "score_texts") and details[0]["text"]:
+            # Kept only until the runtime has scored the saved phrases for THIS utterance
+            # (score_phrases), then released; start/cancel/finish release it too. One encoder
+            # output: about 2 MB for a 30 s utterance.
+            self._scoring = {"encoded": encoded, "top": details[0]["text"]}
         self.last_metrics = {
             "roi_ms": (roi_finished - started) * 1000,
             "encode_ms": (encode_finished - encode_started) * 1000,
@@ -297,5 +305,31 @@ class LipsAdapter:
             max_frame_gap_ms=round(max_gap * 1000) if ts else None,
         )
 
+    def score_phrases(self, phrases):
+        """Score saved phrases against the utterance ``finish()`` just decoded.
+
+        Uses ``LipReader.score_texts``: attention + CTC + LM with the beam
+        search's own weights, length-normalised (nats per token). The decoder's
+        own top text is scored the same way, so the numbers are comparable.
+        Returns ``{"top_score", "scores", "scoring_ms"}`` (``scores[i]`` is None
+        for a phrase the model cannot write, e.g. "112"), or None when no
+        utterance is held. Model log-probabilities, not calibrated probabilities.
+        """
+        held = getattr(self, "_scoring", None)
+        if held is None:
+            return None
+        started = time.perf_counter()
+        results = self.reader.score_texts(held["encoded"], [held["top"], *phrases])
+        if not results or results[0] is None:
+            return None
+        return {"top_score": results[0]["normalized"],
+                "scores": [r["normalized"] if r is not None else None for r in results[1:]],
+                "scoring_ms": (time.perf_counter() - started) * 1000}
+
+    def release_scoring(self):
+        """Forget the held encoder output (bounded memory: one utterance at most)."""
+        self._scoring = None
+
     def close(self):
+        self.release_scoring()
         self.tracker.close()

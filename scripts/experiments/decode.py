@@ -31,6 +31,10 @@ PRESETS = {
     "fps20": [{"fps": 20}],
     # product resampling (searchsorted-left: the first frame at/after each 25 fps tick) vs nearest frame
     "resample": [{"resample": "nearest"}, {"fps": 20, "resample": "nearest"}, {"fps": 12, "resample": "nearest"}],
+    # follow-up: cadences the product sees (browser uploading every frame at ~30 fps with clock jitter; the
+    # old irregular ~20 fps delivery), each with the product resampler and with nearest-frame resampling
+    "cadence": [{"jitter": 4}, {"jitter": 4, "resample": "nearest"}, {"keep": 0.67, "jitter": 4},
+                {"keep": 0.67, "jitter": 4, "resample": "nearest"}],
 }
 
 
@@ -68,7 +72,12 @@ def main() -> None:
     ap.add_argument("--tag", default="stock", help="names the encoder cache and results (change with --vsr-delta)")
     ap.add_argument("--enc-tag", help="encoder cache tag (default: --tag); share it when only the LM changes")
     ap.add_argument("--vsr-delta", help="partial state dict (personal lip model) loaded over the stock model")
-    ap.add_argument("--lm", help="personal LM checkpoint, scored beside the stock LM at weight 0.2 (LipReader)")
+    ap.add_argument("--lm", help="personal LM checkpoint, scored beside the stock LM (LipReader)")
+    ap.add_argument("--lm-mode", choices=["shared", "additive"],
+                    help="personal LM weighting (lipflow.vsr.lm_weights); Experiment 5 used 'additive' "
+                         "(then the only behaviour); default: LipReader's default")
+    ap.add_argument("--personal-weight", type=float,
+                    help="additive: extra weight (0.2); shared: the personal share of the LM weight (0.5)")
     ap.add_argument("--limit", type=int, default=0)
     args = ap.parse_args()
 
@@ -79,9 +88,9 @@ def main() -> None:
     out_dir = os.path.join(args.scratch, "results", "decode", args.tag)
     os.makedirs(out_dir, exist_ok=True)
     summary_all = {"git": C.git_state(), "manifest": args.manifest, "tag": args.tag, "vsr_delta": args.vsr_delta,
-                   "lm": args.lm, "runs": {}}
+                   "lm": args.lm, "lm_mode": args.lm_mode, "personal_weight": args.personal_weight, "runs": {}}
     for beam in args.beam:
-        reader = C.make_reader(beam, args.lm)
+        reader = C.make_reader(beam, args.lm, args.lm_mode, args.personal_weight)
         if args.vsr_delta:
             import torch
             res = reader.model.load_state_dict(torch.load(args.vsr_delta, map_location="cpu", weights_only=True),

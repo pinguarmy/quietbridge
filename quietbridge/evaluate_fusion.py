@@ -193,15 +193,43 @@ def phrase_suggestion_section(rows, phrases):
     """
     if not phrases:
         return {'measured': False, 'reason': 'profile has no saved phrases'}
-    from .phrase_match import rescue_outcome, summarize_rescue
-    outcomes = []
+    from .phrase_match import model_offers, rescue_outcome, summarize_rescue
+    outcomes, model_outcomes = [], []
     for row in rows:
         candidates = [c.get('text', '') for c in row.get('raw_candidates') or [] if isinstance(c, dict)]
         outcome = rescue_outcome(candidates, row['reference'], phrases)
         row['phrase_suggestion'] = outcome
         outcomes.append(outcome)
-    return {'measured': True, 'phrases_source': 'profile lip_prompts', 'phrases': len(phrases),
-            **summarize_rescue(outcomes)}
+        scored = row.get('phrase_model_scores')
+        if scored is not None:
+            # The product's model path: the lip model's own scores decide (see phrase_match.model_offers).
+            offers = model_offers(candidates, phrases, {int(i): s for i, s in scored['scores'].items()},
+                                  scored['top_score'])
+            model_outcome = rescue_outcome(candidates, row['reference'], phrases, offered=offers)
+            row['phrase_suggestion_model'] = model_outcome
+            model_outcomes.append(model_outcome)
+    section = {'measured': True, 'phrases_source': 'profile lip_prompts', 'phrases': len(phrases),
+               **summarize_rescue(outcomes), 'path': 'text'}
+    if model_outcomes and len(model_outcomes) == len(outcomes):
+        # Same rows, same phrases: text-only (as shipped before) and model-scored offers side by side.
+        section['model'] = {'path': 'model', **summarize_rescue(model_outcomes)}
+    else:
+        section['model'] = {'measured': False, 'reason': 'the lip reader cannot score phrases (no score_texts)'}
+    return section
+
+
+def _phrase_model_scores(reader, encoded, candidates, phrases):
+    """Lip-model scores for the phrases the product would score for this result, or None."""
+    from .phrase_match import phrases_to_score
+    texts = [c['text'] for c in candidates if c.get('text')]
+    if not phrases or not texts or not callable(getattr(reader, 'score_texts', None)):
+        return None
+    chosen = phrases_to_score(texts, phrases)
+    results = reader.score_texts(encoded, [texts[0], *(phrases[i] for i in chosen)])
+    if not results or results[0] is None:
+        return None
+    return {'top_score': results[0]['normalized'],
+            'scores': {str(i): r['normalized'] for i, r in zip(chosen, results[1:]) if r is not None}}
 
 
 def evaluate(profile, split, reader, motion=None, *, sign_recognizer=None):
@@ -233,7 +261,10 @@ def evaluate(profile, split, reader, motion=None, *, sign_recognizer=None):
             extra = {**captured, 'sign_decode_ms': decode_ms}
         # MouthCapture stores already resampled model ROIs alongside the longer
         # or shorter raw timestamp sequence. Do not resample them a second time.
-        candidates = reader.beam_search_details(reader.encode(mouth['rois']), nbest=3)
+        encoded = reader.encode(mouth['rois'])
+        candidates = reader.beam_search_details(encoded, nbest=3)
+        phrase_scores = _phrase_model_scores(reader, encoded, candidates, list(getattr(profile, 'lip_prompts', None) or []))
+        del encoded
         lips = LipResult([c['text'] for c in candidates], 0, [c['score'] for c in candidates], mt['start_ms'], mt['end_ms'], mt['raw_frames'], mt['fps'], mt['max_gap_ms'])
         if sign_recognizer is None:
             diagnostic = motion.diagnose(seq)
@@ -253,7 +284,8 @@ def evaluate(profile, split, reader, motion=None, *, sign_recognizer=None):
                      'gesture': diagnostic, 'sign_events': [asdict(e) for e in events], 'decision': asdict(decision),
                      'lips_only': _metric(candidates[0]['text'] if candidates else '', reference),
                      'gestures_only': _metric(gesture_decision.text, reference),
-                     'fusion': _metric(decision.text, reference), 'sequence_timing': st, 'mouth_timing': mt, **extra})
+                     'fusion': _metric(decision.text, reference), 'sequence_timing': st, 'mouth_timing': mt,
+                     **({'phrase_model_scores': phrase_scores} if phrase_scores is not None else {}), **extra})
     def aggregate(name):
         edits = sum(r[name]['edits'] for r in rows)
         words = sum(r[name]['reference_words'] for r in rows)
@@ -316,7 +348,8 @@ def evaluate(profile, split, reader, motion=None, *, sign_recognizer=None):
                    'Cross-split checks cover recording session/trial/pair ids, not what models were trained on; this report does not establish test independence.',
                    'Unknown inputs are labels outside the profile vocabulary other than REST; false emissions count accepted non-REST predictions.',
                    'gesture_classification.recall counts every vocabulary label; gesture_recall_by_text_output separates labels whose entry can produce text.',
-                   'phrase_suggestions counts whether a suggestion was available, not whether the person would choose it.']
+                   'phrase_suggestions counts whether a suggestion was available, not whether the person would choose it; '
+                   'its "model" part uses the lip model\'s own phrase scores (decoder scores, not probabilities).']
     if sign_recognizer is not None:
         decodes = [r['sign_decode_ms'] for r in rows]
         current = sign_recognizer.model_info.get('sha256')

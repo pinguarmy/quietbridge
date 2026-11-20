@@ -53,6 +53,34 @@ MAX_WORDS = 40
 # Set to 0/false/off/no to disable suggestions for this process.
 ENV_SWITCH = "QUIETBRIDGE_PHRASE_SUGGESTIONS"
 
+# --- Model-scored offers (the lip model decides; text distance only prefilters) ----
+# Measured on two public clips of one professional speaker talking aloud
+# (docs/experiments/real-clip-experiments.md, Experiment 2b and the follow-up):
+# scoring a saved sentence under the lip model separates the intended sentence
+# from distinct sentences and from one-word variants far better than the text
+# distance below. Not measured on silent mouthing, short phrases or real users.
+#
+# A profile with at most this many saved phrases has every phrase scored: for
+# so few it is cheaper than prefiltering and cannot miss a phrase whose text the
+# lip candidates got badly wrong.
+SCORE_ALL_PHRASES = 20
+# Larger profiles: at most this many phrases, the nearest by look-alike word
+# edit distance to any lip candidate, are scored. Bounds the added latency
+# (follow-up latency table: ~0.2-0.4 s for 20 phrases on 4 CPU threads).
+SCORE_MAX_PHRASES = 20
+# Prefilter ceiling: a phrase whose normalised distance to every candidate is
+# above this is never scored. Deliberately much looser than MAX_DISTANCE_RATIO
+# (at 12 fps no top-1 was exact, yet model scoring still found the sentence).
+PREFILTER_MAX_RATIO = 0.75
+# Offer a scored phrase only if its length-normalised model score (nats per
+# token) is at least the score of the decoder's own top text, computed the same
+# way, minus this margin. Chosen on session A only, by a rule fixed before the
+# sweep (largest rescue rate with offers on already-correct results <= 10 % and
+# offers for unsaved sentences <= 5 %); measured on 9-35-word sentences, where
+# one wrong word moves the score by ~0.3-0.6 nats/token. Short phrases spread a
+# word's cost over fewer tokens, so this margin is stricter for them (unmeasured).
+MODEL_OFFER_MARGIN = 0.2
+
 _DIGITS = {str(i): w for i, w in enumerate(
     ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
      "fifteen sixteen seventeen eighteen nineteen twenty").split())}
@@ -112,27 +140,36 @@ def lookalike(a: str, b: str) -> bool:
     return bool(va) and va == _viseme_string(b)
 
 
-def word_cost(a: str, b: str) -> float:
+def _pair(a: str, b: str) -> tuple[float, bool]:
+    """(substitution cost, is a look-alike substitution). The flag is tracked
+    separately from the cost so that a LOOKALIKE_COST of 1.0 (no discount)
+    does not turn every ordinary substitution into a "look-alike"."""
     if a == b:
-        return 0.0
-    return LOOKALIKE_COST if lookalike(a, b) else 1.0
+        return 0.0, False
+    if lookalike(a, b):
+        return LOOKALIKE_COST, True
+    return 1.0, False
+
+
+def word_cost(a: str, b: str) -> float:
+    return _pair(a, b)[0]
 
 
 def _align(phrase: list[str], candidate: list[str]):
     """Word edit distance with look-alike substitutions; returns
     (cost, exact_aligned, lookalike_aligned)."""
     n, m = len(phrase), len(candidate)
-    costs = [[word_cost(p, c) for c in candidate] for p in phrase]
+    pairs = [[_pair(p, c) for c in candidate] for p in phrase]
     dp = [[float(i + j) if i == 0 or j == 0 else 0.0 for j in range(m + 1)] for i in range(n + 1)]
     for i in range(1, n + 1):
         for j in range(1, m + 1):
-            dp[i][j] = min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + costs[i - 1][j - 1])
+            dp[i][j] = min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + pairs[i - 1][j - 1][0])
     i, j, exact, look = n, m, 0, 0
     while i > 0 and j > 0:
-        cost = costs[i - 1][j - 1]
-        if dp[i][j] == dp[i - 1][j - 1] + cost:  # costs are 0, 0.5, 1: exact in binary
+        cost, is_lookalike = pairs[i - 1][j - 1]
+        if dp[i][j] == dp[i - 1][j - 1] + cost:  # costs are multiples of 0.5 by default: exact in binary
             exact += cost == 0
-            look += cost == LOOKALIKE_COST
+            look += is_lookalike
             i, j = i - 1, j - 1
         elif dp[i][j] == dp[i - 1][j] + 1:
             i -= 1
@@ -261,17 +298,19 @@ def suggest(candidates, phrases, *, top=None, existing=(), limit=MAX_SUGGESTIONS
 
 # --- Offline evaluation hook (no accuracy claim without paired data) ---------
 
-def rescue_outcome(candidates, reference, phrases, *, top=None) -> dict:
+def rescue_outcome(candidates, reference, phrases, *, top=None, offered=None) -> dict:
     """Would a phrase suggestion have rescued this recording?
 
     Compares the lip top-1 text with "top-1 or any offered phrase suggestion"
     against the intended ``reference``, using ``normalized`` (lower-case words,
     no punctuation, 0-20 spelt out) for equality. The reference is only used
-    for scoring, never for choosing suggestions.
+    for scoring, never for choosing suggestions. ``offered`` (``PhraseMatch``
+    or ``ModelOffer`` objects) evaluates offers decided elsewhere, e.g. by
+    ``model_offers``; by default the text matcher (``suggest``) decides.
     """
     texts = [c for c in (candidates or []) if isinstance(c, str) and c.strip()]
     ref = normalized(reference or "")
-    offered = suggest(candidates, phrases, top=top)
+    offered = suggest(candidates, phrases, top=top) if offered is None else list(offered)
     top1_exact = bool(texts) and normalized(texts[0]) == ref
     suggestion_exact = any(normalized(m.phrase) == ref for m in offered)
     return {
@@ -322,3 +361,112 @@ def summarize_rescue(outcomes) -> dict:
                 "Thresholds are uncalibrated engineering defaults; do not tune them on the final-test session.",
                 "Exact match uses lower-case words without punctuation; it is not the WER normalisation.",
                 "A suggestion only helps if the person notices and chooses it; this counts availability, not use."]}
+
+
+# --- Model-scored offers -----------------------------------------------------
+
+def _prefilter_distance(phrase_keys, candidate_keys) -> float | None:
+    n, m = len(phrase_keys), len(candidate_keys)
+    if not n or not m or n > MAX_WORDS or m > MAX_WORDS:
+        return None
+    if abs(n - m) / max(n, m) > PREFILTER_MAX_RATIO:  # the cost is at least |n - m|
+        return None
+    cost, _, _ = _align(phrase_keys, candidate_keys)
+    ratio = cost / max(n, m)
+    return ratio if ratio <= PREFILTER_MAX_RATIO else None
+
+
+def phrases_to_score(candidates, phrases, *, existing=()) -> list[int]:
+    """Indices of the saved phrases the lip model should score for this result.
+
+    Every distinct, non-empty phrase (first ``MAX_PHRASES``) when there are at
+    most ``SCORE_ALL_PHRASES``; otherwise the ``SCORE_MAX_PHRASES`` nearest by
+    look-alike word edit distance to any of the first ``MAX_CANDIDATES``
+    candidates, within ``PREFILTER_MAX_RATIO``. Phrases already shown as a
+    candidate or alternative are skipped (they would never be offered). Nothing
+    without a non-empty candidate.
+    """
+    keyed_candidates = [[k for k, _ in words(c)] for c in (candidates or [])[:MAX_CANDIDATES]
+                        if isinstance(c, str) and c.strip()]
+    keyed_candidates = [keys for keys in keyed_candidates if keys]
+    if not keyed_candidates:
+        return []
+    listed = {" ".join(keys) for keys in keyed_candidates}
+    listed |= {normalized(text) for text in existing if isinstance(text, str)}
+    distinct, seen = [], set()
+    for index, phrase in enumerate(list(phrases or [])[:MAX_PHRASES]):
+        if not isinstance(phrase, str) or not phrase.strip():
+            continue
+        keys = [k for k, _ in words(phrase)]
+        norm = " ".join(keys)
+        if not keys or norm in seen or norm in listed:
+            continue
+        seen.add(norm)
+        distinct.append((index, keys))
+    if len(distinct) <= SCORE_ALL_PHRASES:
+        return [index for index, _ in distinct]
+    ranked = []
+    for index, keys in distinct:
+        found = [d for d in (_prefilter_distance(keys, c) for c in keyed_candidates) if d is not None]
+        if found:
+            ranked.append((min(found), index))
+    ranked.sort()
+    return [index for _, index in ranked[:SCORE_MAX_PHRASES]]
+
+
+@dataclass(frozen=True)
+class ModelOffer:
+    """A saved phrase the lip model scored as competitive with its own top text.
+
+    ``score_gap`` = phrase score minus top-text score, both length-normalised
+    log-probabilities under the same lip model (nats per token; > 0: the model
+    prefers the phrase). A decoder score, never a probability.
+    """
+    phrase: str
+    phrase_index: int
+    score_gap: float
+    phrase_words: int
+    already_listed: bool
+    sensitive_difference: bool = False
+
+    def evidence(self) -> dict:
+        return {"phrase_index": self.phrase_index, "score_gap": round(self.score_gap, 4),
+                "phrase_words": self.phrase_words, "already_listed": self.already_listed,
+                "sensitive_difference": self.sensitive_difference, "path": "model"}
+
+
+def model_offers(candidates, phrases, phrase_scores, top_score, *, top=None, existing=(),
+                 margin=None, limit=MAX_SUGGESTIONS) -> list[ModelOffer]:
+    """Phrases to offer, decided by the lip model's own scores.
+
+    ``phrase_scores`` maps a phrase index (into ``phrases``) to its
+    length-normalised model score; ``top_score`` is the decoder's top text
+    scored the same way. A phrase is offered only when ``score >= top_score -
+    margin`` (default ``MODEL_OFFER_MARGIN``), it is not already a candidate or
+    alternative, and there is a non-empty candidate. Best score first, at most
+    ``limit`` (never more than ``MAX_SUGGESTIONS``). ``sensitive_difference``
+    compares negation/number/safety words with ``top`` (the displayed text,
+    default: first candidate). Nothing is offered when ``top_score`` is missing.
+    """
+    texts = [c for c in (candidates or []) if isinstance(c, str) and c.strip()]
+    if not texts or top_score is None or not math.isfinite(top_score):
+        return []
+    margin = MODEL_OFFER_MARGIN if margin is None else margin
+    top_text = top if isinstance(top, str) and top.strip() else texts[0]
+    top_sensitive = sensitive_words(top_text)
+    listed = {normalized(t) for t in [*texts, *existing] if isinstance(t, str)}
+    phrases = list(phrases or [])
+    offers, seen = [], set()
+    for index, score in sorted(((i, s) for i, s in (phrase_scores or {}).items()
+                                if s is not None and math.isfinite(s)), key=lambda item: (-item[1], item[0])):
+        if not (0 <= index < len(phrases)) or not isinstance(phrases[index], str):
+            continue
+        phrase = phrases[index].strip()
+        norm = normalized(phrase)
+        if not norm or norm in seen or score < top_score - margin:
+            continue
+        seen.add(norm)
+        offers.append(ModelOffer(phrase=phrase, phrase_index=index, score_gap=score - top_score,
+                                 phrase_words=len(norm.split()), already_listed=norm in listed,
+                                 sensitive_difference=sensitive_words(phrase) != top_sensitive))
+    return [o for o in offers if not o.already_listed][:max(0, min(limit, MAX_SUGGESTIONS))]

@@ -388,3 +388,196 @@ for s in A B; do .venv/bin/python scripts/experiments/decode.py --manifest $SCRA
 
 Each process holds ~3 GB (training ~5 GB); on a 15 GB box run at most two or three at once.
 Decodes resume from their per-segment JSONL files if interrupted.
+
+## Follow-up (2026-11-20, later the same day): model-scored phrase offers, LM weight, capture warning
+
+Same box, same two clips, same 49 segments, same stock model (beam 4). Scripts: `score_latency.py`,
+`model_offers.py`, `e2e_runtime.py` (new) and `decode.py --lm-mode/--preset cadence` (extended). Session
+B has now been used as a test set by several experiments, so it is **no longer a fresh test set**; in
+this follow-up every choice was made on A and B was evaluated once per frozen design. Everything below
+is one professional speaker talking aloud, 27 + 22 sentences of 9-35 words; "on these clips" applies
+to every number. No silent mouthing, no short phrases, no real users.
+
+### F1. Lip-model phrase scoring in the product
+
+What changed: `LipReader.score_texts(enc, texts)` (`lipflow/vsr.py`) forces each text through the
+attention decoder, the CTC branch and the beam's LM scorer(s), combined with the beam search's own
+weights (0.9·att + 0.1·CTC + 0.3·LM, length bonus 0) and divided by tokens + `<eos>` — the variant
+validated in Experiment 2b. The decoder's own top text is scored the same way; on three B segments its
+teacher-forced total equalled the beam's score to 10⁻³ (a real-model test asserts this). After a decode,
+`LipsAdapter` holds that one utterance's encoder output (≈ 2 MB for 30 s); the lips worker, outside the
+runtime lock and before publishing, asks it to score the profile's phrases, then releases it. Which
+phrases: all of them when the profile has ≤ 20 (`SCORE_ALL_PHRASES`), otherwise the 20 nearest by
+look-alike word edit distance within a loose ceiling of 0.75 (`SCORE_MAX_PHRASES`,
+`PREFILTER_MAX_RATIO`; the offer threshold of the text matcher is 0.25). Offer rule
+(`phrase_match.model_offers`): a phrase is offered only if its normalised score ≥ top-text score −
+`MODEL_OFFER_MARGIN` (0.2 nats/token), best score first, at most 2, never one already shown. Phrases
+the model cannot write (digits above 20, non-ASCII letters) fall back to the text rule. Fallback to the
+old text-only behaviour, recorded in `metrics.phrase_match.fallback`, when there is no scorer
+(rehearsal, fakes), the scorer returns nothing, or it raises.
+
+**Latency** (`score_latency.py`, 8 B segments of 5-9 s (median 165 encoder frames), CPU; median and
+max ms for scoring the top text + N phrases; "cold" = the phrases' LM scores not yet cached, i.e. the
+first utterance after start; "warm" = every later one; the top text's LM score comes from the beam):
+
+| phrases | 1 thread, long (17 words) cold / warm | 4 threads, long cold / warm | 1 thread, short (4 words) cold / warm | 4 threads, short cold / warm |
+|---|---|---|---|---|
+| 2 | 224 (267) / 138 (185) | 121 (327) / 85 (826) | 167 (223) / 116 (177) | 69 (107) / 57 (183) |
+| 8 | 646 (769) / 382 (474) | 489 (1020) / 202 (314) | 294 (464) / 228 (413) | 124 (336) / 97 (197) |
+| 20 | 1419 (1782) / 778 (1002) | 933 (1783) / 462 (746) | 643 (1142) / 482 (886) | 233 (524) / 192 (434) |
+| 50 | 3452 (4081) / 1849 (2291) | 2455 (2909) / 762 (1368) | 1099 (1466) / 692 (1139) | 413 (826) / 230 (952) |
+
+The cost is the 6-layer, 768-wide decoder over every phrase token (batched; the source-attention
+projections are already shared), ~37 ms per 17-word phrase on one thread, ~12 ms per 4-word phrase;
+batching did not get it "far below 45 ms per phrase" for long sentences. Timings were taken with other
+work on the box (4-thread maxima are noisy). Hence the cap of 20 scored phrases: worst case added
+before the text appears ≈ 1.8 s (20 long phrases, first utterance, one thread), typical ≈ 0.2-0.5 s
+(warm, 4 threads); in the end-to-end run below it was 47-96 ms because the prefilter passed 0-4 phrases.
+Prefilter (pure Python, outside the lock): 40 ms for 100 short phrases, 184 ms for 100 twenty-word ones.
+
+**Offers** (`model_offers.py`). Product functions on the cached decodes/encoder outputs. Scenarios per
+segment: *open* = a random half of the segment's session + all sentences of the other session (10
+splits); *var1_out* = one constructed one-word variant (2 substitutions, 2 deletions, 2 inserted NOT;
+one list each) + the other session; *var_in* = the reference + its 6 variants + the other session;
+*var_out* = the 6 variants only + the other session. "Rescue" = the intended sentence is offered when it
+is saved and top-1 is wrong (of those, "possible" = it was not already one of the 3 lip candidates).
+Rows / segments in brackets; CI = segment bootstrap.
+
+Selection rule, fixed before the sweep: the largest open-set rescue on A such that every scenario's
+already-correct results get an offer in ≤ 10 % of rows and unsaved open-set sentences get one in ≤ 5 %;
+ties → the smaller margin. Operating curve on **A (selection)**:
+
+| margin | open rescue % (90/18) | rescue possible % (51/11) | correct top-1 gets an offer: var1_out (54/9) / var_in (9/9) | wrong offer, top-1 wrong, var_in (18/18) | best-first when ref + variants saved (18/18) |
+|---|---|---|---|---|---|
+| 0.0 | 2.2 [0.0, 7.5] | 3.9 | 0 / 0 | 0 | 5.6 |
+| 0.1 | 25.6 [6.8, 47.2] | 45.1 | 0 / 0 | 0 | 27.8 |
+| **0.2 (chosen)** | 31.1 [10.3, 53.3] | 54.9 [25.0, 83.6] | 0 / 0 | 0 | 33.3 [11.1, 55.6] |
+| 0.3 | 31.1 | 54.9 | 0 / 0 | 16.7 | 33.3 |
+| 0.5 | 52.2 [28.3, 75.9] | 92.2 | 11.1 / 55.6 | 55.6 | 55.6 |
+| 1.0 | 52.2 | 92.2 | 63.0 / 100 | 94.4 | 55.6 |
+| text matcher (before) | 45.6 [22.6, 69.0] | 80.4 | **100 / 100** | 88.9 | 50.0 |
+
+No margin offered anything for unsaved distinct sentences (open false offers 0 % everywhere, as before).
+
+**B, once, at the frozen margin 0.2** (n = 22 segments; only 3 have an exact top-1):
+
+| B (test, used before) | model-scored (0.2) | text matcher (before) |
+|---|---|---|
+| open rescue (100/19) | 54.0 [31.5, 76.5] | 76.0 [53.5, 94.5] |
+| rescue when possible (82/16) | 65.9 [40.0, 87.3] | 92.7 [77.2, 100] |
+| unsaved sentence gets an offer (110/22) | 0.0 | 0.0 |
+| **correct top-1 gets a one-word-variant offer**, var1_out (17/3) / var_in (3/3) / var_out (3/3) | **0 / 0 / 0** | 100 / 100 / 100 |
+| wrong variant offered when top-1 wrong, var1_out (114/19) | 0.0 | 71.1 [51.7, 89.5] |
+| ref + 6 variants saved, top-1 wrong: ref offered first (19/19) / a variant offered (19/19) | 52.6 [31.6, 73.7] / 0.0 | 73.7 [52.6, 89.5] / 78.9 [57.9, 94.7] |
+| 12 fps (A chose 0.2 again): open rescue (110/22) | 32.7 [13.8, 54.4] | 64.5 [42.2, 82.9] |
+| 12 fps: wrong variant offered, var1_out (131/22) | 0.0 | 57.3 [37.4, 75.6] |
+
+What it shows: gating on the model's own top text removes both failure modes of the text matcher —
+on these clips no correct result gained a one-word-variant offer (0 of 23 rows on B, 0 of 72 on A;
+text matcher: all of them) and no wrong variant was offered beside a wrong result — **but it rescues
+fewer wrong results** (B: 54 % vs 76 %; at 12 fps 33 % vs 65 %). The reason is visible per segment on
+A: when top-1 is wrong, the saved reference scores 0.07-0.48 nats/token *below* the decoded text;
+when top-1 is right, one-word variants score 0.27-0.62 below it. The two ranges overlap, so no single
+margin keeps both, and the selection rule favoured not asking people to confirm correct results.
+Margin 0.5 would recover the text matcher's rescue rate on A at the cost of offering a variant beside
+11-56 % of correct results. What it does not show: short phrases (a one-word change moves a 4-word
+phrase's per-token score ~4x more than a 17-word sentence's, so 0.2 is effectively stricter there;
+unmeasured), silent mouthing, lists of hundreds of similar phrases.
+
+**End to end** (`e2e_runtime.py`): the product `Runtime` (browser-camera mode, mode "lips") with the
+real `LipsAdapter`, fed the B clip's own 640×360 frames at native 29.97 fps timestamps on a virtual
+clock; 34 saved phrases (B000's sentence; one one-word variant of B009's; B005's sentence and 4
+variants; all 27 A sentences). State the page received:
+
+| segment | top-1 | before (text matcher) offers | after: `phrase_matches` | evidence (path, scored, best gap) | scoring ms / decode ms | `capture_warning` |
+|---|---|---|---|---|---|---|
+| B000 (saved) | exact | none | none | model, 0 scored (sentence already listed) | 60 / 2310 | "" |
+| B009 (only a variant saved) | exact | the variant | **none** | model, 1, −0.67 | 96 / 2948 | "" |
+| B005 (sentence + 4 variants saved) | wrong; sentence is candidate 3 | 2 variants | 1 variant (gap −0.12) | model, 4, −0.12 | 95 / 1471 | "" |
+| B012, every 2nd frame (15 fps) | wrong | none | none | model, 0 | 47 / 1799 | "The camera sent only 15 pictures per second, so some words may be missing. …" |
+
+B000 decoded exactly through the product path (the experiment cache had "JUST THE DAYS…": different
+crop path and pre-roll). B005 shows a limit of the rule: the offer is compared with top-1, not with the
+best lip candidate, so a variant can still be offered when the right sentence is already shown as
+candidate 3 (in the cached-decode simulation this did not happen; here it did once).
+
+### F2. Personal language model weight
+
+`lipflow/vsr.py` now *shares* the LM weight: with a personal LM the stock LM gets 0.15 and the personal
+LM 0.15 (`PERSONAL_LM_SHARE = 0.5`, an a-priori split, not tuned), total 0.3 as without one
+(`lm_weights()`; the old additive behaviour is `personal_lm_mode="additive"`, experiments only). B,
+beam 4, same visual model, personal LM = the Experiment 5 candidate (trained on A's text with the
+recipe as committed then), n = 22, 427 words:
+
+| decoding | WER % [95 % CI] | paired Δ vs stock |
+|---|---|---|
+| stock LM only | 13.6 [8.9, 18.8] | — |
+| additive: + personal LM 0.2 (Exp. 5) | 16.9 [11.6, 22.9] | +3.3 [+0.7, +6.5] |
+| additive: + stock-LM copy 0.2 (control, Exp. 5) | 17.1 [11.7, 23.6] | +3.5 [+0.8, +6.7] |
+| **shared: stock 0.15 + personal 0.15** | 13.6 [8.9, 18.8] | +0.0 [+0.0, +0.0] |
+| shared: stock 0.15 + stock-LM copy 0.15 (control) | 13.6 | +0.0 (scores equal to 10⁻⁵) |
+
+Shared vs additive, paired: −3.3 [−6.5, −0.7]. The shared personal LM changed no top-1 on any B
+segment: it is as good as stock and shows no gain — this personal LM barely differs from stock
+(validation perplexity −1.5 %), and the case it is meant for (a person repeating their own phrases)
+is not in this material. The product therefore keeps loading an explicitly promoted personal LM, now
+without extra weight; the saving rule below would not have saved this candidate at all.
+
+`lipflow/train_lm.py`: `GENERAL_SAMPLE` is now 16 written general-English sentences that are not from
+the clips (a test checks there is no shared 4-word run with the old clip lines). A candidate is saved
+only if held-out perplexity improves by ≥ 10 % (`MIN_RELATIVE_GAIN`) and general-text perplexity rises
+by ≤ 5 % (`MAX_GENERAL_LOSS`; callers may pass their own — `quietbridge.signs.train_language` still
+passes 1.15). The result records the reason and states that perplexity is not recognition quality.
+
+### F3. Capture warning and the resampler
+
+`state.capture_warning` (runtime) is set per lip result when the delivered rate is below 24 fps
+(`CAPTURE_MIN_FPS`; 20 fps cost +6.1 on B and +5.6 on A; nothing between 20 and 30 was measured, and
+below 25 fps the model sequence must repeat frames), when a frame interval is ≥ 300 ms
+(`CAPTURE_MAX_GAP_MS`; a 400 ms stall cost +8.2, 200 ms +2.3 within noise), or when frames were dropped
+from the window; it is cleared by the next result, and `metrics.capture_quality` carries the numbers.
+
+Resampler, A only (n = 27), paired WER Δ:
+
+| input cadence | vs undegraded 29.97 fps | nearest-frame minus product rule |
+|---|---|---|
+| every frame at 29.97 fps, timestamps jittered 4 ms (sd) | +2.1 [−0.2, +4.9] | +0.2 [−2.1, +2.7] |
+| irregular ~20 fps (each frame kept with p = 0.67) + 4 ms jitter | +5.6 [+2.2, +9.6] (= regular 20 fps: +0.0 [−3.8, +4.0]) | +0.9 [−2.6, +4.4] |
+
+A does not support changing the resampler, so it is unchanged and B was not decoded for it. Irregular
+~20 fps costs as much as regular 20 fps, which supports the 24 fps warning. 4 ms of timestamp jitter
+alone may cost about 2 points (CI touches 0); worth checking with real browser timestamps.
+
+### Possible product issues found in this follow-up
+
+- **Fixed:** espnet's `MultiHeadedAttention` caches the decoder's source-attention projections keyed by
+  the encoder output's data pointer and length (`espnet/nets/pytorch_backend/transformer/attention.py`,
+  `_mem_kv`). On CPU a freed tensor's address is reused by the next same-size allocation (checked), and
+  a deliberately reused buffer decoded the second of two same-length utterances as the first one's
+  text. `LipReader` now clears the cache before every search and scoring pass (a real-model test
+  covers it); the espnet code itself is unchanged. Re-check of earlier results: every segment whose
+  encoder length repeated an earlier one in the same run (21 segment-conditions across A/B base, 12, 20
+  fps, 400 ms gap and the new cadences) was decoded again with the fix; all 3 candidates were identical,
+  so no reported number changes. In the product it can hit two consecutive utterances of equal frame
+  count (e.g. repeated takes of one phrase).
+- `quietbridge/phrase_match.py`: look-alike substitutions are now counted by a flag, so
+  `LOOKALIKE_COST = 1.0` no longer turns every substitution into a look-alike (regression test).
+- `quietbridge.signs.train_language` passes `--max-general-loss 1.15` by default, looser than the new
+  5 % default of `lipflow/train_lm.py` (outside this change's scope).
+
+### Rerun the follow-up
+
+```sh
+R=/path/to/r5; export QB_EXP_SCRATCH=$SCRATCH QB_EXP_THREADS=3
+.venv/bin/python scripts/experiments/score_latency.py --out $R/latency_long.json
+.venv/bin/python scripts/experiments/score_latency.py --short --out $R/latency_short.json
+.venv/bin/python scripts/experiments/model_offers.py --out-dir $R/offers --score A B --select A
+.venv/bin/python scripts/experiments/model_offers.py --out-dir $R/offers --evaluate B          # once
+.venv/bin/python scripts/experiments/model_offers.py --out-dir $R/offers --cond fps12 --score A B --select A
+.venv/bin/python scripts/experiments/model_offers.py --out-dir $R/offers --cond fps12 --evaluate B
+.venv/bin/python scripts/experiments/decode.py --manifest $SCRATCH/manifest/B.jsonl --lm $SCRATCH/models/lm_A.pth --lm-mode shared --tag plmA_shared --enc-tag stock
+.venv/bin/python scripts/experiments/decode.py --manifest $SCRATCH/manifest/B.jsonl --lm $SCRATCH/models/lm_control.pth --lm-mode shared --tag lmcontrol_shared --enc-tag stock
+.venv/bin/python scripts/experiments/decode.py --manifest $SCRATCH/manifest/A.jsonl --preset cadence
+.venv/bin/python scripts/experiments/e2e_runtime.py --session B --segments B000 B009 B005 B012 --keep-every 1 1 1 2 --out $R/e2e/e2e_B.json
+.venv/bin/python scripts/experiments/report.py --pair plmA/B__base__beam4 plmA_shared/B__base__beam4
+```
