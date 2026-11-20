@@ -216,6 +216,9 @@
 .preview-badge { position: absolute; z-index: 1; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; background: var(--surface); color: var(--ink); box-shadow: var(--shadow-1); }
 .preview-status { top: var(--s-3); left: var(--s-3); }
 .hands-status { right: var(--s-3); bottom: var(--s-3); }
+.camera-rate { top: var(--s-3); right: var(--s-3); max-width: calc(50% - 18px); }
+.preview-badge.badge-warn { background: var(--warn-soft); color: var(--warn-ink); }
+.camera-rate-note:empty { display: none; }
 .preview.live .preview-status::before { background: var(--danger); opacity: 1; }
 
 .capture-controls { display: flex; flex-wrap: wrap; gap: var(--s-2); }

@@ -114,7 +114,7 @@
         <p id="component-errors" class="callout callout-warn component-errors"></p>
         <p class="facts-heading">Timing and input</p>
         <dl class="facts"><div><dt>Release to text</dt><dd id="metric-release">—</dd></div><div><dt>Lip decode</dt><dd id="metric-decode">—</dd></div><div><dt>Local fusion</dt><dd id="metric-fusion">—</dd></div><div><dt>Camera input</dt><dd id="metric-camera-fps">—</dd></div><div><dt>Recorded lip rate</dt><dd id="metric-lip-fps">—</dd></div><div><dt>Raw lip frames</dt><dd id="metric-frames">—</dd></div><div><dt>Largest frame gap</dt><dd id="metric-gap">—</dd></div></dl>
-        <p class="hint">Frame rates describe actual input, not the model's 25 fps target. Preview mode does not measure vision performance. Speech timing measures dispatch, not audible onset.</p>
+        <p class="hint">Camera input is the rate of pictures that actually arrived: the browser sends each new camera picture, up to 30 per second, and the lip model resamples them to 25 fps without recreating missing motion. In tests on recorded speech, lip reading was measurably worse below about 20 per second or with a 400 ms gap. Preview mode does not measure vision performance. Speech timing measures dispatch, not audible onset.</p>
       </div>
     </details>
 

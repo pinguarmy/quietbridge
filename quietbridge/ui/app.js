@@ -18,9 +18,24 @@ let renderedPhrases = '', showAllPhrases = false, reloadPending = false, rendere
 let appStopped = false, stoppedInstance = null, quitPending = false;
 const retiredInstances = new Set();
 const ACTION_TIMEOUT_MS = 15000;
-// Upload target stays ~25 fps; the 960x720 JPEG contract is unchanged.
-const FRAME_UPLOAD_INTERVAL_MS = 40;
-let browserFrameCallback = null, nextFrameUploadAt = 0, lastUploadedVideoTime = null;
+// Browser camera frames: every new camera frame is uploaded (960x720 JPEG), with
+// exactly one upload in flight. A frame that arrives while an upload is in flight is
+// not queued; when the upload finishes, the newest frame is sent. Up to 30 fps: a
+// faster camera sends every other frame, judged by capture time, not the wall clock.
+const MAX_UPLOAD_FPS = 30, MIN_FRAME_SPACING_S = 0.75 / MAX_UPLOAD_FPS;
+// Without requestVideoFrameCallback nothing says when a frame is new, so a timer
+// checks at the target rate: faster could re-encode the same picture where currentTime
+// is a playback clock; slower would drop frames from a 30 fps camera.
+const FALLBACK_FRAME_CHECK_MS = Math.round(1000 / MAX_UPLOAD_FPS);
+let browserFrameCallback = null, frameUploadGeneration = null, frameWaiting = false;
+let lastUploadedVideoTime = null, lastUploadedMediaTime = null, latestMediaTime = null;
+// Live delivered camera rate (state.metrics.camera_input_fps). Below 20 fps the stock
+// lip model lost ~6 WER points on real clips (docs/experiments/real-clip-experiments.md),
+// so the badge warns after 2 s below 20 and clears after 2 s at 22 or more.
+const CAMERA_RATE_LOW_FPS = 20, CAMERA_RATE_OK_FPS = 22, CAMERA_RATE_HOLD_MS = 2000;
+// The server's rate covers the last 5 s, so a fresh camera is not judged at once.
+const CAMERA_RATE_SETTLE_MS = 1500;
+let cameraRateLow = false, cameraRateCrossingAt = null, cameraLiveAt = null;
 // State polling never stops. It is fast while anything can change soon and
 // slower only when idle or in a hidden tab. Reconnect checks stay at 1 s or faster.
 const POLL_FAST_MS = 180, POLL_IDLE_MS = 1000, POLL_HIDDEN_MS = 3000, POLL_RECONNECT_MS = 1000;
@@ -58,25 +73,36 @@ function renderCapabilities(s) {
   // The capture hint already says preview mode tests nothing; this line only lists concepts.
   text('capability-note', s.rehearsal ? `Example concepts: ${concepts}.` : `${backend}: ${concepts}. Only these configured concepts can contribute text. Not full sign-language translation.`);
 }
-// One upload at a time. Uploads follow new video frames (requestVideoFrameCallback
-// where available) within a 40 ms budget, so ~25 fps is kept on a 30 fps camera
-// and unchanged frames are not re-encoded. Older browsers fall back to a timer.
+// Frames are watched continuously while the camera runs (one callback chain per
+// camera generation). rVFC does not fire in a hidden tab: uploads pause there and the
+// recording has a gap, which the server reports; the pending callback fires again
+// when the tab is visible. The timer fallback is throttled in a hidden tab too.
 function scheduleFrameUpload() {
-  if (!browserCameraStream) return;
+  if (!browserCameraStream || browserFrameCallback !== null || browserFrameTimer) return;
   const generation = browserCameraGeneration, video = $('browser-camera');
   const current = () => browserCameraStream && generation === browserCameraGeneration;
   if (typeof video?.requestVideoFrameCallback === 'function') {
-    browserFrameCallback = video.requestVideoFrameCallback(() => {
+    browserFrameCallback = video.requestVideoFrameCallback((now, metadata) => {
       browserFrameCallback = null;
       if (!current()) return;
-      if (Date.now() < nextFrameUploadAt) scheduleFrameUpload(); else uploadBrowserFrames(true);
+      scheduleFrameUpload();
+      if (typeof metadata?.mediaTime === 'number') latestMediaTime = metadata.mediaTime;
+      onVideoFrame(true);
     });
   } else {
     browserFrameTimer = setTimeout(() => {
       browserFrameTimer = null;
-      if (current()) uploadBrowserFrames(false);
-    }, Math.max(10, nextFrameUploadAt - Date.now()));
+      if (!current()) return;
+      scheduleFrameUpload();
+      onVideoFrame(false);
+    }, FALLBACK_FRAME_CHECK_MS);
   }
+}
+function frameUploadInFlight() { return frameUploadGeneration === browserCameraGeneration; }
+// Latest wins: one flag, never a queue.
+function onVideoFrame(knownNewFrame) {
+  if (frameUploadInFlight()) { frameWaiting = true; return; }
+  void uploadBrowserFrames(knownNewFrame);
 }
 function cancelFrameUpload() {
   if (browserFrameTimer) clearTimeout(browserFrameTimer);
@@ -84,24 +110,30 @@ function cancelFrameUpload() {
   const video = $('browser-camera');
   if (browserFrameCallback !== null && typeof video?.cancelVideoFrameCallback === 'function') video.cancelVideoFrameCallback(browserFrameCallback);
   browserFrameCallback = null;
+  frameWaiting = false; frameUploadGeneration = null;
+  lastUploadedVideoTime = lastUploadedMediaTime = latestMediaTime = null;
 }
 function hasNewVideoFrame(video, knownNewFrame) {
+  // With requestVideoFrameCallback the capture timestamp identifies the frame.
+  if (latestMediaTime !== null) {
+    if (lastUploadedMediaTime === null) return true;
+    const spacing = latestMediaTime - lastUploadedMediaTime;
+    return spacing < 0 || spacing >= MIN_FRAME_SPACING_S;
+  }
   if (knownNewFrame || typeof video.currentTime !== 'number') return true;
   return video.currentTime !== lastUploadedVideoTime;
 }
 async function uploadBrowserFrames(knownNewFrame = false) {
-  if (!browserCameraStream || !state?.browser_camera || state.rehearsal) return;
-  const generation = browserCameraGeneration;
+  if (!browserCameraStream || !state?.browser_camera || state.rehearsal || frameUploadInFlight()) return;
+  const generation = browserCameraGeneration, current = () => browserCameraStream && generation === browserCameraGeneration;
+  frameUploadGeneration = generation; frameWaiting = false;
   try {
     const video = $('browser-camera');
     if (video?.videoWidth && hasNewVideoFrame(video, knownNewFrame)) {
-      const now = Date.now();
-      // At most half an interval of catch-up, so a late frame never causes a burst.
-      nextFrameUploadAt = Math.max(nextFrameUploadAt, now - FRAME_UPLOAD_INTERVAL_MS / 2) + FRAME_UPLOAD_INTERVAL_MS;
-      lastUploadedVideoTime = video.currentTime;
+      lastUploadedVideoTime = video.currentTime; lastUploadedMediaTime = latestMediaTime;
       browserFrameCanvas.getContext('2d').drawImage(video, 0, 0, 960, 720);
       const blob = await new Promise(resolve => browserFrameCanvas.toBlob(resolve, 'image/jpeg', .7));
-      if (blob && browserCameraStream && state?.browser_camera && !state.rehearsal) {
+      if (blob && current() && state?.browser_camera && !state.rehearsal) {
         const response = await fetch('/api/frame', {method:'POST', headers:{'Content-Type':'image/jpeg', 'X-Lipflow-Token':token}, body:blob});
         if (response.status === 401 || response.status === 403) {
           const fresh = await fetch('/api/state');
@@ -114,8 +146,12 @@ async function uploadBrowserFrames(knownNewFrame = false) {
       }
     }
   } catch (_) { text('error', 'Camera frames could not reach QuietBridge. Finish message to stop the camera, then retry or type below.'); }
-  // A stop/start while this upload was in flight owns its own loop.
-  if (generation === browserCameraGeneration) scheduleFrameUpload();
+  // A stop/start while this upload was in flight owns its own loop and in-flight flag.
+  if (generation !== browserCameraGeneration) return;
+  frameUploadGeneration = null;
+  // A frame arrived meanwhile: send the newest one now instead of waiting a frame.
+  if (frameWaiting && current()) { frameWaiting = false; void uploadBrowserFrames(false); }
+  else scheduleFrameUpload();
 }
 async function startBrowserCamera() {
   if (browserCameraStarting || browserCameraStopping || browserCameraStream) return;
@@ -141,7 +177,7 @@ async function startBrowserCamera() {
       text('error', message); return;
     }
     if (generation !== browserCameraGeneration) return;
-    text('error', ''); uploadBrowserFrames();
+    text('error', ''); scheduleFrameUpload(); void uploadBrowserFrames();
   } catch (e) {
     if (generation !== browserCameraGeneration) return;
     const hadCamera = Boolean(browserCameraStream);
@@ -175,7 +211,6 @@ function endCameraSessionOnUnload() {
 function stopBrowserCamera() {
   cancelFrameUpload();
   browserCameraGeneration++;
-  lastUploadedVideoTime = null;
   if (browserCameraStream) browserCameraStream.getTracks().forEach(track => track.stop());
   browserCameraStream = null;
   // The local preview is cleared, not frozen: no picture remains after the camera stops.
@@ -964,6 +999,9 @@ function updateMessage() {
   ['accent', 'warn', 'live'].forEach(t => $('decision-status').classList.toggle('badge-' + t, t === tone));
   if ($('corrected-text')) $('corrected-text').disabled = sessionBusy || processing;
   text('reason', reasonText(v));
+  // Advice about the capture behind a settled result; Speak stays available.
+  const captureWarning = typeof state.capture_warning === 'string' ? state.capture_warning.trim() : '';
+  text('capture-warning', captureWarning && !sessionBusy && !processing ? captureWarning : '');
   document.querySelectorAll('.alternative').forEach(b => {const selected = b.dataset.candidate === chosenText; b.classList.toggle('selected', selected); b.setAttribute('aria-pressed', String(selected)); b.disabled = speaking;});
   text('speak-label', review || (chosenText && chosenText !== d.text) ? 'Confirm & speak' : 'Speak message');
   $('speak').disabled = sessionBusy || processing || editorDirty || connectionLost || pendingActions > 0 || !chosenText || !state.speech_available || speaking || deviceSpeaking() || !['accepted','confirmation_needed'].includes(d.status);
@@ -1128,6 +1166,27 @@ function cameraMessageText(s) {
   if (s.camera === 'unavailable') return 'Allow camera access in your browser, or type your message below.';
   return 'Getting your camera ready…';
 }
+// Live delivered camera rate, shown only while the camera is live and once the
+// server reports it. Hysteresis in value and time keeps the badge from flickering.
+function renderCameraRate() {
+  const badge = $('camera-rate');
+  if (!badge) return;
+  const fps = state?.metrics?.camera_input_fps, now = Date.now();
+  if (!cameraLive()) { cameraLiveAt = cameraRateCrossingAt = null; cameraRateLow = false; }
+  else if (cameraLiveAt === null) cameraLiveAt = now;
+  const measured = cameraLiveAt !== null && now - cameraLiveAt >= CAMERA_RATE_SETTLE_MS && typeof fps === 'number' && Number.isFinite(fps);
+  if (measured) {
+    const crossing = cameraRateLow ? fps >= CAMERA_RATE_OK_FPS : fps < CAMERA_RATE_LOW_FPS;
+    if (!crossing) cameraRateCrossingAt = null;
+    else if (cameraRateCrossingAt === null) cameraRateCrossingAt = now;
+    else if (now - cameraRateCrossingAt >= CAMERA_RATE_HOLD_MS) { cameraRateLow = !cameraRateLow; cameraRateCrossingAt = null; }
+  } else cameraRateCrossingAt = null;
+  badge.hidden = !measured;
+  text('camera-rate', measured ? `${Math.round(fps)} fps${cameraRateLow ? ' · low' : ''}` : '');
+  badge.classList.toggle('badge-warn', measured && cameraRateLow);
+  badge.classList.toggle('badge-plain', !(measured && cameraRateLow));
+  text('camera-rate-note', measured && cameraRateLow ? 'Few camera pictures are arriving, so words may be missed. Add light, or close other apps or tabs using the camera, before recording.' : '');
+}
 // Single owner of which picture is visible: local video, server JPEG or placeholder.
 function renderPreview() {
   const image = $('camera'), video = $('browser-camera');
@@ -1136,6 +1195,7 @@ function renderPreview() {
   if (video) video.hidden = !browserCameraStream;
   if (image && !serverOwned) image.hidden = true;
   if (state) text('preview-status', previewStatusText(state));
+  renderCameraRate();
   let showing = Boolean(browserCameraStream);
   if (serverOwned && image) {
     showing = !image.hidden && image.naturalWidth > 0;
@@ -1235,7 +1295,7 @@ document.addEventListener('keydown', e => {
 document.addEventListener('pointerdown', wakePoll, {passive:true});
 document.addEventListener('input', wakePoll, true);
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) wakePoll();
+  if (!document.hidden) { wakePoll(); scheduleFrameUpload(); }
   ensureCameraLoops();
 });
 if ($('cancel')) $('cancel').onclick = () => {keyHeld = pointerHeld = false; requestAction('cancel');};

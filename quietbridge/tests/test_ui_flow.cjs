@@ -659,33 +659,176 @@ test('server-owned camera keeps the downloaded preview path', () => {
   assert.match(a.images[0].src, /^\/api\/frame\?t=/);
 });
 
-test('frame upload waits for a new video frame and never overlaps', async () => {
+// Frame pacing is driven by the fake frame callbacks and timers directly; nothing here reads the wall clock.
+function frameScreen() {
   const a = screen(); a.render({ server_instance: 'boot', token: 'tok' });
   const video = a.elements.get('browser-camera'); video.videoWidth = 960; video.currentTime = 1;
-  let frameCallback = null; video.requestVideoFrameCallback = cb => { frameCallback = cb; return 7; };
-  let uploads = 0, release; a.context.fetch = async (url, options) => { if (url === '/api/frame') { uploads++; return new Promise(r => { release = r; }); } return new Promise(() => {}); };
-  vm.runInContext("browserCameraStream={getTracks:()=>[{stop(){}}]};browserFrameCanvas.getContext=()=>({drawImage(){}});browserFrameCanvas.toBlob=cb=>cb({});", a.context);
-  const first = vm.runInContext('uploadBrowserFrames(true)', a.context); await settle();
-  assert.equal(uploads, 1);
-  assert.equal(frameCallback, null, 'nothing scheduled while the upload is in flight');
-  release({ ok: true, status: 200 }); await first;
-  assert.equal(uploads, 1, 'the next upload waits for a new frame');
-  assert.equal(typeof frameCallback, 'function');
-  // Pin the budget instead of racing the wall clock: a slow host can take longer than 40 ms to get here.
-  vm.runInContext('nextFrameUploadAt = Date.now() + 60000', a.context);
-  let cb = frameCallback; frameCallback = null; cb(); await settle();
-  assert.equal(uploads, 1, 'a frame inside the 40 ms budget is skipped, not encoded');
-  assert.equal(typeof frameCallback, 'function', 'and the next frame is awaited');
-  vm.runInContext('nextFrameUploadAt = 0', a.context);
-  cb = frameCallback; frameCallback = null; cb(); await settle();
-  assert.equal(uploads, 2);
-  // Fallback without requestVideoFrameCallback: an unchanged frame is not re-encoded.
-  delete video.requestVideoFrameCallback; release({ ok: true, status: 200 }); await settle();
-  let draws = 0; vm.runInContext('browserFrameCanvas.getContext=()=>({drawImage(){globalThis.__draws=(globalThis.__draws||0)+1}})', a.context);
-  await vm.runInContext('uploadBrowserFrames(false)', a.context);
-  draws = vm.runInContext('globalThis.__draws||0', a.context);
-  assert.equal(draws, 0);
+  const callbacks = [], cancelled = [], releases = [];
+  let nextId = 0;
+  video.requestVideoFrameCallback = cb => { cb.id = ++nextId; callbacks.push(cb); return cb.id; };
+  video.cancelVideoFrameCallback = id => { cancelled.push(id); const i = callbacks.findIndex(cb => cb.id === id); if (i >= 0) callbacks.splice(i, 1); };
+  const counts = { uploads: 0, draws: 0 };
+  a.context.fetch = async url => { if (url === '/api/frame') { counts.uploads++; return new Promise(r => { releases.push(r); }); } return new Promise(() => {}); };
+  a.context.__countDraw = () => { counts.draws++; };
+  vm.runInContext("browserCameraStream={getTracks:()=>[{stop(){}}]};browserFrameCanvas.getContext=()=>({drawImage(){__countDraw()}});browserFrameCanvas.toBlob=cb=>cb({});", a.context);
+  // Fires the newest registered frame callback once, as the browser would for one presented frame.
+  const frame = async mediaTime => { const cb = callbacks.pop(); assert.equal(typeof cb, 'function', 'a frame callback is registered'); cb(0, { mediaTime }); await settle(); };
+  const release = async () => { releases.shift()({ ok: true, status: 200 }); await settle(); };
+  return { a, video, callbacks, cancelled, releases, counts, frame, release };
+}
+
+test('every new camera frame uploads when idle, with exactly one upload in flight and the newest frame next', async () => {
+  const f = frameScreen();
+  vm.runInContext('scheduleFrameUpload(); scheduleFrameUpload()', f.a.context);
+  assert.equal(f.callbacks.length, 1, 'one watcher per camera generation');
+  await f.frame(1.000);
+  assert.equal(f.counts.uploads, 1);
+  assert.equal(f.callbacks.length, 1, 'frames are still watched while the upload is in flight');
+  await f.frame(1.033); await f.frame(1.066);
+  vm.runInContext('void uploadBrowserFrames(true)', f.a.context); await settle();
+  assert.equal(f.counts.uploads, 1, 'never two uploads in flight, whoever asks');
+  assert.equal(f.counts.draws, 1, 'a frame skipped during an upload is not encoded');
+  await f.release();
+  assert.equal(f.counts.uploads, 2, 'the newest frame is sent as soon as the upload finishes, without queueing the skipped ones');
+  assert.equal(f.counts.draws, 2);
+  await f.release();
+  assert.equal(f.counts.uploads, 2, 'nothing waiting, nothing sent');
+  // Each new frame on an idle uploader is sent: no wall-clock budget skips it.
+  for (const [i, t] of [1.100, 1.133, 1.166].entries()) { await f.frame(t); assert.equal(f.counts.uploads, 3 + i); await f.release(); }
+  await f.frame(1.166);
+  assert.equal(f.counts.uploads, 5, 'an unchanged frame (same capture time) is not re-encoded');
+  await f.frame(1.176);
+  assert.equal(f.counts.uploads, 5, 'a camera faster than 30 fps sends at most ~30 frames per second of capture time');
+  await f.frame(1.200);
+  assert.equal(f.counts.uploads, 6);
+  assert.equal(f.counts.draws, 6);
+  // Stop cancels the watcher, and the in-flight completion starts nothing.
+  await f.frame(1.233);
+  const stale = f.callbacks.at(-1);
+  vm.runInContext('stopBrowserCamera()', f.a.context);
+  assert.equal(f.cancelled.length, 1);
+  assert.equal(f.callbacks.length, 0, 'stop cancels the watcher');
+  await f.release();
+  assert.equal(f.counts.uploads, 6, 'no upload after the camera stopped');
+  stale(0, { mediaTime: 2 }); await settle();
+  assert.equal(f.counts.uploads, 6, 'a late frame callback of a stopped camera does nothing');
+  assert.equal(f.callbacks.length, 0);
+});
+
+test('a camera restarted during an upload owns one loop; the old upload cannot start a second one', async () => {
+  const f = frameScreen();
+  vm.runInContext('scheduleFrameUpload()', f.a.context);
+  await f.frame(1.0);
+  assert.equal(f.counts.uploads, 1);
+  vm.runInContext("stopBrowserCamera(); browserCameraStream={getTracks:()=>[{stop(){}}]}; scheduleFrameUpload()", f.a.context);
+  assert.equal(f.callbacks.length, 1);
+  await f.frame(0.5);
+  assert.equal(f.counts.uploads, 2, 'the new camera uploads its first frame at once');
+  await f.release();
+  assert.equal(f.callbacks.length, 1, 'the old completion registers no extra watcher');
+  await f.frame(0.533);
+  assert.equal(f.counts.uploads, 2, 'the new camera still has its own upload in flight');
+  await f.release();
+  assert.equal(f.counts.uploads, 3, 'its waiting frame follows');
+  vm.runInContext('stopBrowserCamera()', f.a.context);
+});
+
+test('without requestVideoFrameCallback a 30 fps timer uploads only changed frames and stop cancels it', async () => {
+  const f = frameScreen();
+  delete f.video.requestVideoFrameCallback;
+  vm.runInContext('scheduleFrameUpload(); scheduleFrameUpload()', f.a.context);
+  const timers = () => [...f.a.timers.entries()].filter(([, t]) => t.ms === 33);
+  assert.equal(timers().length, 1, 'one timer at the 30 fps target');
+  const tick = async () => { const [[id, t]] = timers(); f.a.timers.delete(id); t.fn(); await settle(); };
+  await tick();
+  assert.equal(f.counts.uploads, 1);
+  await tick();
+  assert.equal(f.counts.uploads, 1, 'no overlap');
+  await f.release();
+  assert.equal(f.counts.draws, 1, 'the waiting check found the same frame and did not re-encode it');
+  await tick();
+  assert.equal(f.counts.draws, 1, 'an unchanged frame is never re-encoded');
+  f.video.currentTime = 1.04; await tick();
+  assert.equal(f.counts.uploads, 2);
+  await f.release();
+  assert.equal(timers().length, 1, 'still exactly one timer');
+  vm.runInContext('stopBrowserCamera()', f.a.context);
+  assert.equal(timers().length, 0, 'stop cancels the timer');
+});
+
+test('frame uploads stay off in rehearsal', async () => {
+  const f = frameScreen();
+  f.a.render({ server_instance: 'boot', token: 'tok', rehearsal: true, revision: 2 });
+  await vm.runInContext('uploadBrowserFrames(true)', f.a.context);
+  assert.equal(f.counts.uploads, 0); assert.equal(f.counts.draws, 0);
+});
+
+// ---- Capture warning and live camera rate ----
+test('a capture warning is advice beside a settled result: shown, cleared, never blocking Speak', () => {
+  const a = screen();
+  const result = { decision: { text: 'I need water', status: 'accepted', reason: 'lip_only' } };
+  a.render(result);
+  assert.equal(a.elements.get('capture-warning').textContent, '', 'absent field shows nothing');
+  const warning = 'The camera sent too few pictures, so some words may be missing. Add light or close other camera apps, then record again.';
+  a.render({ ...result, revision: 2, capture_warning: warning });
+  assert.equal(a.elements.get('capture-warning').textContent, warning);
+  assert.equal(a.elements.get('speak').disabled, false, 'Speak stays available');
+  assert.equal(a.elements.get('error').textContent, '', 'not an error');
+  a.render({ ...result, revision: 2, capture_warning: warning, session_active: true, session_text: 'I need' });
+  assert.equal(a.elements.get('capture-warning').textContent, '', 'hidden while live words arrive');
+  a.render({ ...result, revision: 3, capture_warning: warning });
+  assert.equal(a.elements.get('capture-warning').textContent, warning);
+  a.render({ ...result, revision: 4, capture_warning: '' });
+  assert.equal(a.elements.get('capture-warning').textContent, '', 'cleared when the field clears');
+  a.render({ ...result, revision: 5, capture_warning: 7 });
+  assert.equal(a.elements.get('capture-warning').textContent, '', 'a malformed field shows nothing');
+  const html = fs.readFileSync(path.join(__dirname, '../ui/index.html'), 'utf8');
+  assert.match(html, /<p id="capture-warning" class="callout callout-warn capture-warning" role="status">/, 'a polite status');
+  assert.ok(html.indexOf('id="message-actions"') < html.indexOf('id="capture-warning"'), 'below the Speak controls, so it never moves them');
+});
+
+test('the live camera rate badge appears only while the camera is live and warns with hysteresis', () => {
+  const a = screen();
+  let now = 1_000_000;
+  a.context.Date = class extends Date { static now() { return now; } };
+  const badge = a.elements.get('camera-rate');
+  const show = (fps, advance = 200) => { now += advance; a.render({ metrics: fps === undefined ? {} : { camera_input_fps: fps } }); };
+  show(29.5);
+  assert.equal(badge.hidden, true, 'camera off: nothing to show');
+  vm.runInContext("browserCameraStream={getTracks:()=>[{stop(){}}]}", a.context);
+  show(12, 0);
+  assert.equal(badge.hidden, true, 'a fresh camera is not judged on the previous reading');
+  show(29.5, 1500);
+  assert.equal(badge.hidden, false);
+  assert.equal(badge.textContent, '30 fps');
+  assert.equal(badge.classList.contains('badge-warn'), false);
+  show(undefined);
+  assert.equal(badge.hidden, true, 'absent field: nothing to show');
+  show(17);
+  for (let i = 0; i < 9; i++) show(17);
+  assert.equal(badge.classList.contains('badge-warn'), false, 'a dip shorter than 2 s does not warn');
+  show(25); show(17);
+  for (let i = 0; i < 9; i++) show(17);
+  assert.equal(badge.classList.contains('badge-warn'), false, 'a recovery restarts the hold');
+  show(17);
+  assert.equal(badge.classList.contains('badge-warn'), true, 'below 20 fps for 2 s warns');
+  assert.equal(badge.classList.contains('badge-plain'), false);
+  assert.equal(badge.textContent, '17 fps · low', 'not colour alone');
+  assert.match(a.elements.get('camera-rate-note').textContent, /light/);
+  for (let i = 0; i < 20; i++) show(21);
+  assert.equal(badge.classList.contains('badge-warn'), true, '20–22 fps does not clear the warning (no flicker)');
+  for (let i = 0; i < 10; i++) show(23);
+  assert.equal(badge.classList.contains('badge-warn'), true, 'recovery also needs 2 s');
+  show(23);
+  assert.equal(badge.classList.contains('badge-warn'), false);
+  assert.equal(badge.textContent, '23 fps');
+  assert.equal(a.elements.get('camera-rate-note').textContent, '');
+  for (let i = 0; i < 11; i++) show(15);
+  assert.equal(badge.classList.contains('badge-warn'), true);
   vm.runInContext('stopBrowserCamera()', a.context);
+  assert.equal(badge.hidden, true, 'hidden when the camera stops');
+  assert.equal(badge.classList.contains('badge-warn'), false);
+  assert.equal(a.elements.get('camera-rate-note').textContent, '');
 });
 
 // ---- Quick phrases, newer-model notice, speech failure, long/RTL text, profile list ----
