@@ -34,7 +34,7 @@ function cdpProtocol(child) {
   let buffer=Buffer.alloc(0), id=0; const pending=new Map(), listeners=new Map();
   child.stdio[4].on('data', chunk=>{buffer=Buffer.concat([buffer,chunk]); let n; while((n=buffer.indexOf(0))>=0) {const data=buffer.subarray(0,n).toString(); buffer=buffer.subarray(n+1); let m; try {m=JSON.parse(data);} catch {continue;} if(m.id && pending.has(m.id)){const [resolve,reject]=pending.get(m.id);pending.delete(m.id);m.error?reject(new Error(JSON.stringify(m.error))):resolve(m.result);} else if(m.method) for(const f of listeners.get(m.method)||[]) f(m.params,m.sessionId);}});
   let stderrTail=''; child.stderr.on('data',b=>{stderrTail=(stderrTail+b).slice(-4000);});
-  return {stderr:()=>stderrTail, send(method,params={},sessionId,timeoutMs=10000) {const key=++id; const p=new Promise((resolve,reject)=>pending.set(key,[resolve,reject])); child.stdio[3].write(JSON.stringify({id:key,method,params,...(sessionId?{sessionId}:{})})+'\0'); return Promise.race([p,sleep(timeoutMs).then(()=>{throw Error(`CDP timeout ${method}`);})]);}, on(method,fn){if(!listeners.has(method)) listeners.set(method,[]);listeners.get(method).push(fn);}};
+  return {stderr:()=>stderrTail, send(method,params={},sessionId,timeoutMs=30000) {const key=++id; const p=new Promise((resolve,reject)=>pending.set(key,[resolve,reject])); child.stdio[3].write(JSON.stringify({id:key,method,params,...(sessionId?{sessionId}:{})})+'\0'); return Promise.race([p,sleep(timeoutMs).then(()=>{throw Error(`CDP timeout ${method}`);})]);}, on(method,fn){if(!listeners.has(method)) listeners.set(method,[]);listeners.get(method).push(fn);}};
 }
 async function chromePath() {
   if(process.env.CHROME_BIN) return process.env.CHROME_BIN;
