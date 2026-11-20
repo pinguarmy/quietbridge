@@ -74,12 +74,17 @@ SCORE_MAX_PHRASES = 20
 PREFILTER_MAX_RATIO = 0.75
 # Offer a scored phrase only if its length-normalised model score (nats per
 # token) is at least the score of the decoder's own top text, computed the same
-# way, minus this margin. Chosen on session A only, by a rule fixed before the
-# sweep (largest rescue rate with offers on already-correct results <= 10 % and
-# offers for unsaved sentences <= 5 %); measured on 9-35-word sentences, where
-# one wrong word moves the score by ~0.3-0.6 nats/token. Short phrases spread a
-# word's cost over fewer tokens, so this margin is stricter for them (unmeasured).
-MODEL_OFFER_MARGIN = 0.2
+# way, minus this margin. Chosen on session A only (follow-up addendum in the
+# experiments document) by the product's costs: a lip-only result is always
+# confirmed anyway, so an extra row beside a correct result is clutter, and an
+# extra tap only if it creates a conflict; a missed rescue means retyping.
+# Rule: largest rescue rate with offers for unsaved sentences <= 5 % and
+# conflict offers beside a correct top-1 <= 10 % (one-word-variant scenarios).
+# The earlier 0.2 (no offer at all beside a correct result) rescued far less.
+# Measured on 9-35-word sentences, where one wrong word moves the score by
+# ~0.3-0.6 nats/token; short phrases spread a word's cost over fewer tokens,
+# so this margin is stricter for them (unmeasured).
+MODEL_OFFER_MARGIN = 0.5
 
 _DIGITS = {str(i): w for i, w in enumerate(
     ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "

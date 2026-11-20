@@ -581,3 +581,76 @@ R=/path/to/r5; export QB_EXP_SCRATCH=$SCRATCH QB_EXP_THREADS=3
 .venv/bin/python scripts/experiments/e2e_runtime.py --session B --segments B000 B009 B005 B012 --keep-every 1 1 1 2 --out $R/e2e/e2e_B.json
 .venv/bin/python scripts/experiments/report.py --pair plmA/B__base__beam4 plmA_shared/B__base__beam4
 ```
+
+### Addendum (2026-11-20): offer rule re-selected for what a false offer costs
+
+Why: a lip-only result always needs confirmation (the top text is preselected; one tap). An extra
+phrase row beside a correct result is clutter, and costs a tap only when it creates a *conflict*
+(negation/number/safety difference removes the preselection); a missed rescue costs retyping. The
+F1 criterion (≤ 10 % of correct results get *any* offer) priced clutter as if it were a confirmation.
+
+New criterion, A only (`offer_rules.py --select A`): maximise open-set rescue subject to (a) unsaved
+distinct sentences get an offer in ≤ 5 % of rows and (b) conflict offers beside an exact top-1 in
+≤ 10 % of the constructed-variant rows (var1_out + var_in + var_out pooled, 72 rows / 9 segments);
+ties → less clutter, then the simpler rule. Honest note: (b) was first applied per scenario, which
+picked 0.2 again only because var_in/var_out have one row per correct segment (one segment = 11.1 %);
+after seeing that, it was changed to the pooled form. Rule families swept (offers always ordered by
+model score, at most 2): top-1 reference (`top:m`), best displayed lip candidate as reference
+(`best:m`), and union rules (`union-<ref>:m:M`: model-gated at m OR the shipped text rule with a
+model score no worse than the reference by M). Scores of the 2nd/3rd lip candidates were added to the
+cache for the `best` rules. A, clean (n = 27; %):
+
+| rule | rescue | rescue possible | unsaved offered | any offer beside correct (all / variant rows) | conflict beside correct (variant rows) | wrong offer beside wrong (variant rows) |
+|---|---|---|---|---|---|---|
+| text matcher (before) | 45.6 | 80.4 | 0 | 44.4 / 100 | 51.4 | 85.8 |
+| top:0.2 (F1) | 31.1 | 54.9 | 0 | 0 / 0 | 0 | 0 |
+| top:0.4 | 36.7 | 64.7 | 0 | 5.6 / 12.5 | 0 | 19.1 |
+| **top:0.5 (chosen)** | **52.2** [28.3, 75.9] | 92.2 | 0 | 9.9 / 22.2 | **4.2** | 31.2 |
+| top:0.6 | 52.2 | 92.2 | 0 | 17.9 / 40.3 | 9.7 | 38.3 |
+| top:1.0 | 52.2 | 92.2 | 0 | 32.1 / 72.2 | 23.6 | 70.9 |
+| best:0.5 | 52.2 | 92.2 | 0 | 9.9 / 22.2 | 4.2 | 31.2 |
+| union-top:0.5:0.7 | 52.2 | 92.2 | 0 | 16.7 / 37.5 | 12.5 | 49.6 |
+| union-top:0.6:0.7 | 52.2 | 92.2 | 0 | 19.1 / 43.1 | 9.7 | 50.4 |
+| union-*:≤0.3:0.5 | 45.6 | 80.4 | 0 | 4.9 / 11.1 | 1.9 | 23-25 |
+
+`best:m` equals `top:m` on clean A (it differs only where a lower lip candidate outscores top-1);
+union rules add text-matched phrases that the model rates poorly and never beat the plain margin
+(rescue saturates at 52.2 %: the rest of the "rescues" are references already shown as a lip
+candidate). A at 12 fps, top designs: text 65.3 [45.0, 83.2]; top:0.2 49.2; **top:0.5 67.8 [49.1,
+84.2]**, conflict beside correct 0 % (24 variant rows / 3 segments), wrong-beside-wrong 25.9 %;
+best:0.5 67.8 (wrong-beside-wrong 23.3); top:0.6 and union-top:0.6:0.7 75.4 (conflict 4.2 %).
+
+**Frozen design:** offer a saved phrase iff its length-normalised lip-model score ≥ the top-1 text's
+score − 0.5 nats/token (`MODEL_OFFER_MARGIN = 0.5`), best score first, at most 2, prefilter unchanged
+(all phrases if ≤ 20, else the 20 nearest within 0.75; unscorable phrases use the text rule).
+
+**B, once** (not a fresh test set: used by Experiments 1-5 and F1; n = 22 segments, 3 with an exact
+top-1, so "beside correct" rows are 23 from 3 segments):
+
+| B | text matcher (before) | model-gated 0.2 (F1) | **model-gated 0.5 (now)** |
+|---|---|---|---|
+| rescue, clean (100 rows / 19 segs) | 76.0 [53.5, 94.5] | 54.0 [31.5, 76.5] | **79.0 [58.0, 95.2]** |
+| rescue possible, clean (82 / 16) | 92.7 | 65.9 | 96.3 [87.8, 100] |
+| unsaved sentence offered (110 / 22) | 0 | 0 | 0 |
+| any offer beside correct: all (53) / variant rows (23) | 43.4 / 100 | 0 / 0 | 15.1 / 34.8 |
+| conflict offer beside correct (variant rows, 23) | 52.2 | 0 | **0** |
+| wrong offer beside wrong (variant rows, 152) | 73.0 | 0 | 17.8 [7.9, 27.6] |
+| ref + 6 variants saved, top-1 wrong: ref first (19) | 73.7 | 52.6 | 78.9 [57.9, 94.7] |
+| rescue at 12 fps (110 / 22) | 64.5 [42.2, 82.9] | 32.7 [13.8, 54.4] | **81.8 [63.8, 95.7]** |
+| wrong offer beside wrong at 12 fps (175) | 61.1 | 0 | 13.7 [5.2, 22.7] |
+
+On these clips the 0.5 design rescues at least as often as the text matcher (clean: +3 points, CIs
+overlapping; 12 fps: +17 points) while creating no conflict beside a correct result and far fewer
+wrong offers; the price against 0.2 is one extra row beside about a third of correct results when a
+one-word variant is saved. Same limits as F1: long read-aloud sentences of one speaker, constructed
+variants, small n; short phrases (where 0.5 nats/token is effectively stricter) and silent mouthing
+unmeasured.
+
+```sh
+.venv/bin/python scripts/experiments/model_offers.py --out-dir $R/offers --score A B   # adds lip candidates 2-3
+.venv/bin/python scripts/experiments/model_offers.py --out-dir $R/offers --cond fps12 --score A B
+.venv/bin/python scripts/experiments/offer_rules.py --out-dir $R/offers --select A
+.venv/bin/python scripts/experiments/offer_rules.py --out-dir $R/offers --select A --cond fps12 --rules text top:0.2 top:0.5 best:0.5 union-top:0.6:0.7 top:0.6
+.venv/bin/python scripts/experiments/offer_rules.py --out-dir $R/offers --evaluate B --rules text top:0.2 top:0.5          # once
+.venv/bin/python scripts/experiments/offer_rules.py --out-dir $R/offers --evaluate B --cond fps12 --rules text top:0.2 top:0.5
+```

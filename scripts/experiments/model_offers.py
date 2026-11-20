@@ -71,14 +71,17 @@ def score(args):
         path = os.path.join(args.out_dir, f"scores__{sess}__{args.cond}.json")
         out = json.load(open(path)) if os.path.exists(path) else {}
         for seg in mani[sess]:
-            if seg["id"] in out:
-                continue
             row = dec[sess][seg["id"]]
             cands = [h["text"] for h in row["hyps"][:3]]
+            # all 3 displayed lip candidates (the "best displayed candidate" rule needs them)
+            texts = list(dict.fromkeys([*cands, *sentences, *(t for _, t in variants(seg, vocab))]))
+            have = out.get(seg["id"], {})
+            texts = [t for t in texts if t not in have]
+            if not texts:
+                continue
             enc = torch.load(os.path.join(S, "enc", f"stock__{seg['id']}__{args.cond}.pt"))["enc"]
-            texts = list(dict.fromkeys([*cands[:1], *sentences, *(t for _, t in variants(seg, vocab))]))
             res = reader.score_texts(enc, texts)
-            out[seg["id"]] = {t: (r["normalized"] if r else None) for t, r in zip(texts, res)}
+            out[seg["id"]] = {**have, **{t: (r["normalized"] if r else None) for t, r in zip(texts, res)}}
             print(sess, seg["id"], len(texts), flush=True)
             C.write_json(path, out)
 

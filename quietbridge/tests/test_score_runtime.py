@@ -322,3 +322,15 @@ def test_capture_warning_unit_rules(runtime):
     with runtime.lock:
         runtime._publish(None, [], 5000)
     assert runtime.snapshot()["capture_warning"] == ""
+
+
+def test_close_variant_beside_a_result_is_clutter_not_a_conflict(runtime):
+    # Within the margin and without a negation/number/safety difference: one extra row, the
+    # displayed top keeps its plain (preselected) confirmation; a "not" variant is a conflict.
+    inside = -1.0 - phrase_match.MODEL_OFFER_MARGIN / 2
+    scorer = FakeScorer({"I need some milk now": inside, "I do not need some help now": -9.0,
+                         "I need some help now please": -9.0, "Call my sister": -9.0}, top_score=-1.0)
+    state = publish(runtime, [TOP], scored(runtime, [TOP], scorer))
+    assert state["phrase_matches"] == ["I need some milk now"]
+    assert state["decision"]["text"] == TOP and state["decision"]["reason"] == "lip_only"
+    assert state["decision"]["status"] == "confirmation_needed"

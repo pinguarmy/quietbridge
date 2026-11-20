@@ -246,7 +246,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--lr", type=float, default=3e-5)
     parser.add_argument("--bs", type=int, default=32)
-    parser.add_argument("--max-general-loss", type=float, default=1.15)
+    # Same tolerance as lipflow.train_lm.MAX_GENERAL_LOSS: general-text perplexity may rise by 5 %.
+    parser.add_argument("--max-general-loss", type=float, default=1.05)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default=None)
     args = parser.parse_args(argv)

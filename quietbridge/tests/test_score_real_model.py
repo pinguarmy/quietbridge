@@ -92,8 +92,12 @@ def test_real_clip_prefers_the_spoken_sentence_and_the_offer_rule_holds(reader):
     assert all(math.isfinite(s["normalized"]) for s in scores)
     phrases = variants  # the spoken sentence is NOT saved, only its neighbours
     offers = pm.model_offers([top], phrases, {i: s["normalized"] for i, s in enumerate(scores[2:])}, top_score)
-    if top == TRUTH:  # a correct result must not gain a one-word variant to confirm
-        assert offers == []
+    # Beside a correct result a variant may be offered (clutter, not an extra step), but only within
+    # the margin, best first, and never one that outscores the spoken sentence.
+    assert all(o.score_gap >= -pm.MODEL_OFFER_MARGIN for o in offers)
+    assert [o.score_gap for o in offers] == sorted((o.score_gap for o in offers), reverse=True)
+    if top == TRUTH:
+        assert all(o.score_gap <= 0 for o in offers)
     phrases = [TRUTH, *variants]
     offers = pm.model_offers([top], phrases, {i: s["normalized"] for i, s in enumerate(scores[1:])}, top_score)
     if top != TRUTH and truth >= top_score - pm.MODEL_OFFER_MARGIN:
