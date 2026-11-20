@@ -32,7 +32,8 @@ class LipActivityConfig:
     max_chunk_ms: int = 6000          # Maximum duration cap for continuous activity.
     pre_roll_ms: int = 300            # Target pre-roll buffer duration before trigger timestamp.
     min_active_frames: int = 1        # Consecutive active frames to trigger start.
-    face_loss_quiet: bool = False     # If True, face loss counts as stillness; if False, face loss waits.
+    face_loss_quiet: bool = False     # If True, face loss counts as stillness; if False, face loss waits:
+                                      # unseen time is not quiet, so the quiet timer restarts when the face returns.
 
 
 class LipActivityDetector:
@@ -49,6 +50,10 @@ class LipActivityDetector:
     - Quiet stillness (>= quiet_ms) after min_duration_ms triggers STOP.
     - Continuous activity reaching max_chunk_ms triggers STOP.
     - Reset/cancel restores IDLE state cleanly without leaking old timestamps.
+    - A timestamp at or before the last one seen is ignored, so a late or
+      repeated frame can never start the quiet timer early.
+    - With ``face_loss_quiet=False`` time without a visible face is not quiet:
+      the quiet timer restarts once the face is seen quiet again.
     """
 
     def __init__(self, config: Optional[LipActivityConfig] = None):
@@ -91,6 +96,8 @@ class LipActivityDetector:
             ActivityAction.NONE otherwise.
         """
         if timestamp_ms is None:
+            return ActivityAction.NONE
+        if self.last_ts is not None and timestamp_ms <= self.last_ts:
             return ActivityAction.NONE
         self.last_ts = timestamp_ms
 
@@ -137,4 +144,7 @@ class LipActivityDetector:
                 if quiet_elapsed >= self.config.quiet_ms and elapsed >= self.config.min_duration_ms:
                     self.reset()
                     return ActivityAction.STOP
+            else:
+                # The mouth may have moved while unseen; only observed quiet counts.
+                self.quiet_since = None
             return ActivityAction.NONE

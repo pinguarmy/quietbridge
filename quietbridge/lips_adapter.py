@@ -63,6 +63,24 @@ def _sync_encoder(reader):
         torch.mps.synchronize()
 
 
+def _resample_metrics(resample, ts):
+    """How the fixed-rate model sequence reuses or skips raw frames.
+
+    ``lip_repeated_frames`` counts model steps that reuse a raw frame (a
+    capture gap filled by repetition: no new motion); ``lip_unused_frames``
+    counts raw frames the 25 fps grid never selects.
+    """
+    if not callable(resample) or not ts:
+        return {}
+    try:
+        indices = [int(i) for i in resample(list(ts), len(ts))]
+    except Exception:
+        return {}
+    used = len(set(indices))
+    return {"lip_model_frames": len(indices), "lip_repeated_frames": len(indices) - used,
+            "lip_unused_frames": len(ts) - used}
+
+
 class LipsAdapter:
     def __init__(self, model_path=None, language_model_path=None, beam_size=4, *, personal_model_path=None):
         from lipflow.vsr import LipReader
@@ -168,13 +186,35 @@ class LipsAdapter:
                 self._preroll.popleft()
             return
 
+        rec = self.recording
+        if not self._accepts_recording_frame(rec, timestamp_ms):
+            return
         import cv2
         from lipflow.camera import face_crop
-        rec = self.recording
         rec.ts.append(timestamp_ms / 1000)
         rec.grays.append(face_crop(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY), obs, rec))
         rec.anchors.append(obs.anchors if obs else None)
         rec.mouth_open.append(getattr(obs, "mouth_open", 0.0) if obs else 0.0)
+
+    def _accepts_recording_frame(self, rec, timestamp_ms):
+        """Keep a recording chronological and inside its window.
+
+        A frame captured before the start (queued, then processed after it) is
+        pre-roll only within ``pre_roll_ms`` and after the previous window's
+        last frame; a repeated or earlier timestamp is never re-timed or
+        duplicated into the clip.
+        """
+        ts = getattr(rec, "ts", None)
+        if ts and timestamp_ms / 1000 <= ts[-1]:
+            return False
+        start = getattr(self, "record_start_ms", None)
+        if start is not None and timestamp_ms < start:
+            last_end = getattr(self, "_last_window_end_ms", None)
+            if timestamp_ms < start - getattr(self, "pre_roll_ms", 300):
+                return False
+            if last_end is not None and timestamp_ms <= last_end:
+                return False
+        return True
 
     def cancel(self, timestamp_ms=None):
         self.recording = None
@@ -240,6 +280,7 @@ class LipsAdapter:
         }
 
         ts = getattr(rec, "ts", None) or []
+        self.last_metrics.update(_resample_metrics(getattr(self.reader, "resample", None), ts))
         duration = ts[-1] - ts[0] if len(ts) > 1 else 0.0
         capture_fps = (len(ts) - 1) / duration if duration > 0 else None
         max_gap = max((b - a for a, b in zip(ts, ts[1:])), default=0.0)

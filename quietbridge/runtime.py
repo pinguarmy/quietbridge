@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import deque
 import copy
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import hashlib
 import importlib
 import json
@@ -14,6 +14,7 @@ import stat
 import threading
 import time
 
+from . import phrase_match
 from .cleanup import CleanupClient
 from .contracts import Decision, LipResult, SignEvent
 from .fusion import fuse, load_vocabulary, usable_signs
@@ -50,6 +51,13 @@ def _motion_vocabulary_error(path):
         "meanings and fixed phrases are never applied to a custom motion model.")
 
 
+# Cleared on every published result so values never describe an older one.
+_PER_RESULT_METRICS = (
+    "release_to_text_ms", "decode_ms", "lip_capture_fps", "lip_raw_frames", "lip_max_frame_gap_ms",
+    "lip_start_ms", "lip_end_ms", "lip_candidate_count", "roi_ms", "encode_ms", "search_ms",
+    "lip_model_frames", "lip_repeated_frames", "lip_unused_frames", "lip_dropped_frames",
+    "accepted_source", "accepted_candidate_index", "session_chunk_evidence")
+
 MAX_QUICK_PHRASES = 50
 MAX_PHRASE_CHARS = 2000
 # State is polled several times per second; promoted model files and the
@@ -71,6 +79,25 @@ def quick_phrases(prompts):
             if len(phrases) == MAX_QUICK_PHRASES:
                 break
     return phrases
+
+
+MAX_LEARNED_PHRASES = 50
+
+
+def _learned_phrases(corrections_path):
+    """Corrected texts the person explicitly chose to learn from, newest last.
+
+    Uses the corrections module's own audit, which already excludes records
+    whose sources lie in a validation or test split. Damaged files give [].
+    """
+    if corrections_path is None or _stat_signature(corrections_path) is None:
+        return []
+    try:
+        from .corrections import learning_texts
+        texts = learning_texts(Path(corrections_path).parent)
+    except Exception:
+        return []
+    return quick_phrases(texts[-MAX_LEARNED_PHRASES:])
 
 
 def _stat_signature(path):
@@ -113,11 +140,16 @@ class _ProfileFileWatch:
         self._config_path = None
         self._config_sig = None
         self._phrases = []
+        self._corrections_path = None
+        self._corrections_sig = None
+        self._learned = []
         self._result = (False, "")
         self._next_check = 0.0
 
-    def reset(self, slots, config_path, phrases):
+    def reset(self, slots, config_path, phrases, corrections_path=None):
         """``slots`` maps a slot name to ``(path, loaded_signature)``."""
+        corrections_sig = _stat_signature(corrections_path) if corrections_path is not None else None
+        learned = _learned_phrases(corrections_path)
         with self._lock:
             self._generation += 1
             self._slots = {name: {"path": path, "loaded": loaded, "sha256": None}
@@ -125,8 +157,22 @@ class _ProfileFileWatch:
             self._config_path = config_path
             self._config_sig = _stat_signature(config_path) if config_path is not None else None
             self._phrases = list(phrases)
+            self._corrections_path = corrections_path
+            self._corrections_sig = corrections_sig
+            self._learned = learned
             self._result = (False, "")
             self._next_check = 0.0
+
+    def suggestion_phrases(self):
+        """Saved phrases, then learned corrections; cached, never does I/O."""
+        with self._lock:
+            return list(dict.fromkeys([*self._phrases, *self._learned]))
+
+    def note_learned(self, text):
+        """A correction this process just stored for learning."""
+        with self._lock:
+            if text not in self._learned:
+                self._learned = [*self._learned, text][-MAX_LEARNED_PHRASES:]
 
     def check(self):
         """Return ``(reload_needed, detail, phrases)``; cached between checks."""
@@ -141,6 +187,12 @@ class _ProfileFileWatch:
                 generation = self._generation
                 slots = {name: dict(slot) for name, slot in self._slots.items()}
                 config_path, config_sig = self._config_path, self._config_sig
+                corrections_path, corrections_sig = self._corrections_path, self._corrections_sig
+            learned = None
+            current_corrections = (_stat_signature(corrections_path)
+                                   if corrections_path is not None else None)
+            if current_corrections != corrections_sig:
+                learned = _learned_phrases(corrections_path)
             changes = []
             for name, slot in slots.items():
                 current = _stat_signature(slot["path"])
@@ -179,6 +231,9 @@ class _ProfileFileWatch:
                     if phrases is not None:
                         self._phrases = phrases
                         self._config_sig = current_config
+                    if learned is not None:
+                        self._learned = learned
+                        self._corrections_sig = current_corrections
                     self._next_check = self._clock() + self._interval
                 return (*self._result, list(self._phrases))
         finally:
@@ -196,7 +251,8 @@ class Runtime:
                  profile=None, configuration_warning="", max_utterance_seconds=30.0,
                  lip_activity_config=None, profile_manager=None,
                  explicit_lip_model=None, explicit_lip_language_model=None,
-                 explicit_motion_model=None, explicit_vocabulary_path=None, sign_model=None):
+                 explicit_motion_model=None, explicit_vocabulary_path=None, sign_model=None,
+                 phrase_suggestions=None):
         if rehearsal and browser_camera:
             raise ValueError("Browser camera and rehearsal modes are mutually exclusive")
         self.rehearsal = rehearsal
@@ -215,6 +271,10 @@ class Runtime:
             from .profiles import ProfileManager
             self.profile_manager = ProfileManager()
         self.enable_lips = enable_lips
+        # Personal phrase suggestions beside the lip n-best (see phrase_match).
+        # None follows the QUIETBRIDGE_PHRASE_SUGGESTIONS environment switch.
+        self.phrase_suggestions = (phrase_match.enabled_by_environment() if phrase_suggestions is None
+                                   else bool(phrase_suggestions))
 
         # Track explicit CLI / external overrides so profile switching respects precedence
         self._explicit_lip_model = explicit_lip_model if explicit_lip_model is not None else (lip_model if profile is None and lip_model is not None else None)
@@ -252,6 +312,7 @@ class Runtime:
         self.hand_frames = queue.Queue(maxsize=90)
         self.lip_frames = queue.Queue(maxsize=90)
         self.capture_dropped_frames = 0
+        self._window_dropped_frames = 0  # lip-queue overflow drops since the current window started
         self.hand_control = queue.Queue()
         self.frame_times = deque()
         self.events = deque(maxlen=100)
@@ -286,6 +347,7 @@ class Runtime:
         self.cleanup = CleanupClient()
         self.session = SessionTranscript()
         self._session_windows = []
+        self._session_evidence = []  # text-free per-chunk decoder/capture evidence
         self._session_conflict = False
         self.session_signs = []  # Stable events validated when received in this session.
         self.state = {
@@ -300,7 +362,8 @@ class Runtime:
             "lip_model": self._rehearsal_lip_model_info() if rehearsal else {"mode": "stock", "status": "loading"},
             "camera_error": "", "lip_error": "", "sign_error": "", "error": "",
             "decision": asdict(Decision("", "unavailable", "sign_only", "local")),
-            "candidates": [], "candidate_scores": [], "alternatives": [], "last_sign": None,
+            "candidates": [], "candidate_scores": [], "alternatives": [], "phrase_matches": [],
+            "last_sign": None,
             "metrics": {}, "last_spoken": "", "last_correction": "", "recording": False,
             "auto_recognition": False,
             "session_active": False, "session_finalizing": False,
@@ -339,7 +402,9 @@ class Runtime:
         profile = self.profile
         self._model_watch.reset(self._model_watch_slots(),
                                 profile.config_path if profile is not None else None,
-                                quick_phrases(profile.lip_prompts) if profile is not None else [])
+                                quick_phrases(profile.lip_prompts) if profile is not None else [],
+                                (Path(profile.profile_dir) / "corrections.jsonl"
+                                 if getattr(profile, "profile_dir", None) is not None else None))
 
     def _rehearsal_lip_model_info(self):
         if self.lip_model_path or self.lip_language_model_path:
@@ -491,7 +556,10 @@ class Runtime:
         with self.lock:
             config = self.cleanup.configure(data)
             previous = self.state["cleanup"].get("suggestion", "")
-            if previous and self.confirmed_revision != self.revision and previous != self.state["decision"]["text"]:
+            if (previous and self.confirmed_revision != self.revision
+                    and previous != self.state["decision"]["text"]
+                    and previous not in self.state["candidates"]
+                    and previous not in self.state["phrase_matches"]):
                 self.state["alternatives"] = [text for text in self.state["alternatives"] if text != previous]
             self._cleanup_generation += 1
             self.state["cleanup"] = {"status": "idle" if config["enabled"] else "disabled",
@@ -503,7 +571,7 @@ class Runtime:
         # Deliberately outside the runtime lock: camera and state remain responsive.
         return self.cleanup.test()
 
-    def _publish(self, lips, events, now, since=None, cleanup_labels=None):
+    def _publish(self, lips, events, now, since=None, cleanup_labels=None, apply_phrases=True):
         if self.state["session_active"] and lips is None and self.session.text:
             lips = LipResult([self.session.text], 0)
         start = time.perf_counter()
@@ -518,15 +586,25 @@ class Runtime:
         self.state["alternatives"] = list(dict.fromkeys(c for c in [decision.text, *choices] if c))
         if self.state["session_active"] and self._session_windows:
             self._set_session_alternatives()
-        for metric in ("release_to_text_ms", "decode_ms", "lip_capture_fps",
-                       "lip_raw_frames", "lip_max_frame_gap_ms"):
+        for metric in _PER_RESULT_METRICS:
             self.state["metrics"].pop(metric, None)
         if lips is not None:
             self.state["metrics"].update(
                 lip_capture_fps=lips.capture_fps,
                 lip_raw_frames=lips.raw_frames,
                 lip_max_frame_gap_ms=lips.max_frame_gap_ms,
+                lip_start_ms=lips.start_ms,
+                lip_end_ms=lips.end_ms,
+                lip_candidate_count=len(self.state["candidates"]),
             )
+        if decision.status == "accepted" and decision.text:
+            # Only verified gesture compositions are accepted without a tap.
+            self.state["metrics"]["accepted_source"] = "gesture"
+        if self._session_evidence:
+            self.state["metrics"]["session_chunk_evidence"] = copy.deepcopy(self._session_evidence)
+        if apply_phrases:
+            self._apply_phrase_suggestions(
+                lips, session=bool(self.state["session_active"] and self._session_windows))
         self.state["metrics"]["fusion_ms"] = round((time.perf_counter() - start) * 1000, 2)
         self._cleanup_generation += 1
         labels = list(dict.fromkeys(e.label for e in usable_signs(events, self._fusion_vocabulary, now, since)))
@@ -539,6 +617,97 @@ class Runtime:
             "status": "pending" if pending else ("idle" if self.cleanup.public_config()["enabled"] else "disabled"),
             "suggestion": "", "latency_ms": 0, "error": "", "source_revision": self.revision,
         }
+
+    def _apply_phrase_suggestions(self, lips=None, session=False):
+        """Offer the person's own phrases behind every recognised alternative.
+
+        Never changes the decision text or the order or content of existing
+        alternatives; adds at most ``phrase_match.MAX_SUGGESTIONS`` texts at
+        the end and lists them in ``phrase_matches``. Nothing is offered
+        without a non-empty lip candidate. A suggestion whose negation, number
+        or safety words differ from the displayed text marks the decision as a
+        conflict, so the person must choose explicitly.
+
+        Single window: phrases are compared with the lip n-best. Session: with
+        the whole accumulated text and its chunk-swapped variants (a phrase
+        split across endpointed chunks), and, from two chunks on, with the last
+        chunk's n-best, offered as earlier chunks + phrase (like the existing
+        chunk swaps, earlier recognised words are kept).
+        """
+        self.state["phrase_matches"] = []
+        self.state["metrics"].pop("phrase_match", None)
+        decision = self.state["decision"]
+        if session:
+            candidates = [text for text in self.state["alternatives"] if text]
+        else:
+            candidates = list(dict.fromkeys(c.strip() for c in (lips.candidates if lips else [])
+                                            if isinstance(c, str) and c.strip()))
+        if not candidates:
+            return
+        phrases = self._model_watch.suggestion_phrases()
+        evidence = {"enabled": self.phrase_suggestions, "phrases": len(phrases),
+                    "candidates": len(candidates), "already_listed": 0, "offered": []}
+        self.state["metrics"]["phrase_match"] = evidence
+        if not self.phrase_suggestions or not phrases:
+            return
+        top = decision["text"] or candidates[0]
+        existing = list(self.state["alternatives"])
+        matches = phrase_match.match_phrases(candidates, phrases, top=top, existing=existing)
+        evidence["already_listed"] = sum(m.already_listed for m in matches)
+        offers = [(m, m.phrase, "session" if session else "window") for m in matches if not m.already_listed]
+        if session and len(self._session_windows) > 1:
+            earlier = [selected for selected, _ in self._session_windows[:-1] if selected]
+            last_selected, last_candidates = self._session_windows[-1]
+            listed = {phrase_match.normalized(text) for text in existing}
+            for m in phrase_match.match_phrases(last_candidates, phrases, top=last_selected):
+                text = " ".join([*earlier, m.phrase])
+                if m.already_listed or phrase_match.normalized(text) in listed:
+                    continue
+                differs = phrase_match.sensitive_words(text) != phrase_match.sensitive_words(top)
+                offers.append((replace(m, sensitive_difference=differs), text, "last_chunk"))
+        offered = []
+        for m, text, scope in offers:
+            if text in existing or text in offered:
+                continue
+            offered.append(text)
+            evidence["offered"].append({**m.evidence(), "scope": scope})
+            if len(offered) == phrase_match.MAX_SUGGESTIONS:
+                break
+        if not offered:
+            return
+        self.state["alternatives"].extend(offered)
+        self.state["phrase_matches"] = offered
+        # A gained suggestion is never auto-accepted (lip decisions never are).
+        decision["status"] = "confirmation_needed"
+        if any(item["sensitive_difference"] for item in evidence["offered"]):
+            decision.update(reason="conflict", matched_signs=[])
+
+    def _accepted_source(self, text):
+        """Compact, text-free provenance of a confirmed alternative."""
+        candidates = self.state["candidates"]
+        if text in self.state["phrase_matches"]:
+            return "phrase_suggestion"
+        if self._session_windows and text == self.session.text:
+            return "session_text"
+        if candidates and text == candidates[0]:
+            return "lip_top"
+        if text in candidates:
+            return "lip_candidate"
+        if text and text == self.state["cleanup"].get("suggestion"):
+            return "cleanup_suggestion"
+        if self._session_windows:
+            return "session_alternative"
+        if text == self.state["decision"]["text"] and self.state["decision"]["reason"] in {
+                "agreement", "partial_agreement", "sign_only"}:
+            return "fusion" if candidates else "gesture"
+        if any(text == entry.get("phrase") for entry in self._fusion_vocabulary.values()):
+            return "gesture"
+        return "other"
+
+    def set_phrase_suggestions(self, enabled):
+        """Switch personal phrase suggestions; takes effect from the next result."""
+        with self.lock:
+            self.phrase_suggestions = bool(enabled)
 
     def _cleanup_result(self, generation, revision, result):
         with self.lock:
@@ -612,6 +781,7 @@ class Runtime:
             # Only an explicit new camera session clears accumulated words.
             self.session.reset()
             self._session_windows.clear()
+            self._session_evidence.clear()
             self._session_conflict = False
             self.session_signs.clear()
             self.state["session_gestures"] = []
@@ -668,6 +838,7 @@ class Runtime:
         self.record_generation = self.window_generation
         self.record_start = clock_ms()
         self._record_generation += 1
+        self._window_dropped_frames = 0
         self.release_ms = self.finish_at = None
         self._window_motion = motion and mode != "lips"
         self._window_motion_done = not self._window_motion
@@ -720,6 +891,7 @@ class Runtime:
         # Cancel publishes a decision, so discard the accumulated session first.
         self.session.reset()
         self._session_windows.clear()
+        self._session_evidence.clear()
         self._session_conflict = False
         self.session_signs.clear()
         self.events.clear()
@@ -752,6 +924,12 @@ class Runtime:
             CorrectionStore(self.profile).record(
                 original=original, corrected=corrected,
                 candidates=list(self.state["alternatives"]), learn=True)
+            self._model_watch.note_learned(corrected)
+        # The edit is a new revision: phrase rows belonged to the old result.
+        if self.state["phrase_matches"]:
+            self.state["alternatives"] = [text for text in self.state["alternatives"]
+                                          if text not in self.state["phrase_matches"]]
+            self.state["phrase_matches"] = []
         if corrected not in self.state["alternatives"]:
             self.state["alternatives"].append(corrected)
         self.state["decision"].update(text=corrected, status="accepted", reason="corrected",
@@ -759,6 +937,7 @@ class Runtime:
         self.revision += 1
         self.confirmed_revision = self.revision
         self.state["last_correction"] = "Correction saved for future training" if learn else "Correction applied locally"
+        self.state["metrics"].update(accepted_source="manual_edit", accepted_candidate_index=None)
         self._reset_cleanup_suggestion()
 
     def _action_confirm(self, data):
@@ -766,6 +945,10 @@ class Runtime:
         text = data.get("text", "")
         if not text or text not in self.state["alternatives"]:
             raise ValueError("Select one of the displayed alternatives")
+        candidates = self.state["candidates"]
+        self.state["metrics"].update(
+            accepted_source=self._accepted_source(text),
+            accepted_candidate_index=candidates.index(text) if text in candidates else None)
         self.state["decision"]["text"] = text
         self.state["decision"]["status"] = "accepted"
         self.confirmed_revision = self.revision
@@ -862,6 +1045,19 @@ class Runtime:
                     alternatives.append(" ".join(chunk for chunk in chunks if chunk))
         self.state["alternatives"] = list(dict.fromkeys(alternatives))
 
+    def _chunk_evidence(self, result, reason):
+        """Text-free decoder and capture evidence for one session chunk."""
+        return {"candidate_count": len(result.candidates) if result else 0,
+                "candidate_scores": list(result.candidate_scores) if result else [],
+                "start_ms": result.start_ms if result else None,
+                "end_ms": result.end_ms if result else None,
+                "raw_frames": result.raw_frames if result else 0,
+                "capture_fps": result.capture_fps if result else None,
+                "max_frame_gap_ms": result.max_frame_gap_ms if result else None,
+                "decode_ms": result.decode_ms if result else None,
+                "dropped_frames": self._window_dropped_frames,
+                "selected": reason}
+
     def _publish_session(self, result, window_events=None):
         """Append a completed chunk; fuse explicit motion at its own boundary."""
         if window_events is not None:
@@ -874,11 +1070,13 @@ class Runtime:
             selected = decision.text.strip()
             if selected or any(c.strip() for c in candidates):
                 self._session_windows.append((selected, candidates))
+                self._session_evidence.append(self._chunk_evidence(result, decision.reason))
             self.session.append(selected)
             self.events.clear()  # Window evidence must not rerank a later session chunk.
         elif result is not None and result.candidates:
             selected = result.candidates[0].strip()
             self._session_windows.append((selected, result.candidates))
+            self._session_evidence.append(self._chunk_evidence(result, "lip_only"))
             self.session.append(selected)
         text = self.session.text
         self.state["session_text"] = text
@@ -892,12 +1090,14 @@ class Runtime:
                                   max_frame_gap_ms=result.max_frame_gap_ms) if text and result else
                         LipResult([text], 0) if text else None)
         self._publish(session_lips, list(self.events) if combined and window_events is None else [], clock_ms(),
-                      self.record_start if self._window_motion else None, cleanup_labels=context)
+                      self.record_start if self._window_motion else None, cleanup_labels=context,
+                      apply_phrases=False)
         # Standalone gesture choices are not complete accumulated-session text.
         if self._session_windows:
             self._set_session_alternatives()
         if self._session_conflict and text:
             self.state["decision"].update(status="confirmation_needed", reason="conflict", matched_signs=[])
+        self._apply_phrase_suggestions(session_lips, session=bool(self._session_windows))
         if not self.state["session_active"]:
             self.state["session_finalizing"] = False
 
@@ -952,6 +1152,8 @@ class Runtime:
                    for frames in (self.hand_frames, self.lip_frames)]
         if preserve and any(dropped):
             self.capture_dropped_frames += 1
+        if preserve and dropped[1]:
+            self._window_dropped_frames += 1
         if self.capture_dropped_frames:
             self.state["metrics"]["capture_dropped_frames"] = self.capture_dropped_frames
 
@@ -1158,6 +1360,13 @@ class Runtime:
             if recognizer is not None:
                 recognizer.close()
 
+    @staticmethod
+    def _capture_lower_bound(adapter, start):
+        pre_roll = getattr(adapter, "pre_roll_ms", None)
+        if start is None or isinstance(pre_roll, bool) or not isinstance(pre_roll, (int, float)):
+            return start
+        return start - max(0, pre_roll)
+
     def _lips(self, worker_gen=0, worker_stop=None):
         adapter = None
         active_generation = None
@@ -1218,7 +1427,11 @@ class Runtime:
                         adapter.recording = None
                     active_start = active_generation = None
                 if packet and packet[1] != last_processed_ts:
-                    in_capture = (active_start is not None and packet[1] >= active_start
+                    # A frame queued before the start but dequeued after it is
+                    # still pre-roll: an adapter that declares a pre-roll takes
+                    # it (and enforces its own window boundaries).
+                    lower = self._capture_lower_bound(adapter, active_start)
+                    in_capture = (active_start is not None and packet[1] >= lower
                                   and (end is None or packet[1] <= end))
                     if active_start is None or in_capture:
                         adapter.process(*packet)
@@ -1254,8 +1467,9 @@ class Runtime:
                     # Producers enqueue chronologically under this same lock. Drain
                     # every queued in-window frame before decoding, skipping later
                     # frames rather than letting them hold up finalization.
+                    lower = self._capture_lower_bound(adapter, active_start)
                     with self.lip_frames.mutex:
-                        pending_capture = any(active_start <= ts <= self.finish_at
+                        pending_capture = any(lower <= ts <= self.finish_at
                                               for _, ts in self.lip_frames.queue)
                     if pending_capture:
                         continue
@@ -1277,6 +1491,7 @@ class Runtime:
                             self._publish(result, events, self.finish_at, active_start)
                         self.state["metrics"].update(decode_ms=result.decode_ms,
                             release_to_text_ms=clock_ms() - released,
+                            lip_dropped_frames=self._window_dropped_frames,
                             **getattr(adapter, "last_metrics", {}))
                 except Exception as exc:
                     with self.lock:
@@ -1406,6 +1621,7 @@ class Runtime:
                 self.seen.clear()
                 self.session.reset()
                 self._session_windows.clear()
+                self._session_evidence.clear()
                 self._session_conflict = False
                 self.session_signs.clear()
                 self.tracking = {"hands": [], "mouth": None}
@@ -1446,8 +1662,8 @@ class Runtime:
                     "sign_diagnostics": None,
                     "camera_error": "", "lip_error": "", "sign_error": "", "error": "",
                     "decision": asdict(Decision("", "unavailable", "sign_only", "local")),
-                    "candidates": [], "candidate_scores": [], "alternatives": [], "last_sign": None,
-                    "metrics": {}, "last_spoken": "", "last_correction": "", "recording": False,
+                    "candidates": [], "candidate_scores": [], "alternatives": [], "phrase_matches": [],
+                    "last_sign": None, "metrics": {}, "last_spoken": "", "last_correction": "", "recording": False,
                     "auto_recognition": False,
                     "session_active": False, "session_finalizing": False,
                     "session_text": "", "session_chunks": [], "session_gestures": [],
