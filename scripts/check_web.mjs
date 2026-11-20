@@ -84,6 +84,12 @@ async function run(variant, coreOnly=false) {
     const dialog=async accept=>{await waitFor(()=>dialogs.length,'native confirmation dialog');const d=dialogs.shift();expect(d.type==='confirm','native confirm',d);await send('Page.handleJavaScriptDialog',{accept});};
     // Test-double state fields from the fixture (see OVERLAY_FIELDS there).
     const overlay=fields=>protocol.command('overlay',{fields});
+    // TEST DOUBLE for first-run setup: the fixture overlays a labelled `setup` state and the page's
+    // /api/setup/* requests are answered in the page and recorded, so no check ever downloads anything.
+    const setupFixture={busy:false,reload_needed:false,assets:[{id:'lips',label:'Lip reading',status:'missing',bytes_done:0,bytes_total:0,error:'',size_note:'about 1.2 GB',license_note:'Fixture licence note: non-commercial research use only.'}]};
+    const interceptSetup=()=>evaluate(`(()=>{if(window.__setupRequests) return;const original=window.fetch.bind(window);window.__setupOriginalFetch=original;window.__setupRequests=[];window.fetch=(u,o)=>{if(String(u).startsWith('/api/setup/')){window.__setupRequests.push([String(u),JSON.parse(o.body)]);return Promise.resolve(new Response('{"ok":true}',{status:200,headers:{'Content-Type':'application/json'}}));}return original(u,o);};})()`);
+    const releaseSetup=()=>evaluate('(()=>{if(window.__setupOriginalFetch){window.fetch=window.__setupOriginalFetch;delete window.__setupOriginalFetch;delete window.__setupRequests;}})()');
+    const setupRequests=()=>evaluate('window.__setupRequests||[]');
     // While a native confirm is open, page JS cannot be evaluated; wait on CDP events only.
     const dialogOpened=async ms=>{const end=Date.now()+ms;while(Date.now()<end && !dialogs.length) await sleep(50);return dialogs.length>0;};
     const action=async (name,data)=>evaluate(`(async()=>fetch('/api/action/${name}',{method:'POST',headers:{'Content-Type':'application/json','X-Lipflow-Token':(await fetch('/api/state').then(r=>r.json())).token},body:JSON.stringify(${JSON.stringify(data)})}).then(async r=>({ok:r.ok,body:await r.json()})))()`);
@@ -107,7 +113,7 @@ async function run(variant, coreOnly=false) {
     console.log(JSON.stringify({variant,origin,snapshotID:snapshotId,identity:ready.identity,browser:browserVersion.product,node:process.version,evidence:'real DOM/HTTP; silent speech dispatch; some DOM-dispatched input; no physical capture or audible speech'}));
     if(process.argv.includes('--keyboard-profile')) {
       const key=async(name,code=name)=>{
-        const virtual={Tab:9,Enter:13}[code];
+        const virtual={Tab:9,Enter:13,Space:32}[code];
         await send('Input.dispatchKeyEvent',{type:'keyDown',key:name,code,windowsVirtualKeyCode:virtual,...(code==='Enter'?{text:'\r'}:{})});
         await send('Input.dispatchKeyEvent',{type:'keyUp',key:name,code,windowsVirtualKeyCode:virtual});
       };
@@ -140,9 +146,9 @@ async function run(variant, coreOnly=false) {
       console.log('PASS keyboard typing/apply/explicit silent dispatch and draft navigation (CDP keys/text; no DOM focus or click)');
       currentCase='profile-draft-boundary';
       // Profile controls below are DOM-dispatched, not keyboard evidence.
-      const settings=async()=>{await click('a[href="/settings"]');await waitFor(()=>evaluate("location.pathname==='/settings' && !!document.querySelector('#profile-select')"),'profile Settings');await waitFor(()=>evaluate("[...document.querySelector('#profile-select').options].some(x=>x.value==='other')"),'profile options ready');};
+      const settings=async()=>{await click('a[href="/settings"]');await waitFor(()=>evaluate("location.pathname==='/settings' && !!document.querySelector('#profile-select')").catch(()=>false),'profile Settings');await waitFor(()=>evaluate("[...document.querySelector('#profile-select').options].some(x=>x.value==='other')").catch(()=>false),'profile options ready');};
       const choose=async id=>{await evaluate(`document.querySelector('#profile-select').value=${JSON.stringify(id)}`);await click('#profile-switch-btn');};
-      const back=async id=>{await click('a[href="/"]');await waitFor(()=>evaluate(`location.pathname==='/' && !!document.querySelector('#corrected-text') && typeof state!=='undefined' && state?.profile_id===${JSON.stringify(id)}`),'return to rendered profile message');};
+      const back=async id=>{await click('a[href="/"]');await waitFor(()=>evaluate(`location.pathname==='/' && !!document.querySelector('#corrected-text') && typeof state!=='undefined' && state?.profile_id===${JSON.stringify(id)}`).catch(()=>false),'return to rendered profile message');};
       await settings();await choose('other');await dialog(false);
       expect((await state()).profile_id==='default','declined profile switch leaves active profile unchanged',await state());
       await choose('other');await dialog(true);await waitFor(async()=>(await state()).profile_id==='other','other profile selected');
@@ -167,6 +173,22 @@ async function run(variant, coreOnly=false) {
       await waitFor(async()=>(await state()).decision.text==='Thank you, that helps.' && (await visible()).editor==='Thank you, that helps.','keyboard phrase applied');
       expect((await snap()).speech_calls.length===spokenBefore,'a quick phrase never speaks',await snap());
       console.log('PASS keyboard quick phrase (CDP Tab/Enter; phrases from the fixture test double)');
+      currentCase='keyboard-setup-consent';
+      await interceptSetup();
+      await overlay({setup:setupFixture});
+      await waitFor(()=>evaluate("!document.querySelector('#setup-panel').hidden && !!document.querySelector('#setup-download-lips')"),'fixture setup offer rendered');
+      await reach(x=>x.id==='setup-download-lips');await key('Enter');
+      await sleep(300);
+      expect((await setupRequests()).length===0 && await evaluate("document.activeElement?.id==='setup-consent-lips' && !document.activeElement.checked"),'Enter on Download without consent requests nothing and moves focus to the unticked consent',{requests:await setupRequests(),focus:await evaluate('document.activeElement?.id')});
+      await key(' ','Space');
+      expect(await evaluate("document.querySelector('#setup-consent-lips').checked"),'Space ticks the consent box',await evaluate('document.activeElement?.id'));
+      await reach(x=>x.id==='setup-download-lips');await key('Enter');
+      await waitFor(async()=>(await setupRequests()).length===1,'keyboard Download sends one request');
+      expect(JSON.stringify(await setupRequests())==='[["/api/setup/download",{"id":"lips","accept_license":true}]]','consented download request body',await setupRequests());
+      await overlay({setup:{...setupFixture,assets:[{...setupFixture.assets[0],status:'ready'}]}});
+      await waitFor(()=>evaluate("document.querySelector('#setup-panel').hidden"),'nothing left to set up shows nothing');
+      await overlay({setup:null}); await releaseSetup();
+      console.log('PASS keyboard setup consent and Download (CDP Tab/Space/Enter; setup state and download endpoint are page/fixture test doubles)');
       return;
     }
     currentCase='typed-speech';
@@ -238,6 +260,27 @@ async function run(variant, coreOnly=false) {
     await overlay({quick_phrases:[]});
     await waitFor(()=>evaluate("document.querySelector('#quick-phrases').hidden"),'an empty phrase list shows nothing');
     await overlay({quick_phrases:null});
+    currentCase='setup-consent';
+    const stageTop=()=>evaluate("Math.round(document.querySelector('.stage').getBoundingClientRect().top+scrollY)");
+    const topBefore=await stageTop(), setupSpeech=(await snap()).speech_calls.length;
+    await interceptSetup();
+    await overlay({setup:setupFixture});
+    await waitFor(()=>evaluate("!document.querySelector('#setup-panel').hidden && document.querySelector('#setup-license-lips')?.textContent.includes('Fixture licence note') && !document.querySelector('#setup-consent-lips').checked"),'setup offer shows the licence and an unticked consent');
+    await click('#setup-download-lips'); await sleep(300);
+    expect((await setupRequests()).length===0,'Download without the consent tick requests nothing',await setupRequests(),'setup-consent');
+    await click('#setup-consent-lips'); await click('#setup-download-lips');
+    await waitFor(async()=>(await setupRequests()).length===1,'consented download requested once');
+    expect(JSON.stringify(await setupRequests())==='[["/api/setup/download",{"id":"lips","accept_license":true}]]','download request carries the explicit licence acceptance',await setupRequests());
+    await overlay({setup:{...setupFixture,busy:true,assets:[{...setupFixture.assets[0],status:'downloading',bytes_done:300e6,bytes_total:1.2e9}]}});
+    await waitFor(()=>evaluate("document.querySelector('#setup-progress-lips')?.value===300000000 && document.querySelector('#setup-progress-lips').max===1200000000 && document.querySelector('#setup-bytes-lips').textContent==='300 MB of 1.20 GB · 25%' && !document.querySelector('#setup-cancel-lips').hidden"),'real progress bar with bytes and percentage');
+    expect(await stageTop()===topBefore && await evaluate("!document.querySelector('#corrected-text').disabled"),'message panel stays put and typing stays available during setup',{before:topBefore,after:await stageTop()});
+    await overlay({setup:{...setupFixture,reload_needed:true,assets:[{...setupFixture.assets[0],status:'ready'}]}});
+    await waitFor(()=>evaluate("!document.querySelector('#setup-ready').hidden && !document.querySelector('#setup-reload').disabled && document.querySelector('#setup-assets').children.length===0"),'ready step offers an explicit Start using it');
+    await sleep(600);
+    expect((await snap()).state.setup?.reload_needed===true && (await setupRequests()).length===1 && (await snap()).speech_calls.length===setupSpeech,'setup state alone never reloads, downloads or speaks',{requests:await setupRequests()});
+    await overlay({setup:{...setupFixture,assets:[{...setupFixture.assets[0],status:'ready'}]}});
+    await waitFor(()=>evaluate("document.querySelector('#setup-panel').hidden"),'nothing left to set up shows nothing on the message page');
+    await overlay({setup:null}); await releaseSetup();
     console.log(`PASS core journeys variant=${variant}`);
     if(coreOnly) return;
     currentCase='models-reload-notice';
@@ -369,7 +412,7 @@ async function run(variant, coreOnly=false) {
 async function main() {
   if(process.argv.includes('--calibrate')) {
     await run('control',true);
-    for(const [variant,expected,check] of [['phrase-replaces-draft','quick-phrase','phrase-draft-confirm'],['conflict-stale','conflict-selection','selected-editor'],['draft-loss','draft-continuity','incoming-draft'],['confirm-edit-stale','pending-confirm-edit','edited-confirm-dispatch'],['choice-label-mismatch','conflict-selection','visible-label']]) {
+    for(const [variant,expected,check] of [['phrase-replaces-draft','quick-phrase','phrase-draft-confirm'],['conflict-stale','conflict-selection','selected-editor'],['draft-loss','draft-continuity','incoming-draft'],['confirm-edit-stale','pending-confirm-edit','edited-confirm-dispatch'],['choice-label-mismatch','conflict-selection','visible-label'],['download-without-consent','setup-consent','setup-consent']]) {
       let found; try {await run(variant,true);} catch(e) {found={caseId:e.caseId,checkId:e.checkId}; console.log(`calibration ${variant}: ${e.message}`);}
       currentCase='calibration'; expect(found?.caseId===expected && found?.checkId===check,`${variant} fails ${expected}/${check}, not a timeout or unrelated assertion`,found);
     }

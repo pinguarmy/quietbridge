@@ -65,6 +65,10 @@ def prepare_ui(destination, variant):
         source = replace_once(source,
             "  if (editorDirty && editor?.value !== phrase && !confirmDiscard('Use this phrase instead of your unfinished edit? The unfinished edit will be replaced.')) return;\n",
             '')
+    elif variant == 'download-without-consent':
+        source = replace_once(source,
+            "  if (!item.consent.checked) {",
+            "  if (false) {")
     elif variant == 'confirm-edit-stale':
         source = replace_once(source,
             "    if (editorDirty || editVersion !== version || editorProfile !== profile || chosenText !== message\n        || state.revision !== revision || state.decision.status !== 'accepted' || state.decision.text !== message) {",
@@ -88,11 +92,15 @@ def identity(ui):
 
 
 # TEST DOUBLE: state fields the browser check drives directly (quick_phrases,
-# models_reload_needed/_detail, speech_error). They override whatever the
-# rehearsal runtime reports, so the UI contract is checked even before or
-# independently of the runtime producing them. A profile reload clears the
-# models_reload_* overlay, as a real reload of the promoted model would.
-OVERLAY_FIELDS = {'quick_phrases', 'models_reload_needed', 'models_reload_detail', 'speech_error'}
+# models_reload_needed/_detail, speech_error, and the setup / phrase_matches /
+# speech_settings / app contract). They override whatever the rehearsal runtime
+# reports, so the UI contract is checked even before or independently of the
+# runtime producing them. A profile reload clears the models_reload_* overlay,
+# as a real reload of the promoted model would. An overlaid `setup` is display
+# state only: the browser check intercepts /api/setup/* in the page, so no
+# check ever starts a real download.
+OVERLAY_FIELDS = {'quick_phrases', 'models_reload_needed', 'models_reload_detail', 'speech_error',
+                  'setup', 'phrase_matches', 'speech_settings', 'app'}
 
 
 class Fixture:
@@ -128,12 +136,26 @@ class Fixture:
         runtime.snapshot = overlaid_snapshot
         runtime.switch_profile = reloading_switch_profile
 
+    def _install_payload_overlay(self, server):
+        # The server adds setup / speech_settings / app after the runtime snapshot,
+        # so state responses are overlaid once more where they are written.
+        fixture, handler = self, server.RequestHandlerClass
+
+        class OverlaidHandler(handler):
+            def _json(self, status, data):
+                if isinstance(data, dict) and 'server_instance' in data and fixture.overlay:
+                    data = {**data, **fixture.overlay}
+                return super()._json(status, data)
+
+        server.RequestHandlerClass = OverlaidHandler
+
     def start(self, port=0):
         runtime = Runtime(rehearsal=True, profile_manager=self.manager)
         runtime.speaker.close()
         runtime.speaker = SilentSpeaker()
         self._install_overlay(runtime)
         server = server_module.make_server(runtime, port)
+        self._install_payload_overlay(server)
         thread = threading.Thread(target=server.serve_forever,
                                   kwargs={'poll_interval': 0.05}, daemon=True)
         thread.start()
@@ -167,7 +189,7 @@ def emit(payload):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--variant', choices=['control', 'conflict-stale', 'draft-loss', 'confirm-edit-stale', 'choice-label-mismatch', 'phrase-replaces-draft'], default='control')
+    parser.add_argument('--variant', choices=['control', 'conflict-stale', 'draft-loss', 'confirm-edit-stale', 'choice-label-mismatch', 'phrase-replaces-draft', 'download-without-consent'], default='control')
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='quietbridge-web-check-') as temporary:
         root = Path(temporary)

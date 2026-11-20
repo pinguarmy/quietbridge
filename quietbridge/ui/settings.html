@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/design.css"><link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<main class="page settings">
+<main id="main" class="page settings">
   <header class="topbar">
     <div class="topbar-brand"><a class="wordmark" href="/">QuietBridge<span class="bridge-mark" aria-hidden="true"></span></a></div>
     <nav class="nav" aria-label="Main navigation"><a href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>Back to your message</a></nav>
@@ -19,10 +19,36 @@
   </div>
   <p id="error" class="callout callout-danger settings-error" role="alert"></p>
   <div class="settings-stack">
+    <section id="downloads" class="card settings-card" aria-labelledby="downloads-heading" hidden>
+      <div class="card-head"><h2 id="downloads-heading">Downloads</h2><p class="muted small">One-time model files for the camera. Typing never needs them. Nothing downloads until you choose.</p></div>
+      <div id="setup-assets" class="setup-assets setup-compact"></div>
+      <div id="setup-ready" class="subpanel setup-ready" hidden>
+        <p id="setup-ready-detail"><strong>Download complete.</strong> Start using it to load the new models now. This clears the current message; an unfinished typed edit stays in its tab.</p>
+        <div class="form-actions"><button id="setup-reload" class="btn btn-primary btn-s" type="button" aria-describedby="setup-ready-detail setup-reload-blocked">Start using it</button></div>
+        <p id="setup-reload-blocked" class="hint"></p>
+      </div>
+      <p id="setup-status" class="hint" role="status" aria-live="polite"></p>
+      <p id="setup-announce" class="sr-only" role="status" aria-live="polite"></p>
+    </section>
+
     <section class="card settings-card" aria-labelledby="mode-heading">
       <h2 id="mode-heading">How you communicate</h2>
       <div class="segmented mode-switch" role="group" aria-labelledby="mode-heading"><button type="button" data-mode="combined" aria-describedby="mode-hint">Lips and gestures</button><button type="button" data-mode="lips" aria-describedby="mode-hint">Lips only</button><button type="button" data-mode="signs" aria-describedby="mode-hint">Gestures only</button></div>
       <p id="mode-hint" class="hint">Either input can work on its own.</p>
+    </section>
+
+    <section id="voice" class="card settings-card" aria-labelledby="voice-heading" hidden>
+      <div class="card-head"><h2 id="voice-heading">Voice</h2><p class="muted small">How Speak message sounds on this computer. Changing it here never speaks.</p></div>
+      <div id="voice-controls" class="settings-form">
+        <div class="field">
+          <span id="voice-rate-label" class="label">Speaking rate</span>
+          <div class="segmented voice-rate" role="group" aria-labelledby="voice-rate-label"><button id="voice-rate-slow" type="button" aria-pressed="false">Slow</button><button id="voice-rate-normal" type="button" aria-pressed="false">Normal</button><button id="voice-rate-fast" type="button" aria-pressed="false">Fast</button></div>
+        </div>
+        <div id="voice-select-field" class="field"><label for="voice-select">Voice</label><select id="voice-select" class="select"><option value="">System default</option></select></div>
+        <p id="voice-list-note" class="hint"></p>
+      </div>
+      <p id="voice-unavailable" class="hint"></p>
+      <p id="voice-status" class="hint" role="status" aria-live="polite"></p><p id="voice-error" class="callout callout-danger" role="alert"></p>
     </section>
 
     <section class="card settings-card" aria-labelledby="profile-heading">
@@ -90,8 +116,28 @@
         <p class="hint">Frame rates describe actual input, not the model's 25 fps target. Preview mode does not measure vision performance. Speech timing measures dispatch, not audible onset.</p>
       </div>
     </details>
+
+    <section id="quit-card" class="card settings-card quit-card" aria-labelledby="quit-heading" hidden>
+      <div class="quit-row">
+        <div class="card-head"><h2 id="quit-heading">Quit QuietBridge</h2><p class="muted small">Stops the camera and QuietBridge on this computer. An unfinished typed edit stays visible so you can copy it.</p></div>
+        <button id="quit-button" class="btn btn-danger-quiet quit-button" type="button" aria-describedby="quit-status quit-error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v8"/><path d="M6.3 7.3a8 8 0 1 0 11.4 0"/></svg>Quit QuietBridge</button>
+      </div>
+      <p id="quit-status" class="hint" role="status" aria-live="polite"></p><p id="quit-error" class="callout callout-danger" role="alert"></p>
+    </section>
   </div>
-  <footer class="site-footer"><p>Recognition and speech run on this device.</p></footer>
+  <footer class="site-footer"><p>Recognition and speech run on this device.</p><p id="about-line" class="about-line"></p></footer>
 </main>
+<section id="stopped-screen" class="stopped-screen" aria-labelledby="stopped-heading" hidden>
+  <div class="stopped-card card">
+    <span class="bridge-mark stopped-mark" aria-hidden="true"></span>
+    <h2 id="stopped-heading" class="stopped-heading" tabindex="-1">QuietBridge has stopped.</h2>
+    <p class="stopped-lead">You can close this tab. To use QuietBridge again, start it on this computer; this page reconnects by itself when it is back.</p>
+    <div id="stopped-draft-block" class="stopped-draft" hidden>
+      <label for="stopped-draft" class="label">Your unfinished message</label>
+      <textarea id="stopped-draft" class="textarea" dir="auto" rows="3" readonly></textarea>
+      <div class="form-actions"><button id="stopped-copy" class="btn btn-s" type="button">Copy message</button><p id="stopped-copy-status" class="hint" role="status" aria-live="polite"></p></div>
+    </div>
+  </div>
+</section>
 <script src="/app.js"></script><script src="/cleanup-settings.js"></script>
 </body></html>

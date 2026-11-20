@@ -75,12 +75,32 @@
         <div id="quick-phrases-list" class="chips quick-phrase-list" role="group" aria-labelledby="quick-phrases-heading" aria-describedby="quick-phrases-source"></div>
         <button id="quick-phrases-more" class="btn btn-ghost btn-s phrases-more" type="button" aria-controls="quick-phrases-list" aria-expanded="false" hidden>Show all phrases</button>
       </section>
+      <section id="recent-card" class="card phrases recent" aria-labelledby="recent-heading" hidden>
+        <div class="phrases-head recent-head">
+          <h2 id="recent-heading">Recent</h2>
+          <button id="recent-clear" class="btn btn-ghost btn-s" type="button">Clear recent</button>
+        </div>
+        <div id="recent-list" class="chips quick-phrase-list" role="group" aria-labelledby="recent-heading" aria-describedby="recent-note"></div>
+        <button id="recent-more" class="btn btn-ghost btn-s phrases-more" type="button" aria-controls="recent-list" aria-expanded="false" hidden>Show all recent</button>
+        <p id="recent-note" class="hint">Spoken or shown in this tab. Choosing one sets your message without speaking it. Kept only in this tab, never sent anywhere.</p>
+      </section>
     </div>
     <div class="column column-camera">
       <section class="card camera" aria-labelledby="capture-heading">
         <div class="camera-head"><h2 id="capture-heading">Your camera</h2><span class="badge badge-plain"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 9.3V6a3 3 0 0 0-5.7-1.3M9 9v2a3 3 0 0 0 5 2.2"/><path d="M18.8 13.5A7 7 0 0 0 19 11M5 11a7 7 0 0 0 11.3 5.5M12 18v3"/><path d="m4 4 16 16"/></svg>No microphone</span></div>
         <div id="rehearsal-banner" class="callout" hidden><span>Preview only. No camera or recognition. <a href="/settings#preview">Try an example</a></span></div>
         <p id="input-warning" class="callout callout-warn" role="status"></p>
+        <div id="setup-panel" class="setup-panel" role="group" aria-label="Camera setup" hidden>
+          <p id="setup-intro" class="setup-intro"></p>
+          <div id="setup-assets" class="setup-assets"></div>
+          <div id="setup-ready" class="setup-ready" hidden>
+            <h3 id="setup-ready-heading">Download complete</h3>
+            <p id="setup-ready-detail">Start using it to load the new models now. This clears the current message; an unfinished typed edit stays in this tab. Nothing loads until you choose.</p>
+            <div class="callout-actions"><button id="setup-reload" class="btn btn-primary btn-s" type="button" aria-describedby="setup-ready-detail setup-reload-blocked">Start using it</button></div>
+            <p id="setup-reload-blocked" class="hint"></p>
+          </div>
+          <p id="setup-announce" class="sr-only" role="status" aria-live="polite"></p>
+        </div>
         <section id="models-reload-notice" class="callout callout-accent reload-notice" aria-labelledby="models-reload-heading" hidden>
           <h3 id="models-reload-heading">A newer model is available</h3>
           <p id="models-reload-detail"></p>

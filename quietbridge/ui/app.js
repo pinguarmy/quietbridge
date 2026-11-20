@@ -8,9 +8,14 @@ browserFrameCanvas.width = 960; browserFrameCanvas.height = 720;
 let editorDirty = false, editorProfile = null, editVersion = 0;
 // Text the user explicitly picked from the alternatives for this revision.
 let userSelection = null, stopSpeakingPending = false, largeDisplayOpener = null;
-// The profile's own quick phrases; long lists start collapsed.
-const QUICK_PHRASES_COLLAPSED = 12;
-let renderedPhrases = '', showAllPhrases = false, reloadPending = false;
+// The profile's own quick phrases and this tab's recent messages. Long lists start
+// collapsed to the chips that fit in three rows at the current width (12 chips
+// where no layout can be measured).
+const QUICK_PHRASES_COLLAPSED = 12, CHIP_ROWS_COLLAPSED = 3, RECENT_MAX = 8;
+let renderedPhrases = '', showAllPhrases = false, reloadPending = false, renderedRecent = '', showAllRecent = false;
+// Quit: once QuietBridge was stopped on purpose, polling continues quietly so a
+// restarted app is picked up, but no "connection lost" noise is shown.
+let appStopped = false, stoppedInstance = null, quitPending = false;
 const retiredInstances = new Set();
 const ACTION_TIMEOUT_MS = 15000;
 // Upload target stays ~25 fps; the 960x720 JPEG contract is unchanged.
@@ -22,6 +27,8 @@ const POLL_FAST_MS = 180, POLL_IDLE_MS = 1000, POLL_HIDDEN_MS = 3000, POLL_RECON
 const RECENT_ACTIVITY_MS = 10000;
 let pollTimer = null, pollDueAt = 0, pollInFlight = false, lastUserActivity = Date.now();
 const draftKey = profile => 'quietbridge-unsent-v1:' + (profile || 'default');
+// Recent messages live only in this tab's sessionStorage, per profile; never sent anywhere.
+const recentKey = profile => 'quietbridge-recent-v1:' + (profile || 'default');
 function storageRead(key) { try { return window.sessionStorage?.getItem(key) ?? null; } catch (_) { return null; } }
 function storageWrite(key, value) { try { if (value !== null) window.sessionStorage?.setItem(key, value); else window.sessionStorage?.removeItem(key); } catch (_) {} }
 function persistEditor() {
@@ -215,6 +222,30 @@ function requestAction(name, data = {}) {
   }).finally(() => { pendingActions--; updateMessage(); });
   return actionChain;
 }
+// Requests that do not change the message (downloads, voice, quit): the same token,
+// JSON body and bounded timeout as actions, and never retried automatically.
+async function postJson(url, data = {}) {
+  const controller = new AbortController();
+  let timer;
+  try {
+    const timedOut = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error('The request timed out. Its result is uncertain; check the status shown before trying again.'));
+      }, ACTION_TIMEOUT_MS);
+    });
+    const request = (async () => {
+      const res = await fetch(url, {method:'POST', signal:controller.signal,
+        headers:{'Content-Type':'application/json', 'X-Lipflow-Token':token}, body:JSON.stringify(data)});
+      let result = {};
+      try { result = await res.json(); } catch (_) {}
+      if (!res.ok) throw new Error(result?.error || `QuietBridge refused the request (${res.status}).`);
+      return result;
+    })();
+    return await Promise.race([request, timedOut]);
+  } finally { clearTimeout(timer); wakePoll(); }
+}
+const isStatePayload = value => Boolean(value) && typeof value === 'object' && typeof value.revision === 'number' && Boolean(value.decision);
 
 function render(s) {
   if (retiredInstances.has(s.server_instance)) return false;
@@ -291,6 +322,7 @@ function render(s) {
   // stays static so changing guidance never moves the message or Speak controls.
   text('record-hint', captureHint(s, {motionInput, explicitMotionSession, needsLips, browserCameraAvailable}));
   renderReloadNotice(s);
+  renderSetup(s); renderVoice(s); renderAppInfo(s);
   const d = s.decision, review = d.status === 'confirmation_needed';
   const captureBusy = s.session_active || s.session_finalizing || s.phase !== 'idle';
   const speechError = speechErrorText(s);
@@ -301,7 +333,9 @@ function render(s) {
     if (item) { if (step === flowStep) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current'); }
   });
   const revisionChanged = renderedRevision !== s.revision;
-  const alternativesKey = JSON.stringify([s.alternatives, s.cleanup?.status, s.cleanup?.suggestion, d.status, s.phase]);
+  // The person's own saved phrases close to what was lip-read: offered as labelled choices, never preselected.
+  const phraseMatches = Array.isArray(s.phrase_matches) ? s.phrase_matches.filter(p => typeof p === 'string' && p) : [];
+  const alternativesKey = JSON.stringify([s.alternatives, s.cleanup?.status, s.cleanup?.suggestion, d.status, s.phase, phraseMatches]);
   if (revisionChanged) {
     chosenText = review && d.reason === 'conflict' ? null : (d.text || null);
     userSelection = null;
@@ -327,9 +361,11 @@ function render(s) {
         if (seen.has(key)) return false;
         seen.add(key); return true;
       });
-      if ((review && (d.reason === 'conflict' || alternatives.length > 1)) || (s.cleanup?.status === 'ready' && alternatives.includes(s.cleanup.suggestion))) alternatives.forEach(candidate => {
-        const button = document.createElement('button'); button.className = 'alternative'; button.setAttribute('dir', 'auto');
+      const ownPhraseOffered = alternatives.length > 1 && alternatives.some(candidate => phraseMatches.includes(candidate));
+      if ((review && (d.reason === 'conflict' || alternatives.length > 1)) || (s.cleanup?.status === 'ready' && alternatives.includes(s.cleanup.suggestion)) || ownPhraseOffered) alternatives.forEach(candidate => {
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'alternative'; button.setAttribute('dir', 'auto');
         button.textContent = candidate === s.cleanup?.suggestion && s.cleanup?.status === 'ready' ? `AI suggestion: ${candidate}` : candidate;
+        if (button.textContent === candidate && phraseMatches.includes(candidate)) labelOwnPhrase(button, candidate);
         button.onclick = () => {
           if (speaking) return;
           if (editorDirty && !confirmDiscard('Use these selected words instead of your unfinished edit? The unfinished edit will be replaced.')) return;
@@ -351,7 +387,7 @@ function render(s) {
     $('alternatives').before(status);
   }
   text('cleanup-status', s.cleanup?.status === 'pending' ? 'Preparing an optional AI suggestion…' : s.cleanup?.status === 'error' ? 'AI suggestion unavailable. Your original message is still available.' : s.cleanup?.status === 'ready' ? 'Review the AI suggestion before choosing it.' : '');
-  renderQuickPhrases(s);
+  renderQuickPhrases(s); renderRecent();
   text('speech-error', speechError ? `Speech did not play: ${speechError.replace(/[.!?]*$/, '.')} Use Show large or Copy message instead, or try Speak again.` : '');
   updateMessage();
   renderPreview();
@@ -380,6 +416,14 @@ function render(s) {
   return true;
 }
 
+// "Your phrase" tag on an alternative; the accessible name reads "Your phrase: <words>".
+function labelOwnPhrase(button, candidate) {
+  const tag = document.createElement('span'); tag.className = 'alt-tag'; tag.textContent = 'Your phrase';
+  const separator = document.createElement('span'); separator.className = 'sr-only'; separator.textContent = ': ';
+  const words = document.createElement('span'); words.className = 'alt-text'; words.textContent = candidate;
+  button.replaceChildren(tag, separator, words);
+  button.classList.add('own-phrase');
+}
 function captureHint(s, {motionInput, explicitMotionSession, needsLips, browserCameraAvailable}) {
   if (s.rehearsal) return 'Preview mode does not use a camera or test recognition.';
   if (s.session_finalizing === true) return 'Camera off. Your words stay here while the last result finishes.';
@@ -387,6 +431,9 @@ function captureHint(s, {motionInput, explicitMotionSession, needsLips, browserC
     ? 'Record one sign and its words: keep face, upper body and both hands in view. Finish recording, then Finish message to review.'
     : 'Start recording, make one gesture and mouth its words together, then Finish recording. Finish message stops the camera.';
   if (s.session_active === true || s.auto_recognition === true) return 'Mouth a short phrase. Choose Finish message when you are done. Nothing is spoken yet.';
+  const lipAsset = setupAsset(s, 'lips');
+  if (needsLips && lipAsset && lipAsset.status !== 'ready') return lipAsset.status === 'downloading' ? 'Lip reading is downloading. You can type your message meanwhile.' : 'Lip reading needs its one-time download above. You can type your message meanwhile.';
+  if (needsLips && s.setup?.reload_needed === true && s.lips !== 'ready') return 'The download is complete. Choose Start using it above.';
   if (needsLips && s.lips === 'warming') return 'Getting the lip reader ready…';
   if (needsLips && s.lips === 'unavailable') return 'Lip reading needs attention in Settings.';
   const gesturesReady = s.signs === 'ready' && Object.values(s.vocabulary || {}).some(v => v.enabled ?? v.verified);
@@ -428,32 +475,374 @@ async function reloadModels() {
   } finally { reloadPending = false; if (state) renderReloadNotice(state); }
 }
 
+// ---- First-run setup: one-time model downloads ----
+// Shown from state only. Nothing downloads without the person's informed click
+// (licence note shown first, explicit consent tick), and nothing reloads by itself.
+const SETUP_PURPOSE = {lips: 'read silent lip movements', gestures: 'recognise hand gestures'};
+const SETUP_STATUSES = ['ready', 'missing', 'downloading', 'error'];
+const setupItems = new Map(), setupPending = new Map(), setupAnnounced = new Map();
+let renderedSetupIds = '', setupReloadPending = false;
+function setupAssets(s) {
+  return Array.isArray(s?.setup?.assets) ? s.setup.assets.filter(a => a && typeof a.id === 'string' && a.id) : [];
+}
+function setupAsset(s, id) { return setupAssets(s).find(a => a.id === id) || null; }
+function setupStatus(a) { return SETUP_STATUSES.includes(a.status) ? a.status : 'missing'; }
+function formatBytes(n) {
+  const v = Number(n) || 0;
+  if (v >= 1e9) return (v / 1e9).toFixed(v >= 1e10 ? 1 : 2) + ' GB';
+  if (v >= 1e6) return Math.round(v / 1e6) + ' MB';
+  return v >= 1e3 ? Math.round(v / 1e3) + ' kB' : Math.max(0, Math.round(v)) + ' bytes';
+}
+function setupPercent(a) {
+  const done = Number(a.bytes_done) || 0, total = Number(a.bytes_total) || 0;
+  return total > 0 ? Math.min(100, Math.floor(done / total * 100)) : null;
+}
+function setText(el, value) { const next = String(value ?? ''); if (el && el.textContent !== next) el.textContent = next; }
+function node(tag, className = '', id = '') {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (id) el.id = id;
+  return el;
+}
+// One item per asset, built once and updated in place so focus and the consent tick survive polling.
+function setupItem(asset) {
+  if (setupItems.has(asset.id)) return setupItems.get(asset.id);
+  const key = asset.id.replace(/[^A-Za-z0-9_-]/g, '_');
+  const item = {
+    root: node('div', 'setup-item'), head: node('div', 'setup-item-head'), title: node('h3', 'setup-title', `setup-title-${key}`),
+    badge: node('span', 'badge setup-badge'), explain: node('p', 'setup-explain', `setup-explain-${key}`),
+    failure: node('p', 'callout callout-danger setup-error', `setup-error-${key}`),
+    license: node('p', 'setup-license', `setup-license-${key}`),
+    consentLabel: node('label', 'check setup-consent'), consent: node('input', '', `setup-consent-${key}`), consentText: node('span'),
+    progressWrap: node('div', 'setup-progress'), progress: node('progress', 'progress', `setup-progress-${key}`), bytes: node('p', 'setup-bytes', `setup-bytes-${key}`),
+    actions: node('div', 'setup-actions'), download: node('button', 'btn btn-primary btn-s', `setup-download-${key}`),
+    cancel: node('button', 'btn btn-s', `setup-cancel-${key}`), hint: node('p', 'hint setup-hint', `setup-hint-${key}`),
+  };
+  item.failure.setAttribute('role', 'alert');
+  item.consent.type = 'checkbox';
+  item.consent.setAttribute('aria-describedby', `${item.license.id} ${item.hint.id}`);
+  item.consent.addEventListener('change', () => { if (item.consent.checked && item.hint.dataset.reason === 'consent') { item.hint.dataset.reason = ''; setText(item.hint, ''); } });
+  item.consentLabel.append(item.consent, item.consentText);
+  item.progress.setAttribute('aria-labelledby', item.title.id);
+  item.progress.setAttribute('aria-describedby', item.bytes.id);
+  item.progressWrap.append(item.progress, item.bytes);
+  item.download.type = 'button'; item.cancel.type = 'button';
+  item.download.setAttribute('aria-describedby', `${item.explain.id} ${item.hint.id}`);
+  item.download.onclick = () => startSetupDownload(asset.id);
+  item.cancel.onclick = () => cancelSetupDownload(asset.id);
+  item.actions.append(item.download, item.cancel);
+  item.head.append(item.title, item.badge);
+  item.root.append(item.head, item.explain, item.failure, item.license, item.consentLabel, item.progressWrap, item.actions, item.hint);
+  item.root.dataset.asset = asset.id;
+  setupItems.set(asset.id, item);
+  return item;
+}
+function updateSetupItem(item, a, s) {
+  const status = setupStatus(a), label = a.label || a.id, pending = setupPending.get(a.id);
+  const purpose = SETUP_PURPOSE[a.id] || 'use this input';
+  const size = typeof a.size_note === 'string' && a.size_note.trim() ? ` (${a.size_note.trim()})` : '';
+  const offer = status === 'missing' || status === 'error';
+  const otherBusy = s.setup?.busy === true && status !== 'downloading';
+  setText(item.title, label);
+  setText(item.badge, {ready:'Ready', missing:'Not downloaded', downloading:'Downloading', error:'Stopped'}[status]);
+  ['accent', 'warn', 'live'].forEach(t => item.badge.classList.toggle('badge-' + t, t === ({ready:'accent', missing:'warn', downloading:'accent', error:'live'})[status]));
+  setText(item.explain, status === 'ready' ? `Downloaded. QuietBridge can ${purpose}.`
+    : status === 'downloading' ? 'Downloading now. You can keep typing. Cancel keeps what has arrived, so a later download continues from there.'
+    : status === 'error' ? 'The download stopped before it finished. Try again continues from where it stopped.'
+    : `To ${purpose}, QuietBridge needs a download${size}.`);
+  item.failure.hidden = status !== 'error';
+  setText(item.failure, status === 'error' ? (typeof a.error === 'string' && a.error.trim() ? a.error.trim() : 'The download did not finish.') : '');
+  const note = typeof a.license_note === 'string' ? a.license_note.trim() : '';
+  item.license.hidden = !offer || !note;
+  setText(item.license, note ? `Licence: ${note}` : '');
+  item.consentLabel.hidden = !offer;
+  setText(item.consentText, note ? `I have read the licence note and want to download ${label}${size}.` : `I want to download ${label}${size}.`);
+  item.download.hidden = !offer;
+  setText(item.download, pending ? 'Starting…' : status === 'error' ? 'Try again' : 'Download');
+  item.download.disabled = Boolean(pending) || otherBusy;
+  item.cancel.hidden = status !== 'downloading';
+  setText(item.cancel, pending ? 'Cancelling…' : 'Cancel download');
+  item.cancel.disabled = Boolean(pending);
+  item.progressWrap.hidden = status !== 'downloading';
+  if (status === 'downloading') {
+    const done = Number(a.bytes_done) || 0, total = Number(a.bytes_total) || 0, percent = setupPercent(a);
+    if (total > 0) { item.progress.max = total; item.progress.value = Math.min(done, total); }
+    else item.progress.removeAttribute('value');
+    setText(item.bytes, total > 0 ? `${formatBytes(done)} of ${formatBytes(total)} · ${percent}%` : `${formatBytes(done)} so far`);
+  }
+  // A message from the person's own action stays until their next action.
+  if (!item.hint.dataset.reason) setText(item.hint, otherBusy && offer ? 'Another download is running. Start this one when it finishes.' : '');
+}
+// Polite, sparse announcements: a change of status and each quarter of progress, never every poll.
+function announceSetup(a) {
+  const status = setupStatus(a), percent = setupPercent(a), label = a.label || a.id;
+  const previous = setupAnnounced.get(a.id), wasDownloading = Boolean(previous?.startsWith('downloading'));
+  // Progress of unknown size has no quarters to announce.
+  if (status === 'downloading' && percent === null && wasDownloading) return;
+  const key = status === 'downloading' ? `downloading:${percent === null ? 0 : Math.floor(percent / 25) * 25}` : status;
+  setupAnnounced.set(a.id, key);
+  if (previous === undefined || previous === key) return;
+  const message = status === 'ready' ? `${label} downloaded.`
+    : status === 'downloading' ? (wasDownloading ? `${label} download ${key.split(':')[1]}% done.` : `${label} download started.`)
+    : status === 'missing' && wasDownloading ? `${label} download cancelled. What arrived is kept.` : '';
+  if (message) text('setup-announce', message);
+}
+function renderSetup(s) {
+  const container = $('setup-assets');
+  if (!container) return;
+  const hasSetup = Boolean(s.setup) && typeof s.setup === 'object';
+  const assets = setupAssets(s), inSettings = Boolean($('downloads'));
+  const shown = assets.filter(a => inSettings || setupStatus(a) !== 'ready');
+  const reloadNeeded = hasSetup && s.setup.reload_needed === true;
+  hide('setup-panel', !hasSetup || (shown.length === 0 && !reloadNeeded));
+  hide('downloads', !hasSetup || (assets.length === 0 && !reloadNeeded));
+  const offered = shown.some(a => ['missing', 'error'].includes(setupStatus(a)));
+  text('setup-intro', offered ? 'Typing works now. The camera needs a one-time download first. Nothing downloads until you choose.'
+    : shown.some(a => setupStatus(a) === 'downloading') ? 'Typing works now. The camera is ready to use once the download finishes.' : '');
+  const ids = JSON.stringify(shown.map(a => a.id));
+  const items = shown.map(a => { const item = setupItem(a); updateSetupItem(item, a, s); announceSetup(a); return item.root; });
+  // Re-inserting nodes would drop focus, so the list changes only when its members do.
+  if (ids !== renderedSetupIds) { renderedSetupIds = ids; container.replaceChildren(...items); }
+  renderSetupReload(s);
+}
+function renderSetupReload(s) {
+  if (!$('setup-reload')) return;
+  const needed = s?.setup?.reload_needed === true;
+  hide('setup-ready', !needed);
+  const blocked = needed ? reloadBlockedReason(s) : '';
+  text('setup-reload-blocked', blocked);
+  $('setup-reload').disabled = !needed || Boolean(blocked) || setupReloadPending || pendingActions > 0;
+}
+async function setupRequest(id, url, body, failure) {
+  const item = setupItems.get(id);
+  setupPending.set(id, true);
+  if (item) { item.hint.dataset.reason = ''; setText(item.hint, ''); }
+  if (state) renderSetup(state);
+  try {
+    const result = await postJson(url, body);
+    if (isStatePayload(result)) render(result);
+    return true;
+  } catch (e) {
+    // Never retried automatically: the server may already have acted.
+    if (item) { item.hint.dataset.reason = 'local'; setText(item.hint, `${failure}: ${e.message || 'QuietBridge did not answer.'}`); }
+    return false;
+  } finally {
+    setupPending.delete(id);
+    if (state) renderSetup(state);
+  }
+}
+async function startSetupDownload(id) {
+  const item = setupItems.get(id), asset = setupAsset(state, id);
+  if (!state || !item || !asset || setupPending.get(id) || !['missing', 'error'].includes(setupStatus(asset)) || item.download.disabled) return;
+  if (!item.consent.checked) {
+    item.hint.dataset.reason = 'consent';
+    setText(item.hint, 'First tick the box to confirm you have read the licence note and want this download.');
+    item.consent.focus(); return;
+  }
+  await setupRequest(id, '/api/setup/download', {id, accept_license: true}, 'The download could not start');
+}
+async function cancelSetupDownload(id) {
+  if (!state || setupPending.get(id) || setupStatus(setupAsset(state, id) || {}) !== 'downloading') return;
+  await setupRequest(id, '/api/setup/cancel', {id}, 'The download could not be cancelled');
+}
+// "Start using it": the existing explicit model reload of the running profile.
+async function setupReload() {
+  const button = $('setup-reload');
+  if (!state || !button || button.disabled || state.setup?.reload_needed !== true) return;
+  if (hasCurrentMessage() && !confirmDiscard('Start using the downloaded models now? This clears the current message. Your unfinished typed edit stays in this tab.')) return;
+  persistEditor();
+  setupReloadPending = true; renderSetupReload(state);
+  try {
+    if (await requestAction('profile_select', {id: state.profile_id})) {
+      const loading = state.lips === 'warming' || state.signs === 'loading';
+      const message = loading ? 'Loading the new models. The camera is ready when loading finishes.' : 'The new models are in use.';
+      text('correction-status', message); text('setup-status', message);
+    }
+  } finally { setupReloadPending = false; if (state) renderSetupReload(state); }
+}
+
+// ---- Voice (Settings) ----
+let voicePending = false, voiceSynced = null, renderedVoices = '';
+function renderVoice(s) {
+  if (!$('voice')) return;
+  const vs = s.speech_settings;
+  const valid = Boolean(vs) && typeof vs === 'object';
+  hide('voice', !valid);
+  if (!valid) return;
+  const available = s.speech_available !== false;
+  hide('voice-controls', !available);
+  text('voice-unavailable', available ? '' : 'On-device speech is not available on this computer, so there is no voice to set. Show large and Copy message still work.');
+  for (const rate of ['slow', 'normal', 'fast']) {
+    const button = $('voice-rate-' + rate);
+    if (button) { button.setAttribute('aria-pressed', String(vs.rate === rate)); button.disabled = voicePending; }
+  }
+  const voices = (Array.isArray(vs.voices) ? vs.voices : []).filter(v => v && typeof v.id === 'string' && v.id);
+  hide('voice-select-field', voices.length === 0);
+  text('voice-list-note', voices.length ? '' : 'This computer offers only its standard voice.');
+  const select = $('voice-select');
+  if (!select) return;
+  const listKey = JSON.stringify(voices.map(v => [v.id, v.label]));
+  if (listKey !== renderedVoices) {
+    renderedVoices = listKey; voiceSynced = null;
+    const option = (value, label) => { const o = document.createElement('option'); o.value = value; o.textContent = label; return o; };
+    select.replaceChildren(option('', 'System default'), ...voices.map(v => option(v.id, v.label || v.id)));
+  }
+  // Follow the saved voice only when it changes, so a choice in progress is not undone by polling.
+  const saved = typeof vs.voice === 'string' && voices.some(v => v.id === vs.voice) ? vs.voice : '';
+  if (!voicePending && voiceSynced !== saved) { select.value = saved; voiceSynced = saved; }
+  select.disabled = voicePending;
+}
+async function saveVoice(change) {
+  if (!state || voicePending || !state.speech_settings) return;
+  voicePending = true; renderVoice(state);
+  text('voice-status', 'Saving…'); text('voice-error', '');
+  try {
+    const result = await postJson('/api/speech/settings', change);
+    if (isStatePayload(result)) render(result);
+    text('voice-status', change.rate ? `Saved: ${change.rate} speaking rate. Speak message uses it from now on.` : 'Saved. Speak message uses this voice from now on.');
+  } catch (e) {
+    text('voice-status', '');
+    text('voice-error', `Not saved: ${e.message || 'QuietBridge did not answer.'} The previous setting stays in use.`);
+    voiceSynced = null;
+  } finally { voicePending = false; if (state) renderVoice(state); }
+}
+
+// ---- About line and Quit (Settings) ----
+function renderAppInfo(s) {
+  const app = s.app && typeof s.app === 'object' ? s.app : null;
+  const how = app && ({browser_camera:'using this browser’s camera', server_camera:'using a camera attached to this computer', rehearsal:'in preview mode, without a camera'})[app.started_with];
+  text('about-line', app ? [`QuietBridge${typeof app.version === 'string' && app.version ? ' ' + app.version : ''}`, how ? 'started ' + how : ''].filter(Boolean).join(' · ') : '');
+  // Only a backend that reports itself can be asked to quit.
+  hide('quit-card', !app);
+}
+async function quitApp() {
+  const button = $('quit-button');
+  if (!state || !button || quitPending || appStopped) return;
+  if (!confirmDiscard('Quit QuietBridge? This stops the camera and QuietBridge on this computer. To use it again, start QuietBridge again.')) return;
+  persistEditor();
+  quitPending = true; button.disabled = true; text('quit-error', ''); text('quit-status', 'Stopping QuietBridge…');
+  try {
+    const result = await postJson('/api/shutdown', {});
+    if (result?.ok !== true) throw new Error('QuietBridge did not confirm that it stopped.');
+    showStoppedScreen();
+  } catch (e) {
+    text('quit-status', '');
+    text('quit-error', `${e.message || 'QuietBridge did not answer.'} It may still be running.`);
+  } finally { quitPending = false; button.disabled = false; }
+}
+function stoppedDraft() {
+  if ($('corrected-text') && editorDirty) return $('corrected-text').value;
+  return storageRead(draftKey(editorProfile || state?.profile_id)) || '';
+}
+function showStoppedScreen() {
+  persistEditor();
+  appStopped = true; stoppedInstance = state?.server_instance || null; connectionLost = false;
+  if (browserCameraStream) stopBrowserCamera();
+  const draft = stoppedDraft();
+  if ($('stopped-draft')) $('stopped-draft').value = draft;
+  hide('stopped-draft-block', !draft.trim());
+  text('stopped-copy-status', '');
+  if ($('main')) $('main').hidden = true;
+  hide('stopped-screen', false);
+  titleBeforeStop = document.title;
+  document.title = 'QuietBridge has stopped';
+  $('stopped-heading')?.focus();
+  schedulePoll();
+}
+let titleBeforeStop = '';
+function leaveStoppedScreen() {
+  appStopped = false; stoppedInstance = null;
+  hide('stopped-screen', true);
+  if ($('main')) $('main').hidden = false;
+  if (titleBeforeStop) document.title = titleBeforeStop;
+}
+
 // The person's own phrases. Tapping one applies it exactly like typing it and
 // choosing Use this message: it never speaks and never learns.
+function phraseChip(phrase, extraClass = '') {
+  const button = document.createElement('button');
+  button.type = 'button'; button.className = 'quick-phrase chip' + (extraClass ? ' ' + extraClass : '');
+  // Visually truncated by CSS; the full text stays the accessible name.
+  button.textContent = phrase; button.title = phrase; button.dataset.phrase = phrase;
+  button.setAttribute('dir', 'auto');
+  button.onclick = () => useQuickPhrase(phrase);
+  return button;
+}
+// Index of the first chip below the collapsed rows, or -1 when everything fits.
+// Without measurable layout, falls back to a fixed count.
+function chipOverflowIndex(buttons) {
+  let rows = 0, rowTop = null;
+  for (let i = 0; i < buttons.length; i++) {
+    const top = buttons[i].offsetTop;
+    if (typeof top !== 'number') return buttons.length > QUICK_PHRASES_COLLAPSED ? QUICK_PHRASES_COLLAPSED : -1;
+    if (rowTop === null || top > rowTop + 2) { rowTop = top; if (++rows > CHIP_ROWS_COLLAPSED) return i; }
+  }
+  return -1;
+}
+// The same collapse at every width: collapsed lists show what fits in three rows.
+// Hidden chips leave the tab order; "Show all" reveals them in place.
+function layoutChips(list, more, showAll, noun) {
+  if (!list) return;
+  const buttons = Array.from(list.children || []);
+  buttons.forEach(b => { b.hidden = false; });
+  const cut = chipOverflowIndex(buttons);
+  if (cut >= 0 && !showAll) buttons.slice(cut).forEach(b => { b.hidden = true; });
+  if (more) {
+    more.hidden = cut < 0;
+    more.textContent = showAll ? `Show fewer ${noun}` : `Show all ${buttons.length} ${noun}`;
+    more.setAttribute('aria-expanded', String(showAll));
+  }
+}
+function layoutPhraseLists() {
+  layoutChips($('quick-phrases-list'), $('quick-phrases-more'), showAllPhrases, 'phrases');
+  layoutChips($('recent-list'), $('recent-more'), showAllRecent, 'recent');
+}
 function renderQuickPhrases(s) {
   const list = $('quick-phrases-list');
   if (!list) return;
   const phrases = (Array.isArray(s.quick_phrases) ? s.quick_phrases : []).filter(p => typeof p === 'string' && p.trim());
   hide('quick-phrases', phrases.length === 0);
-  const key = JSON.stringify([phrases, showAllPhrases]);
+  const key = JSON.stringify(phrases);
   if (key === renderedPhrases) return;
   renderedPhrases = key;
-  const shown = showAllPhrases ? phrases : phrases.slice(0, QUICK_PHRASES_COLLAPSED);
-  list.replaceChildren(...shown.map(phrase => {
-    const button = document.createElement('button');
-    button.type = 'button'; button.className = 'quick-phrase chip';
-    // Visually truncated by CSS; the full text stays the accessible name.
-    button.textContent = phrase; button.title = phrase; button.dataset.phrase = phrase;
-    button.setAttribute('dir', 'auto');
-    button.onclick = () => useQuickPhrase(phrase);
-    return button;
-  }));
-  const more = $('quick-phrases-more');
-  if (more) {
-    more.hidden = phrases.length <= QUICK_PHRASES_COLLAPSED;
-    more.textContent = showAllPhrases ? 'Show fewer phrases' : `Show all ${phrases.length} phrases`;
-    more.setAttribute('aria-expanded', String(showAllPhrases));
-  }
+  list.replaceChildren(...phrases.map(phrase => phraseChip(phrase)));
+  layoutChips(list, $('quick-phrases-more'), showAllPhrases, 'phrases');
+}
+
+// Recent messages in this tab: only text actually dispatched to speech without a
+// speech error, or shown with Show large. Choosing one sets the message like a
+// phrase; it never speaks. Nothing leaves this tab.
+function recentProfile() { return editorProfile || state?.profile_id || 'default'; }
+function readRecent(profile = recentProfile()) {
+  try {
+    const saved = JSON.parse(storageRead(recentKey(profile)) || '[]');
+    return Array.isArray(saved) ? saved.filter(m => typeof m === 'string' && m.trim()).slice(0, RECENT_MAX) : [];
+  } catch (_) { return []; }
+}
+function rememberRecent(message, profile = recentProfile()) {
+  const value = typeof message === 'string' ? message.trim() : '';
+  if (!value) return;
+  const list = [value, ...readRecent(profile).filter(m => m !== value)].slice(0, RECENT_MAX);
+  storageWrite(recentKey(profile), JSON.stringify(list));
+  renderRecent();
+}
+function renderRecent() {
+  const list = $('recent-list');
+  if (!list || !state) return;
+  const profile = recentProfile(), items = readRecent(profile);
+  hide('recent-card', items.length === 0);
+  const key = JSON.stringify([profile, items]);
+  if (key === renderedRecent) return;
+  renderedRecent = key;
+  list.replaceChildren(...items.map(message => phraseChip(message, 'recent-chip')));
+  layoutChips(list, $('recent-more'), showAllRecent, 'recent');
+  if (state) updateMessage();
+}
+function clearRecent() {
+  storageWrite(recentKey(recentProfile()), null);
+  showAllRecent = false; renderRecent();
+  text('correction-status', 'Recent messages cleared from this tab.');
+  focusEditor();
 }
 function quickPhraseBlocked(v = messageView()) {
   return v.sessionBusy || v.processing || speaking || deviceSpeaking() || connectionLost || pendingActions > 0;
@@ -575,13 +964,14 @@ function updateMessage() {
   $('message-actions')?.classList.toggle('show-leads', showLeads);
   $('message-actions')?.classList.toggle('speaking', deviceSpeaking());
   const phraseBlocked = quickPhraseBlocked(v);
-  Array.from($('quick-phrases-list')?.children || []).forEach(b => {
+  [...Array.from($('quick-phrases-list')?.children || []), ...Array.from($('recent-list')?.children || [])].forEach(b => {
     const current = isCurrentMessage(b.dataset.phrase);
     b.disabled = phraseBlocked || current;
     b.classList.toggle('current', current);
     if (current) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current');
   });
   if ($('models-reload-button') && state.models_reload_needed === true) $('models-reload-button').disabled = Boolean(reloadBlockedReason(state)) || reloadPending || pendingActions > 0;
+  renderSetupReload(state);
   if ($('new-message')) $('new-message').disabled = sessionBusy || processing || speaking || pendingActions > 0 || !hasCurrentMessage();
   if ($('copy-message')) $('copy-message').disabled = !($('corrected-text')?.value.trim() || chosenText);
   if ($('save-correction')) {
@@ -606,6 +996,8 @@ async function speakMessage() {
     if (await requestAction('speak', {revision, text:message}) && !speechErrorText(state)) {
       $('step-review')?.removeAttribute('aria-current');
       $('step-speak')?.setAttribute('aria-current', 'step');
+      // Dispatched without a speech error: remembered in this tab only.
+      rememberRecent(message, profile);
     }
   } finally { speaking = false; updateMessage(); }
 }
@@ -749,6 +1141,7 @@ function pollShouldBeFast() {
   return Date.now() - lastUserActivity < RECENT_ACTIVITY_MS;
 }
 function pollDelay() {
+  if (appStopped) return POLL_HIDDEN_MS;
   const actionPending = pendingActions > 0 || speaking || stopSpeakingPending;
   let delay = pollShouldBeFast() ? POLL_FAST_MS : POLL_IDLE_MS;
   if (document.hidden && !actionPending) delay = Math.max(delay, POLL_HIDDEN_MS);
@@ -769,15 +1162,23 @@ async function poll() {
   clearTimeout(pollTimer); pollTimer = null; pollInFlight = true;
   try {
     const response = await fetch('/api/state'); if (!response.ok) throw new Error();
+    if (appStopped) {
+      const next = await response.json();
+      // The app that was quit may answer once more while it stops; only a new instance is a restart.
+      if (!next?.server_instance || next.server_instance === stoppedInstance) return;
+      leaveStoppedScreen(); render(next); retryProfilesList(); return;
+    }
     if (connectionLost) {text('error', ''); connectionLost = false;}
     const result = await response.json(); render(result);
     retryProfilesList();
   } catch (_) {
+    // Quit on purpose: keep checking quietly for a restart, without reconnect messages.
+    if (appStopped) return;
     connectionLost = true; persistEditor();
     text('error', 'Connection lost. Reconnecting automatically. Your edit is kept in this tab; you can still type or copy it.');
     if ($('record')) $('record').disabled = true;
     // Speak, Use this message, phrases and reload all check connectionLost.
-    if (state) { updateMessage(); renderReloadNotice(state); }
+    if (state) { updateMessage(); renderReloadNotice(state); renderSetupReload(state); }
   }
   finally { pollInFlight = false; schedulePoll(); }
 }
@@ -876,6 +1277,7 @@ function openLargeDisplay() {
   $('large-display').hidden = false;
   document.body?.classList?.add('large-open');
   $('large-close')?.focus();
+  rememberRecent(value);
 }
 function closeLargeDisplay() {
   if (!largeDisplayOpen()) return;
@@ -911,8 +1313,31 @@ if ($('copy-message')) $('copy-message').onclick = async () => {
 if ($('models-reload-button')) $('models-reload-button').onclick = reloadModels;
 if ($('quick-phrases-more')) $('quick-phrases-more').onclick = () => {
   showAllPhrases = !showAllPhrases;
-  if (state) renderQuickPhrases(state);
+  layoutChips($('quick-phrases-list'), $('quick-phrases-more'), showAllPhrases, 'phrases');
   updateMessage();
+};
+if ($('recent-more')) $('recent-more').onclick = () => {
+  showAllRecent = !showAllRecent;
+  layoutChips($('recent-list'), $('recent-more'), showAllRecent, 'recent');
+  updateMessage();
+};
+if ($('recent-clear')) $('recent-clear').onclick = clearRecent;
+// Rows depend on the width, so a resize or rotation re-fits the collapsed lists.
+let chipLayoutFrame = null;
+window.addEventListener('resize', () => {
+  if (chipLayoutFrame !== null) return;
+  const later = typeof window.requestAnimationFrame === 'function' ? window.requestAnimationFrame.bind(window) : fn => setTimeout(fn, 50);
+  chipLayoutFrame = later(() => { chipLayoutFrame = null; layoutPhraseLists(); });
+});
+if ($('setup-reload')) $('setup-reload').onclick = setupReload;
+for (const rate of ['slow', 'normal', 'fast']) if ($('voice-rate-' + rate)) $('voice-rate-' + rate).onclick = () => {
+  if (state?.speech_settings?.rate !== rate) return saveVoice({rate});
+};
+if ($('voice-select')) $('voice-select').addEventListener('change', () => saveVoice({voice: $('voice-select').value}));
+if ($('quit-button')) $('quit-button').onclick = quitApp;
+if ($('stopped-copy')) $('stopped-copy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('stopped-draft').value); text('stopped-copy-status', 'Copied.'); }
+  catch (_) { $('stopped-draft').focus(); $('stopped-draft').select(); text('stopped-copy-status', 'Select the text and use your device Copy command.'); }
 };
 if ($('open-guide')) {
   setGuide(false);

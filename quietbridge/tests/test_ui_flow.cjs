@@ -18,7 +18,7 @@ function screen(page = 'index.html', sessionValues = new Map(), localValues = ne
       listeners: {},
       matches() { return false; }, addEventListener(name, fn) { this.listeners[name] = fn; }, getContext() { return null; },
       focus() { this.focused = true; }, select() {},
-      append(child) { this.children.push(child); if (child.id) elements.set(child.id, child); },
+      append(...kids) { for (const child of kids) { this.children.push(child); if (child.id) elements.set(child.id, child); } },
       before(child) { if (child.id) elements.set(child.id, child); },
       replaceChildren(...children) { this.children = children; },
     };
@@ -774,16 +774,443 @@ test('quick phrases are unavailable during sessions, speech and connection loss'
   await phraseButtons(a)[0].onclick(); assert.equal(calls, 0);
 });
 
+const visibleChips = list => list.children.filter(b => !b.hidden);
 test('a long phrase list starts collapsed and expands on request', () => {
   const a = screen(); const phrases = Array.from({ length: 30 }, (_, i) => `Phrase ${i + 1}`);
   a.render({ quick_phrases: phrases });
-  assert.equal(phraseButtons(a).length, 12);
+  assert.equal(visibleChips(a.elements.get('quick-phrases-list')).length, 12, 'without measurable layout: a fixed count');
   const more = a.elements.get('quick-phrases-more');
   assert.equal(more.hidden, false); assert.match(more.textContent, /Show all 30/); assert.equal(more.attributes['aria-expanded'], 'false');
   more.onclick();
-  assert.equal(phraseButtons(a).length, 30); assert.equal(more.attributes['aria-expanded'], 'true');
+  assert.equal(visibleChips(a.elements.get('quick-phrases-list')).length, 30); assert.equal(more.attributes['aria-expanded'], 'true');
   a.render({ revision: 2, quick_phrases: ['Only one'] });
   assert.equal(phraseButtons(a).length, 1); assert.equal(more.hidden, true);
+});
+
+// Fake layout: chips flow into rows of `perRow` (a 390 px phone fits one long phrase per row).
+function withRows(list, perRow) {
+  list.children.forEach((b, i) => { Object.defineProperty(b, 'offsetTop', { configurable: true, get: () => (b.hidden ? 0 : Math.floor(i / perRow) * 52) }); });
+}
+test('phones: collapsed phrases show only what fits in three rows, the same rule at every width', () => {
+  const a = screen();
+  const long = Array.from({ length: 10 }, (_, i) => `Could you please help me with number ${i + 1}, thank you so much`);
+  a.render({ quick_phrases: long });
+  const list = a.elements.get('quick-phrases-list'), more = a.elements.get('quick-phrases-more');
+  withRows(list, 1); vm.runInContext('layoutPhraseLists()', a.context);
+  assert.equal(visibleChips(list).length, 3, 'one long phrase per row on a phone: three rows');
+  assert.equal(more.hidden, false); assert.equal(more.textContent, 'Show all 10 phrases');
+  assert.equal(list.children.slice(3).every(b => b.hidden), true, 'hidden chips leave the tab order');
+  withRows(list, 4); a.windowListeners.get('resize')(); [...a.timers.values()].filter(t => t.ms === 50).forEach(t => t.fn());
+  assert.equal(visibleChips(list).length, 10, 'a wide screen fits all ten in three rows');
+  assert.equal(more.hidden, true);
+  withRows(list, 1); vm.runInContext('layoutPhraseLists()', a.context);
+  more.onclick();
+  assert.equal(visibleChips(list).length, 10); assert.equal(more.textContent, 'Show fewer phrases');
+  a.render({ revision: 2, quick_phrases: long });
+  assert.equal(visibleChips(list).length, 10, 'polling does not collapse an expanded list');
+});
+
+// ---- First-run setup (state contract: setup.assets / reload_needed) ----
+const LICENCE = 'Lip-reading weights: non-commercial research use only.';
+function setupState(assets, extra = {}) {
+  return { server_instance: 'boot', token: 'tok', profile_id: 'sam', setup: { busy: false, reload_needed: false, assets, ...extra } };
+}
+const lipsAsset = extra => ({ id: 'lips', label: 'Lip reading', status: 'missing', bytes_done: 0, bytes_total: 0, error: '', size_note: 'about 1.2 GB', license_note: LICENCE, ...extra });
+
+test('setup: absent or all-ready setup renders nothing and requests nothing', async () => {
+  for (const page of ['index.html', 'settings.html']) {
+    const a = screen(page); const calls = []; a.context.fetch = async url => { calls.push(url); return new Promise(() => {}); };
+    a.render();
+    assert.equal(a.elements.get('setup-assets').children.length, 0, page);
+    if (page === 'index.html') assert.equal(a.elements.get('setup-panel').hidden, true);
+    else assert.equal(a.elements.get('downloads').hidden, true);
+    a.render({ ...setupState([lipsAsset({ status: 'ready' })]), revision: 2 });
+    if (page === 'index.html') assert.equal(a.elements.get('setup-panel').hidden, true, 'nothing to do on the message page');
+    else assert.equal(a.elements.get('downloads').hidden, false, 'Settings lists what is installed');
+    await settle();
+    assert.deepEqual(calls.filter(u => u.startsWith('/api/setup')), []);
+  }
+});
+
+test('setup: a missing asset explains itself, shows the licence before an unticked consent, and Download needs the consent', async () => {
+  const a = screen(); const calls = [];
+  a.context.fetch = async (url, options) => { calls.push([url, JSON.parse(options.body), options.headers['X-Lipflow-Token']]); return okJson({ ok: true }); };
+  a.render(setupState([lipsAsset()]));
+  assert.equal(a.elements.get('setup-panel').hidden, false);
+  assert.match(a.elements.get('setup-explain-lips').textContent, /needs a download \(about 1\.2 GB\)\./);
+  assert.match(a.elements.get('setup-intro').textContent, /Typing works now.*Nothing downloads until you choose/);
+  assert.equal(a.elements.get('setup-license-lips').hidden, false);
+  assert.match(a.elements.get('setup-license-lips').textContent, /non-commercial research use only/);
+  const item = a.elements.get('setup-assets').children[0].children;
+  const order = cls => item.findIndex(c => c.className === cls);
+  assert.ok(order('setup-license') < order('check setup-consent') && order('check setup-consent') < order('setup-actions'), 'licence, then consent, then Download');
+  const consent = a.elements.get('setup-consent-lips');
+  assert.equal(consent.checked, false, 'consent starts unticked');
+  assert.equal(consent.type, 'checkbox');
+  assert.match(a.elements.get('setup-progress-lips').attributes['aria-labelledby'], /setup-title-lips/);
+  await a.elements.get('setup-download-lips').onclick();
+  assert.deepEqual(calls, [], 'no consent: nothing is requested');
+  assert.equal(consent.focused, true, 'focus moves to the consent box');
+  assert.match(a.elements.get('setup-hint-lips').textContent, /tick the box/i);
+  assert.match(a.elements.get('record-hint').textContent, /one-time download/);
+  assert.equal(a.elements.get('corrected-text').disabled, false, 'typing stays available');
+  consent.checked = true; consent.listeners.change();
+  assert.equal(a.elements.get('setup-hint-lips').textContent, '');
+  await a.elements.get('setup-download-lips').onclick();
+  assert.deepEqual(calls, [['/api/setup/download', { id: 'lips', accept_license: true }, 'tok']]);
+});
+
+test('setup: download progress, polite sparse announcements, cancel, error and Try again', async () => {
+  const a = screen(); const calls = [];
+  a.context.fetch = async (url, options) => { calls.push([url, JSON.parse(options.body)]); return okJson({ ok: true }); };
+  a.render(setupState([lipsAsset()]));
+  assert.equal(a.elements.get('setup-announce').textContent, '', 'the first render announces nothing');
+  a.render({ ...setupState([lipsAsset({ status: 'downloading', bytes_done: 340e6, bytes_total: 1.2e9 })], { busy: true }), revision: 2 });
+  assert.equal(a.elements.get('setup-progress-lips').max, 1.2e9);
+  assert.equal(a.elements.get('setup-progress-lips').value, 340e6);
+  assert.equal(a.elements.get('setup-bytes-lips').textContent, '340 MB of 1.20 GB · 28%');
+  assert.equal(a.elements.get('setup-download-lips').hidden, true);
+  assert.doesNotMatch(a.elements.get('setup-intro').textContent, /until you choose/, 'no offer wording while it downloads');
+  assert.equal(a.elements.get('setup-assets').children[0].children.find(c => c.className === 'check setup-consent').hidden, true, 'no consent box while downloading');
+  assert.equal(a.elements.get('setup-cancel-lips').hidden, false);
+  assert.equal(a.elements.get('setup-announce').textContent, 'Lip reading download started.');
+  a.elements.get('setup-announce').textContent = '';
+  a.render({ ...setupState([lipsAsset({ status: 'downloading', bytes_done: 350e6, bytes_total: 1.2e9 })], { busy: true }), revision: 3 });
+  assert.equal(a.elements.get('setup-announce').textContent, '', 'not on every poll');
+  assert.equal(a.elements.get('setup-bytes-lips').textContent, '350 MB of 1.20 GB · 29%');
+  a.render({ ...setupState([lipsAsset({ status: 'downloading', bytes_done: 600e6, bytes_total: 1.2e9 })], { busy: true }), revision: 4 });
+  assert.equal(a.elements.get('setup-announce').textContent, 'Lip reading download 50% done.', 'each quarter is announced once');
+  const removed = []; a.elements.get('setup-progress-lips').removeAttribute = name => removed.push(name);
+  a.render({ ...setupState([lipsAsset({ status: 'downloading', bytes_done: 5e6, bytes_total: 0 })], { busy: true }), revision: 5 });
+  assert.deepEqual(removed, ['value'], 'unknown size: an indeterminate bar');
+  assert.equal(a.elements.get('setup-bytes-lips').textContent, '5 MB so far', 'unknown size: indeterminate, bytes only');
+  await a.elements.get('setup-cancel-lips').onclick();
+  assert.deepEqual(calls, [['/api/setup/cancel', { id: 'lips' }]]);
+  a.render({ ...setupState([lipsAsset({ status: 'missing', bytes_done: 5e6 })]), revision: 6 });
+  assert.match(a.elements.get('setup-announce').textContent, /cancelled/);
+  a.render({ ...setupState([lipsAsset({ status: 'error', error: 'Network unreachable.' })]), revision: 7 });
+  assert.equal(a.elements.get('setup-error-lips').hidden, false);
+  assert.equal(a.elements.get('setup-error-lips').textContent, 'Network unreachable.');
+  assert.equal(a.elements.get('setup-error-lips').attributes.role, 'alert');
+  assert.equal(a.elements.get('setup-download-lips').textContent, 'Try again');
+  assert.equal(a.elements.get('setup-license-lips').hidden, false, 'licence shown again before retrying');
+  a.elements.get('setup-consent-lips').checked = false;
+  await a.elements.get('setup-download-lips').onclick();
+  assert.equal(calls.length, 1, 'Try again also needs the consent');
+  a.elements.get('setup-consent-lips').checked = true;
+  await a.elements.get('setup-download-lips').onclick();
+  assert.deepEqual(calls[1], ['/api/setup/download', { id: 'lips', accept_license: true }]);
+});
+
+test('setup: a refused or hung download request is reported once and never retried', async () => {
+  const a = screen(); let calls = 0;
+  a.context.fetch = async () => { calls++; return { ok: false, status: 400, json: async () => ({ error: 'Accept the licence first.' }) }; };
+  a.render(setupState([lipsAsset()]));
+  a.elements.get('setup-consent-lips').checked = true;
+  await a.elements.get('setup-download-lips').onclick(); await settle();
+  assert.equal(calls, 1);
+  assert.match(a.elements.get('setup-hint-lips').textContent, /could not start: Accept the licence first/);
+  a.render({ ...setupState([lipsAsset()]), revision: 2 });
+  assert.match(a.elements.get('setup-hint-lips').textContent, /could not start/, 'the failure stays visible across polls');
+  a.context.fetch = () => { calls++; return new Promise(() => {}); };
+  const pending = a.elements.get('setup-download-lips').onclick(); await settle();
+  assert.equal(a.elements.get('setup-download-lips').disabled, true);
+  assert.equal(a.elements.get('setup-download-lips').textContent, 'Starting…');
+  [...a.timers.values()].find(t => t.ms === 15000).fn(); await pending;
+  assert.equal(calls, 2);
+  assert.match(a.elements.get('setup-hint-lips').textContent, /timed out.*uncertain/);
+  assert.equal(a.elements.get('setup-download-lips').disabled, false);
+});
+
+test('setup: while one download runs, another cannot start', () => {
+  const a = screen();
+  a.render(setupState([lipsAsset({ status: 'downloading', bytes_done: 1, bytes_total: 10 }), { id: 'gestures', label: 'Gestures', status: 'missing', license_note: 'Apache-2.0', size_note: 'about 8 MB' }], { busy: true }));
+  assert.equal(a.elements.get('setup-download-gestures').disabled, true);
+  assert.match(a.elements.get('setup-hint-gestures').textContent, /Another download is running/);
+});
+
+test('setup: Ready explains the reload, is blocked while the camera is in use, and reloads only on request', async () => {
+  const a = screen(); const calls = [];
+  a.context.fetch = async (url, options) => { calls.push([url, options?.body && JSON.parse(options.body)]); return okJson({ ...a.context.sample, revision: 9, lips: 'warming', setup: { busy: false, reload_needed: false, assets: [lipsAsset({ status: 'ready' })] } }); };
+  a.render({ ...setupState([lipsAsset({ status: 'ready' })], { reload_needed: true }), session_active: true, auto_recognition: true });
+  assert.equal(a.elements.get('setup-panel').hidden, false);
+  assert.equal(a.elements.get('setup-ready').hidden, false);
+  assert.equal(a.elements.get('setup-reload').disabled, true);
+  assert.match(a.elements.get('setup-reload-blocked').textContent, /stop the camera/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../ui/index.html'), 'utf8'), /id="setup-ready-detail">[^<]*clears the current message/);
+  await a.elements.get('setup-reload').onclick();
+  await settle();
+  assert.deepEqual(calls.filter(c => c[0] !== '/api/state' && c[0] !== '/api/tracking'), [], 'state alone and a blocked button never reload');
+  a.render({ ...setupState([lipsAsset({ status: 'ready' })], { reload_needed: true }), revision: 2, decision: { text: 'Current words', status: 'accepted', reason: 'corrected' } });
+  a.elements.get('corrected-text').value = 'Typed edit'; a.elements.get('corrected-text').listeners.input();
+  assert.equal(a.elements.get('setup-reload').disabled, false);
+  let asked = 0; a.context.window.confirm = message => { asked++; assert.match(message, /clears the current message.*edit stays/); return false; };
+  await a.elements.get('setup-reload').onclick();
+  assert.equal(asked, 1); assert.equal(calls.filter(c => c[0].startsWith('/api/action')).length, 0);
+  a.context.window.confirm = () => true;
+  await a.elements.get('setup-reload').onclick();
+  assert.deepEqual(calls.filter(c => c[0].startsWith('/api/action')), [['/api/action/profile_select', { id: 'sam' }]]);
+  assert.equal(a.elements.get('setup-panel').hidden, true, 'done: the panel goes away');
+  assert.equal(a.elements.get('corrected-text').value, 'Typed edit');
+  assert.match(a.elements.get('correction-status').textContent, /Loading the new models/);
+});
+
+test('setup: Settings shows the same downloads compactly, including installed ones', async () => {
+  const a = screen('settings.html'); const calls = [];
+  a.context.fetch = async (url, options) => { calls.push([url, JSON.parse(options.body)]); return okJson({ ok: true }); };
+  a.render(setupState([lipsAsset({ status: 'ready' }), { id: 'gestures', label: 'Gestures', status: 'missing', license_note: 'Apache-2.0', size_note: 'about 8 MB' }]));
+  assert.equal(a.elements.get('downloads').hidden, false);
+  assert.equal(a.elements.get('setup-assets').children.length, 2);
+  assert.match(a.elements.get('setup-explain-lips').textContent, /Downloaded/);
+  assert.equal(a.elements.get('setup-download-lips').hidden, true);
+  await a.elements.get('setup-download-gestures').onclick();
+  assert.deepEqual(calls, []);
+  a.elements.get('setup-consent-gestures').checked = true;
+  await a.elements.get('setup-download-gestures').onclick();
+  assert.deepEqual(calls, [['/api/setup/download', { id: 'gestures', accept_license: true }]]);
+});
+
+test('setup: polling re-renders in place so the consent tick and focus survive', () => {
+  const a = screen(); a.render(setupState([lipsAsset()]));
+  const before = a.elements.get('setup-assets').children[0];
+  a.elements.get('setup-consent-lips').checked = true;
+  let replaced = 0; const original = a.elements.get('setup-assets').replaceChildren;
+  a.elements.get('setup-assets').replaceChildren = function (...c) { replaced++; return original.apply(this, c); };
+  for (let r = 2; r < 6; r++) a.render({ ...setupState([lipsAsset()]), revision: r });
+  assert.equal(replaced, 0);
+  assert.equal(a.elements.get('setup-assets').children[0], before);
+  assert.equal(a.elements.get('setup-consent-lips').checked, true);
+});
+
+// ---- Voice settings (Settings) ----
+const voiceState = extra => ({ server_instance: 'boot', token: 'tok', speech_settings: { rate: 'normal', voice: '', voices: [{ id: 'en-gb', label: 'English (UK)' }, { id: 'en-us', label: 'English (US)' }] }, ...extra });
+test('voice: absent settings show nothing; rate and voice save explicitly with visible feedback and never speak', async () => {
+  const a = screen('settings.html'); a.render();
+  assert.equal(a.elements.get('voice').hidden, true, 'absent field: no Voice card');
+  const calls = [];
+  a.context.fetch = async (url, options) => { const body = JSON.parse(options.body); calls.push([url, body, options.headers['X-Lipflow-Token']]); return okJson({ ...a.context.sample, revision: a.context.sample.revision + 1, speech_settings: { ...a.context.sample.speech_settings, ...body } }); };
+  a.render({ ...voiceState(), revision: 2 });
+  assert.equal(a.elements.get('voice').hidden, false);
+  assert.equal(a.elements.get('voice-rate-normal').attributes['aria-pressed'], 'true');
+  assert.deepEqual(a.elements.get('voice-select').children.map(o => [o.value, o.textContent]), [['', 'System default'], ['en-gb', 'English (UK)'], ['en-us', 'English (US)']]);
+  await a.elements.get('voice-rate-slow').onclick();
+  assert.deepEqual(calls, [['/api/speech/settings', { rate: 'slow' }, 'tok']]);
+  assert.equal(a.elements.get('voice-rate-slow').attributes['aria-pressed'], 'true');
+  assert.match(a.elements.get('voice-status').textContent, /Saved/);
+  await a.elements.get('voice-rate-slow').onclick();
+  assert.equal(calls.length, 1, 'choosing the current rate sends nothing');
+  a.elements.get('voice-select').value = 'en-us'; await a.elements.get('voice-select').listeners.change();
+  assert.deepEqual(calls[1], ['/api/speech/settings', { voice: 'en-us' }, 'tok']);
+  assert.equal(calls.some(c => /speak/.test(c[0].replace('/api/speech/settings', ''))), false);
+});
+
+test('voice: a failed save says so, is not retried and returns to the saved voice', async () => {
+  const a = screen('settings.html'); a.render(voiceState());
+  let calls = 0; a.context.fetch = async () => { calls++; return { ok: false, status: 400, json: async () => ({ error: 'Unknown voice' }) }; };
+  a.elements.get('voice-select').value = 'en-gb'; await a.elements.get('voice-select').listeners.change(); await settle();
+  assert.equal(calls, 1);
+  assert.match(a.elements.get('voice-error').textContent, /Not saved: Unknown voice/);
+  assert.equal(a.elements.get('voice-status').textContent, '');
+  assert.equal(a.elements.get('voice-select').value, '', 'shows the voice actually in use');
+  a.render({ ...voiceState(), revision: 2 });
+  assert.equal(calls, 1);
+});
+
+test('voice: no voices or no speech hides the choices with a short explanation', () => {
+  const a = screen('settings.html');
+  a.render(voiceState({ speech_settings: { rate: 'fast', voice: '', voices: [] } }));
+  assert.equal(a.elements.get('voice-select-field').hidden, true);
+  assert.match(a.elements.get('voice-list-note').textContent, /only its standard voice/);
+  assert.equal(a.elements.get('voice-controls').hidden, false);
+  a.render(voiceState({ revision: 2, speech_available: false }));
+  assert.equal(a.elements.get('voice-controls').hidden, true);
+  assert.match(a.elements.get('voice-unavailable').textContent, /not available/);
+  assert.equal(fs.readFileSync(path.join(__dirname, '../ui/settings.html'), 'utf8').includes('Test voice'), false, 'no Test voice: the speak path cannot do it without changing the message');
+});
+
+test('voice: polling does not undo a choice in progress, but follows a real change', () => {
+  const a = screen('settings.html'); a.render(voiceState());
+  const select = a.elements.get('voice-select');
+  select.value = 'en-gb';
+  a.render({ ...voiceState(), revision: 2 });
+  assert.equal(select.value, 'en-gb');
+  a.render({ ...voiceState({ speech_settings: { rate: 'normal', voice: 'en-us', voices: voiceState().speech_settings.voices } }), revision: 3 });
+  assert.equal(select.value, 'en-us');
+});
+
+// ---- About line and Quit ----
+test('about line comes from app and is absent for older state', () => {
+  const a = screen('settings.html'); a.render();
+  assert.equal(a.elements.get('about-line').textContent, '');
+  assert.equal(a.elements.get('quit-card').hidden, true, 'an older backend is not offered Quit');
+  a.render({ revision: 2, app: { version: '0.9.0', started_with: 'browser_camera' } });
+  assert.equal(a.elements.get('about-line').textContent, 'QuietBridge 0.9.0 · started using this browser’s camera');
+  a.render({ revision: 3, app: { version: '0.9.0', started_with: 'rehearsal' } });
+  assert.match(a.elements.get('about-line').textContent, /preview mode, without a camera/);
+  assert.equal(a.elements.get('quit-card').hidden, false);
+});
+
+function quitScreen(sessionValues = new Map()) {
+  const a = screen('settings.html', sessionValues);
+  a.render({ server_instance: 'boot-a', token: 'tok', profile_id: 'sam', app: { version: '1', started_with: 'browser_camera' } });
+  return a;
+}
+test('quit asks first, stops on one request, shows a calm stopped page with the draft, and polls without reconnect noise', async () => {
+  const storage = new Map([['quietbridge-unsent-v1:sam', 'Half-typed words']]);
+  const a = quitScreen(storage); const calls = [];
+  a.context.window.confirm = () => false;
+  a.context.fetch = async (url, options) => { calls.push([url, options?.body]); return okJson({ ok: true }); };
+  await a.elements.get('quit-button').onclick();
+  assert.deepEqual(calls, [], 'declined: nothing sent');
+  a.context.window.confirm = message => { assert.match(message, /stops the camera and QuietBridge on this computer/); return true; };
+  await a.elements.get('quit-button').onclick();
+  assert.deepEqual(calls, [['/api/shutdown', '{}']]);
+  assert.equal(a.elements.get('main').hidden, true);
+  assert.equal(a.elements.get('stopped-screen').hidden, false);
+  assert.equal(a.elements.get('stopped-heading').focused, true);
+  assert.equal(a.elements.get('stopped-draft-block').hidden, false);
+  assert.equal(a.elements.get('stopped-draft').value, 'Half-typed words', 'the unfinished edit stays visible and copyable');
+  assert.equal(a.context.document.title, 'QuietBridge has stopped');
+  a.context.fetch = async () => { throw new Error('connection refused'); };
+  await vm.runInContext('poll()', a.context);
+  assert.equal(a.elements.get('error').textContent, '', 'no "Connection lost… reconnecting" after a deliberate quit');
+  assert.deepEqual(pollTimers(a).map(t => t.ms), [3000], 'quiet, slow checks for a restart');
+  assert.equal(storage.get('quietbridge-unsent-v1:sam'), 'Half-typed words');
+  a.context.fetch = async () => okJson({ ...a.context.sample, server_instance: 'boot-a', revision: 5 });
+  await vm.runInContext('poll()', a.context);
+  assert.equal(a.elements.get('stopped-screen').hidden, false, 'the app that was quit answering once more is not a restart');
+  a.context.fetch = async () => okJson({ ...a.context.sample, server_instance: 'boot-b', token: 'tok-b', revision: 0 });
+  await vm.runInContext('poll()', a.context);
+  assert.equal(a.elements.get('stopped-screen').hidden, true, 'a restarted app is picked up as today');
+  assert.equal(a.elements.get('main').hidden, false);
+  assert.match(a.elements.get('error').textContent, /restarted/);
+  assert.equal(vm.runInContext('token', a.context), 'tok-b');
+});
+
+test('a failed quit says it may still be running and is not retried', async () => {
+  const a = quitScreen(); let calls = 0;
+  a.context.fetch = async () => { calls++; throw new Error('Network down'); };
+  await a.elements.get('quit-button').onclick(); await settle();
+  assert.equal(calls, 1);
+  assert.match(a.elements.get('quit-error').textContent, /may still be running/);
+  assert.equal(a.elements.get('stopped-screen').hidden, true);
+  assert.equal(a.elements.get('quit-button').disabled, false);
+});
+
+test('quit with no unfinished edit hides the draft block', async () => {
+  const a = quitScreen();
+  a.context.fetch = async () => okJson({ ok: true });
+  await a.elements.get('quit-button').onclick();
+  assert.equal(a.elements.get('stopped-draft-block').hidden, true);
+});
+
+// ---- Recent messages (this tab only) ----
+function recentScreen(storage = new Map(), extra = {}) {
+  const a = screen('index.html', storage);
+  a.render({ server_instance: 'boot', token: 'tok', profile_id: 'sam', ...extra });
+  return a;
+}
+const recentList = a => a.elements.get('recent-list').children.map(b => b.textContent);
+let recentRevision = 10;
+async function applyAndSpeak(a, words, speechError = '') {
+  a.context.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    const rev = ++recentRevision;
+    if (url.endsWith('/correct')) return okJson({ ...a.context.sample, revision: rev, decision: { text: body.text, status: 'accepted', reason: 'corrected' } });
+    if (url.endsWith('/speak')) return okJson({ ...a.context.sample, revision: rev, last_spoken: body.text, speech_error: speechError });
+    return new Promise(() => {});
+  };
+  a.elements.get('corrected-text').value = words; a.elements.get('corrected-text').listeners.input();
+  await a.elements.get('save-correction').onclick();
+  await a.elements.get('speak').onclick();
+}
+test('recent: only messages actually dispatched without a speech error, or shown large, are kept', async () => {
+  const a = recentScreen();
+  assert.equal(a.elements.get('recent-card').hidden, true, 'nothing yet');
+  a.elements.get('corrected-text').value = 'Applied only'; a.elements.get('corrected-text').listeners.input();
+  a.context.fetch = async (url, options) => okJson({ ...a.context.sample, revision: 2, decision: { text: 'Applied only', status: 'accepted', reason: 'corrected' } });
+  await a.elements.get('save-correction').onclick();
+  assert.equal(a.elements.get('recent-card').hidden, true, 'applying is not speaking');
+  await applyAndSpeak(a, 'Speech failed', 'No audio device');
+  assert.equal(a.elements.get('recent-card').hidden, true, 'a speech error is not recorded');
+  await applyAndSpeak(a, 'Please open the window');
+  assert.deepEqual(recentList(a), ['Please open the window']);
+  assert.equal(a.elements.get('recent-card').hidden, false);
+  a.render({ revision: 500, server_instance: 'boot', token: 'tok', profile_id: 'sam', decision: { text: 'Shown large words', status: 'accepted', reason: 'corrected' } });
+  a.elements.get('show-large').onclick();
+  assert.deepEqual(recentList(a), ['Shown large words', 'Please open the window'], 'newest first');
+  assert.equal(JSON.parse(a.sessionValues.get('quietbridge-recent-v1:sam')).length, 2, 'stored only in this tab, per profile');
+});
+
+test('recent: de-duplicated, capped at eight, per profile, and clearing removes only this list', async () => {
+  const storage = new Map([['quietbridge-unsent-v1:sam', 'Draft stays']]);
+  const a = recentScreen(storage);
+  for (let i = 1; i <= 10; i++) vm.runInContext(`rememberRecent(${JSON.stringify('Message ' + i)})`, a.context);
+  vm.runInContext("rememberRecent('Message 5')", a.context);
+  assert.equal(recentList(a).length, 8);
+  assert.deepEqual(recentList(a).slice(0, 3), ['Message 5', 'Message 10', 'Message 9']);
+  const other = recentScreen(storage, { profile_id: 'alex' });
+  assert.equal(other.elements.get('recent-card').hidden, true, 'another profile has its own list');
+  storage.set('quietbridge-recent-v1:alex', '{not json');
+  const broken = recentScreen(storage, { profile_id: 'alex' });
+  assert.equal(broken.elements.get('recent-card').hidden, true, 'unreadable storage is ignored');
+  a.elements.get('recent-clear').onclick();
+  assert.equal(a.elements.get('recent-card').hidden, true);
+  assert.equal(storage.has('quietbridge-recent-v1:sam'), false);
+  assert.equal(storage.get('quietbridge-unsent-v1:sam'), 'Draft stays');
+  assert.equal(a.elements.get('corrected-text').focused, true);
+});
+
+test('recent: storage that throws never breaks typing', () => {
+  const throwing = { has: () => { throw new Error('denied'); }, get: () => { throw new Error('denied'); }, set: () => { throw new Error('denied'); }, delete: () => { throw new Error('denied'); } };
+  const a = recentScreen(throwing);
+  vm.runInContext("rememberRecent('Hello')", a.context);
+  assert.equal(a.elements.get('recent-card').hidden, true);
+  assert.equal(a.elements.get('corrected-text').disabled, false);
+});
+
+test('recent: choosing one sets the message like a phrase and never speaks', async () => {
+  const a = recentScreen(new Map([['quietbridge-recent-v1:sam', JSON.stringify(['Thank you.', 'Water, please.'])]]));
+  assert.deepEqual(recentList(a), ['Thank you.', 'Water, please.']);
+  const calls = [];
+  a.context.fetch = async (url, options) => { calls.push([url, JSON.parse(options.body)]); return okJson({ ...a.context.sample, revision: 2, decision: { text: 'Water, please.', status: 'accepted', reason: 'corrected' } }); };
+  await a.elements.get('recent-list').children[1].onclick(); await settle();
+  assert.deepEqual(calls, [['/api/action/correct', { revision: 1, text: 'Water, please.', learn: false }]]);
+  assert.equal(a.elements.get('recent-list').children[1].disabled, true, 'the current message');
+  assert.equal(a.elements.get('recent-list').children[1].attributes['aria-current'], 'true');
+  a.render({ revision: 3, server_instance: 'boot', token: 'tok', profile_id: 'sam', session_active: true, auto_recognition: true });
+  assert.equal(a.elements.get('recent-list').children.every(b => b.disabled), true, 'unavailable during a live session');
+});
+
+// ---- "Your phrase" suggestions ----
+test('phrase matches are labelled "Your phrase" in the option name and are never preselected', () => {
+  const a = screen();
+  const decision = { text: 'I need a brake', status: 'accepted', reason: 'lip_only' };
+  a.render({ decision, alternatives: ['I need a brake', 'I need a break, please.'], phrase_matches: ['I need a break, please.'] });
+  const buttons = a.elements.get('alternatives').children;
+  assert.equal(buttons.length, 2, 'an accepted result with an own-phrase match still offers the choice');
+  assert.equal(buttons[0].children.length, 0); assert.equal(buttons[0].textContent, 'I need a brake');
+  const name = buttons[1].children.map(c => c.textContent).join('');
+  assert.equal(name, 'Your phrase: I need a break, please.', 'the accessible name includes the label');
+  assert.equal(buttons[1].children[1].className, 'sr-only');
+  assert.equal(buttons[1].attributes['aria-pressed'], 'false', 'never preselected');
+  assert.equal(buttons[0].attributes['aria-pressed'], 'true', 'the recognised words stay the current choice');
+  assert.equal(a.elements.get('message').textContent, 'I need a brake');
+  buttons[1].onclick();
+  assert.equal(a.elements.get('message').textContent, 'I need a break, please.');
+  assert.equal(a.elements.get('speak-label').textContent, 'Confirm & speak');
+  a.render({ revision: 2, decision, alternatives: ['I need a brake', 'I need a break, please.'] });
+  assert.equal(a.elements.get('alternatives').children.length, 0, 'absent field: no extra choices for an accepted result');
+});
+
+test('phrase matches during a conflict keep the conflict rules', () => {
+  const a = screen();
+  a.render({ decision: { text: 'Yes', status: 'confirmation_needed', reason: 'conflict' }, alternatives: ['Yes', 'No.', 'Not now, thank you.'], phrase_matches: ['Not now, thank you.', 'Not in alternatives'] });
+  const buttons = a.elements.get('alternatives').children;
+  assert.equal(buttons.length, 3);
+  assert.equal(buttons.every(b => b.attributes['aria-pressed'] === 'false'), true);
+  assert.equal(a.elements.get('speak').disabled, true, 'a conflict still needs a choice');
+  assert.equal(buttons[2].classList.contains('own-phrase'), true);
 });
 
 test('newer model notice explains the consequence, is blocked while the camera is in use and never reloads by itself', async () => {

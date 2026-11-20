@@ -82,6 +82,15 @@
 }
 .alternative.selected::before { border: 7px solid var(--accent); background: var(--surface); }
 .alternative:disabled { cursor: not-allowed; opacity: .6; }
+/* "Your phrase": the person's own saved phrase, offered as a choice, never preselected. */
+.alternative.own-phrase { flex-wrap: wrap; row-gap: var(--s-1); }
+.alt-tag {
+  display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: var(--radius-pill);
+  background: var(--accent-soft); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent);
+  font-size: var(--text-xs); font-weight: 650; line-height: 1.2; white-space: nowrap;
+}
+.alt-text { flex: 1 1 12ch; min-width: 0; }
+.alternative.selected .alt-tag { background: var(--surface); }
 
 /* Actions: one hero (Speak, Stop speaking, or Show large without speech), then a quiet row. */
 .stage-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
@@ -141,6 +150,10 @@
 }
 .quick-phrase.current:disabled { opacity: 1; cursor: default; box-shadow: inset 0 0 0 1px var(--accent); }
 .phrases-more { justify-self: start; margin-left: calc(-1 * var(--s-3)); }
+.recent { gap: var(--s-3); }
+.recent-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); flex-wrap: wrap; }
+.recent-head .btn { margin-right: calc(-1 * var(--s-3)); }
+.recent-chip { background: var(--surface); }
 
 /* ---------- Camera ---------- */
 
@@ -151,6 +164,42 @@
 .reload-notice h3 { font-size: var(--text-m); }
 .reload-notice .notice-consequence { font-size: var(--text-xs); }
 .reload-notice .hint { color: inherit; }
+
+/* First-run setup: a quiet panel inside the camera card (and the Settings Downloads
+   card). One primary action per asset; the licence note always precedes the choice. */
+.setup-panel {
+  display: grid; gap: var(--s-3); padding: var(--s-4) var(--s-5);
+  border-radius: var(--radius-m); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line);
+}
+.setup-intro { color: var(--ink-2); font-size: var(--text-s); font-weight: 550; }
+.setup-intro:empty { display: none; }
+.setup-assets { display: grid; gap: var(--s-3); }
+.setup-assets:empty { display: none; }
+.setup-item {
+  display: grid; gap: var(--s-2); padding: var(--s-4); border-radius: var(--radius-m);
+  background: var(--surface); box-shadow: var(--shadow-1);
+}
+.setup-item-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2) var(--s-3); flex-wrap: wrap; }
+.setup-title { font-size: var(--text-m); }
+.setup-explain { color: var(--ink-2); font-size: var(--text-s); }
+.setup-license {
+  padding: var(--s-2) var(--s-3); border-radius: var(--radius-s);
+  background: var(--warn-soft); color: var(--warn-ink); font-size: var(--text-xs); line-height: 1.5;
+}
+.setup-consent { padding: 6px 0; }
+.setup-progress { display: grid; gap: var(--s-1); }
+.setup-bytes { color: var(--ink-2); font-size: var(--text-xs); font-weight: 600; font-variant-numeric: tabular-nums; }
+.setup-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.setup-actions .btn:not(.btn-primary) { background: var(--surface); }
+.setup-error { padding: var(--s-2) var(--s-3); font-size: var(--text-xs); }
+.setup-hint:not(:empty) { color: var(--ink-2); font-weight: 550; }
+.setup-ready { display: grid; gap: var(--s-2); }
+.setup-panel .setup-ready { padding: var(--s-4); border-radius: var(--radius-m); background: var(--accent-soft); color: var(--accent-ink); }
+.setup-panel .setup-ready h3 { font-size: var(--text-m); }
+.setup-panel .setup-ready p { font-size: var(--text-s); }
+.setup-panel .setup-ready .hint { color: inherit; }
+/* In Settings each asset is a compact row inside the card. */
+.setup-compact .setup-item { background: var(--surface-2); box-shadow: none; }
 
 .preview {
   position: relative; display: grid; place-items: center; aspect-ratio: 4 / 3; overflow: hidden;
@@ -262,6 +311,28 @@ body.large-open { overflow: hidden; }
 .form-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
 .settings .facts { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
 .facts-heading { color: var(--ink); font-size: var(--text-s); font-weight: 650; margin-top: var(--s-2); }
+.voice-rate { justify-self: start; max-width: 100%; }
+.voice-rate button { min-width: 88px; }
+#voice-controls > .hint:empty { display: none; }
+
+/* Quit: quiet danger action, kept apart at the end of Settings. */
+.quit-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3) var(--s-5); flex-wrap: wrap; }
+.quit-row .card-head { flex: 1 1 280px; }
+.quit-button { flex: none; border-color: var(--danger); }
+.quit-button svg { width: 20px; height: 20px; }
+.about-line { margin-top: var(--s-1); }
+.about-line:empty { display: none; }
+
+/* After Quit: a calm full-page state. */
+.stopped-screen { min-height: 100vh; display: grid; place-items: center; padding: var(--page-pad); }
+.stopped-card { display: grid; gap: var(--s-4); width: min(560px, 100%); padding: var(--s-8); }
+.stopped-mark { width: 40px; height: 22px; border-width: 4.5px; border-radius: 22px 22px 0 0; }
+.stopped-heading { font-size: var(--text-2xl); font-weight: 700; letter-spacing: -.02em; line-height: 1.2; }
+.stopped-heading:focus { outline: none; }
+.stopped-heading:focus-visible { outline: 3px solid var(--focus); }
+.stopped-lead { color: var(--ink-2); }
+.stopped-draft { display: grid; gap: var(--s-2); padding-top: var(--s-4); border-top: 1px solid var(--line); }
+.stopped-draft .form-actions { align-items: center; }
 
 /* ---------- Narrow screens ---------- */
 
@@ -276,6 +347,9 @@ body.large-open { overflow: hidden; }
   .preview { aspect-ratio: 16 / 9; }
   .preview.live { aspect-ratio: 4 / 3; }
   .guide { padding: var(--s-4) var(--s-5); }
+  .setup-panel { padding: var(--s-3); }
+  .setup-item { padding: var(--s-3) var(--s-4); }
+  .stopped-card { padding: var(--s-6) var(--s-5); }
 }
 /* Progress collapses to numbers; the current step keeps its word. */
 @media (max-width: 560px) {
@@ -287,6 +361,8 @@ body.large-open { overflow: hidden; }
   .profile-row { grid-template-columns: 1fr; }
   .mode-switch { display: grid; grid-template-columns: 1fr; justify-self: stretch; }
   .mode-switch button { text-align: start; }
+  .setup-actions .btn { flex: 1 1 auto; }
+  .quit-button { flex: 1 1 100%; }
   .composer-bar { padding-left: var(--s-4); }
   .composer-bar .btn { flex: 1 1 100%; }
   /* Three quiet actions become compact icon tiles so labels never break mid-button. */
@@ -302,7 +378,9 @@ body.large-open { overflow: hidden; }
 /* ---------- Forced colours ---------- */
 
 @media (forced-colors: active) {
-  .composer-box, .alternative, .preview, .subpanel, .label-list span { border: 1px solid CanvasText; }
+  .composer-box, .alternative, .preview, .subpanel, .label-list span,
+  .setup-panel, .setup-item, .setup-license, .alt-tag, .setup-panel .setup-ready { border: 1px solid CanvasText; }
+  .quit-button { border: 1px solid CanvasText; }
   .alternative.selected, .quick-phrase.current:disabled { border: 3px solid Highlight; }
   .alternative::before { border-color: CanvasText; forced-color-adjust: none; background: Canvas; }
   .alternative.selected::before { border-color: Highlight; }
@@ -321,3 +399,7 @@ body.large-open { overflow: hidden; }
   .stage { padding: 0; }
   .message.long { max-height: none; overflow: visible; }
 }
+
+/* Setup with only the "Start using it" step left: no frame around a frame. */
+.setup-panel:has(.setup-assets:empty):has(.setup-intro:empty) { padding: 0; background: none; box-shadow: none; }
+@media (forced-colors: active) { .setup-panel:has(.setup-assets:empty):has(.setup-intro:empty) { border: 0; } }
