@@ -1,6 +1,6 @@
 """Your own words: names and terms lip reading can't guess (a name is just lip shapes).
 
-One per line in ~/Library/Application Support/Lipflow/words.txt. They're used to pick
+One per line in words.txt in the Lipflow data folder (lipflow.paths.HOME). They're used to pick
 between the model's top guesses and to fix their capitalisation, and given to the LLM.
 """
 from __future__ import annotations

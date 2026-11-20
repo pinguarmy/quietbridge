@@ -1,7 +1,7 @@
 """First-run setup: permissions → import words & phrases → mouth ~24 sentences → train on your face.
 
 The practice step uses the normal push-to-talk key (Right Option), so onboarding is also the tutorial.
-Clips are saved with their known text under ~/Library/Application Support/Lipflow/clips/onboarding.
+Clips are saved with their known text under clips/onboarding in the Lipflow data folder (lipflow.paths.HOME).
 Training holds 6 of them out and only keeps the face model if it reads those better than the stock model.
 """
 from __future__ import annotations

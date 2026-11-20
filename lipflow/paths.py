@@ -11,10 +11,27 @@ WINDOWS = sys.platform == "win32"
 # not only in vsr.py, so `lipflow doctor` can check them without importing torch first.
 MODELS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models")
 
-if WINDOWS:  # %APPDATA%\Lipflow
-    _DEFAULT_HOME = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "Lipflow")
-else:
-    _DEFAULT_HOME = os.path.expanduser("~/Library/Application Support/Lipflow")
+
+
+def default_home(platform=None, environ=None):
+    """The per-user data directory for this platform (before any LIPFLOW_HOME override).
+
+    Windows: %APPDATA%\Lipflow. macOS: ~/Library/Application Support/Lipflow.
+    Elsewhere (Linux): $XDG_DATA_HOME/lipflow, by default ~/.local/share/lipflow.
+    """
+    platform = sys.platform if platform is None else platform
+    environ = os.environ if environ is None else environ
+    if platform == "win32":
+        return os.path.join(environ.get("APPDATA") or os.path.expanduser("~"), "Lipflow")
+    if platform == "darwin":
+        return os.path.expanduser("~/Library/Application Support/Lipflow")
+    base = environ.get("XDG_DATA_HOME") or ""
+    if not os.path.isabs(base):  # the XDG spec ignores a relative XDG_DATA_HOME
+        base = os.path.expanduser("~/.local/share")
+    return os.path.join(base, "lipflow")
+
+
+_DEFAULT_HOME = default_home()
 HOME = os.environ.get("LIPFLOW_HOME") or _DEFAULT_HOME
 PERSONAL_MODELS = os.path.join(HOME, "models")
 PERSONAL_VSR = os.path.join(PERSONAL_MODELS, "vsr_face.pth")

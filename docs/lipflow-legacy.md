@@ -70,7 +70,7 @@ The first launch opens setup, which takes about 8 minutes:
 
 Re-run it any time from the menu → *Set up / train on my face…*. More practice clips help more.
 Everything personal (clips, phrases, trained models) lives in
-`~/Library/Application Support/Lipflow/`. Delete that folder to start over.
+`~/Library/Application Support/Lipflow/` on macOS (`%APPDATA%\Lipflow` on Windows, `~/.local/share/lipflow` on Linux, or `$XDG_DATA_HOME/lipflow`). Delete that folder to start over.
 
 To start Lipflow at login: System Settings → General → Login Items → add Lipflow. Logs are in
 `~/Library/Logs/Lipflow.log`. Running from a terminal (`uv run lipflow`) also works, but then

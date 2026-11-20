@@ -1,7 +1,7 @@
 """Learn from what you already say: import your Wispr Flow history (or any text).
 
 `lipflow import-wispr` reads Wispr Flow's local database read-only, keeps just the text of
-your dictations, and writes it to ~/Library/Application Support/Lipflow/phrases.txt. Nothing
+your dictations, and writes it to phrases.txt in the Lipflow data folder (lipflow.paths.HOME). Nothing
 leaves your Mac. From those phrases Lipflow builds:
 
 - a small word-pair model of how you talk, used to pick between the lip-reader's guesses;
