@@ -392,12 +392,13 @@ def make_server(runtime, port=8765, *, downloads=None):
                 return_to = f"http://127.0.0.1:{self.server.server_port}/"
                 location = f"http://127.0.0.1:{lab.server_port}/?" + urlencode({"return_to": return_to})
                 self._send(302, b"", "text/plain; charset=utf-8", [("Location", location)])
-            elif path in {"/", "/index.html", "/settings", "/settings.html", "/app.js", "/cleanup-settings.js",
-                          "/style.css", "/design.css", "/favicon.svg"}:
-                filename = {"/": "index.html", "/settings": "settings.html"}.get(path, path[1:])
-                mime = {"index.html": "text/html", "settings.html": "text/html", "app.js": "text/javascript",
-                        "cleanup-settings.js": "text/javascript", "style.css": "text/css", "design.css": "text/css",
-                        "favicon.svg": "image/svg+xml"}[filename]
+            elif path in {"/", "/index.html", "/communicate", "/about", "/settings", "/settings.html",
+                          "/app.js", "/cleanup-settings.js", "/style.css", "/design.css", "/favicon.svg"}:
+                filename = {"/": "index.html", "/communicate": "index.html", "/about": "about.html",
+                            "/settings": "settings.html"}.get(path, path[1:])
+                mime = {"index.html": "text/html", "about.html": "text/html", "settings.html": "text/html",
+                        "app.js": "text/javascript", "cleanup-settings.js": "text/javascript", "style.css": "text/css",
+                        "design.css": "text/css", "favicon.svg": "image/svg+xml"}[filename]
                 self._send(200, (UI / filename).read_bytes(), mime + "; charset=utf-8")
             else:
                 self._json(404, {"error": "Not found"})

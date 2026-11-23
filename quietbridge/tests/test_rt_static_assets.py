@@ -70,6 +70,23 @@ def test_pages_reference_only_assets_the_server_serves(page):
             assert response.status == 200, asset
 
 
+def test_optional_about_page_keeps_direct_communication_available():
+    with serving() as server:
+        home_response, home = get(server, "/")
+        direct_response, direct = get(server, "/communicate")
+        about_response, about = get(server, "/about")
+    assert home_response.status == direct_response.status == about_response.status == 200
+    assert b'id="corrected-text"' in home
+    assert direct == home
+    assert b'href="/about"' in home
+    assert b'href="/communicate"' in about
+    assert b"<script" not in about
+    assert about_response.getheader("Content-Type") == "text/html; charset=utf-8"
+    assert about_response.getheader("X-Content-Type-Options") == "nosniff"
+    assert about_response.getheader("Cache-Control") == "no-store"
+    assert about_response.getheader("Content-Security-Policy") == CSP
+
+
 def test_unlisted_ui_files_are_not_served():
     with serving() as server:
         for path in ("/design.css.bak", "/../server.py", "/ui/design.css", "/favicon.ico"):
